@@ -33,6 +33,10 @@ const priceText = (value: number | null | undefined) => (value == null ? '' : St
 const CFD_SIZES = [0.01, 0.1, 0.5, 1];
 const FUTURES_SIZES = [1, 2, 3, 5];
 
+/** Step of the "+" button, from the lot chosen before any "+" clicks: under 0.1 → 0.01, under 1 → 0.1, else 1. */
+const sizeStep = (base: number, futures: boolean) => (futures || base >= 1 ? 1 : base >= 0.1 ? 0.1 : 0.01);
+const roundSize = (n: number) => Math.round(n * 100) / 100;
+
 interface Props {
   user: PublicUser;
   instruments: Instrument[];
@@ -57,7 +61,13 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
   const [exit, setExit] = useState(priceText(trade?.exitPrice));
   const [stopLoss, setStopLoss] = useState(priceText(trade?.stopLoss));
   const [takeProfit, setTakeProfit] = useState(priceText(trade?.takeProfit));
-  const [size, setSize] = useState(priceText(trade?.positionSize));
+  const [size, setSizeText] = useState(priceText(trade?.positionSize));
+  /** The lot the "+" step is based on; "+" clicks leave it unchanged. */
+  const [sizeBase, setSizeBase] = useState(trade?.positionSize ?? undefined);
+  const setSize = (text: string) => {
+    setSizeText(text);
+    setSizeBase(parseDecimal(text));
+  };
   const [fxRate, setFxRate] = useState(trade?.fxRateSource === 'manual' ? priceText(trade.fxRate) : '');
   const [notes, setNotes] = useState(trade?.notes ?? '');
   const [source, setSource] = useState<TradeSource>(trade?.source ?? 'own');
@@ -193,6 +203,8 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
   const unit = instrument ? UNIT_LABEL[instrument.measureUnit] : '';
   const isFutures = instrument?.market === 'futures';
   const sizeLabel = isFutures ? 'Kontrakty' : 'Loty';
+  const currentSize = parseDecimal(size);
+  const step = sizeStep(sizeBase ?? currentSize ?? 0, isFutures);
   const cfd = instruments.filter((i) => i.market === 'cfd');
   const futures = instruments.filter((i) => i.market === 'futures');
 
@@ -313,6 +325,24 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
               </button>
             );
           })}
+        </div>
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            disabled={!currentSize}
+            onClick={() => currentSize && setSize(priceText(roundSize(currentSize * 2)))}
+            className="h-9 flex-1 border border-line font-mono text-[13px] text-dim transition hover:text-ink disabled:opacity-40 disabled:hover:text-dim"
+          >
+            ×2
+          </button>
+          <button
+            type="button"
+            disabled={!currentSize}
+            onClick={() => currentSize && setSizeText(priceText(roundSize(currentSize + step)))}
+            className="h-9 flex-1 border border-line font-mono text-[13px] text-dim transition hover:text-ink disabled:opacity-40 disabled:hover:text-dim"
+          >
+            +{priceText(step)}
+          </button>
         </div>
       </div>
 
