@@ -15,7 +15,7 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { trades, tradeScreenshots } from '../db/schema.ts';
 import { badRequest, HttpError, notFound } from '../errors.ts';
-import { createTrade, deleteTrade, getTrade, listTrades, tradeStats, updateTrade } from '../services/trades.ts';
+import { createTrade, deleteTrade, getTrade, listTrades, tradeStats, tradingMonitor, updateTrade } from '../services/trades.ts';
 
 const IMAGE_EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
@@ -37,6 +37,8 @@ export const tradeRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get('/trades/stats', { schema: { tags, querystring: tradeStatsQuerySchema } }, (req) =>
     tradeStats(app.db, req.user, req.query),
   );
+
+  app.get('/trades/monitor', { schema: { tags } }, (req) => tradingMonitor(app.db, req.user));
 
   app.get('/trades/:id', { schema: { tags, params: idParams } }, (req) => getTrade(app.db, req.user, req.params.id));
 

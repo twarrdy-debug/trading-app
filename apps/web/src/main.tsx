@@ -3,6 +3,7 @@ import { createRootRoute, createRoute, createRouter, RouterProvider } from '@tan
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { CalculatorPage } from './features/calculator/CalculatorPage.tsx';
+import { CalendarPage } from './features/calendar/CalendarPage.tsx';
 import { JournalPage } from './features/journal/JournalPage.tsx';
 import { StatsPage } from './features/stats/StatsPage.tsx';
 import { AppShell, ComingSoon } from './layout/AppShell.tsx';
@@ -19,11 +20,7 @@ const routeTree = rootRoute.addChildren([
     path: '/analiza',
     component: () => <ComingSoon title="Analiza dzienna" stage="Etap 4" />,
   }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: '/kalendarz',
-    component: () => <ComingSoon title="Kalendarz ekonomiczny" stage="Etap 5" />,
-  }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/kalendarz', component: CalendarPage }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: '/sygnaly',

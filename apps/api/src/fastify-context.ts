@@ -2,6 +2,8 @@
 // clients type-checking against src/types.ts see them without loading the whole app.
 import type { DB } from './db/client.ts';
 import type { Env } from './env.ts';
+import type { QuoteProvider } from './services/basis.ts';
+import type { CalendarSource } from './services/calendar.ts';
 import type { FxProvider } from './services/fx.ts';
 
 declare module 'fastify' {
@@ -9,6 +11,8 @@ declare module 'fastify' {
     db: DB;
     env: Env;
     fx: FxProvider;
+    quotes: QuoteProvider;
+    calendar: CalendarSource;
     uploadDir: string;
   }
 }

@@ -62,8 +62,49 @@ export type EventImpact = (typeof EVENT_IMPACTS)[number];
 export const THEMES = ['dark', 'light', 'system'] as const;
 export type Theme = (typeof THEMES)[number];
 
-/** Currencies tracked by the economic calendar. */
+/** Currencies shown by default in the economic calendar. */
 export const CALENDAR_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'JPY'] as const;
+
+export const EVENT_IMPACT_LABELS: Record<EventImpact, string> = {
+  high: 'Wysoki',
+  medium: 'Średni',
+  low: 'Niski',
+  holiday: 'Święto',
+};
+
+export const EVENT_CATEGORIES = [
+  'central_bank',
+  'inflation',
+  'labor',
+  'growth',
+  'business',
+  'consumer',
+  'housing',
+  'trade',
+  'energy',
+  'bonds',
+  'holiday',
+  'other',
+] as const;
+export type EventCategory = (typeof EVENT_CATEGORIES)[number];
+
+export const EVENT_CATEGORY_LABELS: Record<EventCategory, string> = {
+  central_bank: 'Banki centralne',
+  inflation: 'Inflacja',
+  labor: 'Rynek pracy',
+  growth: 'PKB i wzrost',
+  business: 'Koniunktura (PMI)',
+  consumer: 'Konsumpcja',
+  housing: 'Nieruchomości',
+  trade: 'Handel',
+  energy: 'Surowce i energia',
+  bonds: 'Obligacje',
+  holiday: 'Święto',
+  other: 'Inne',
+};
+
+/** Losing trades in a row (same day) that trigger the trading monitor alert. */
+export const LOSS_STREAK_ALERT = 3;
 
 /** Fixed emotion list, seeded into the `emotions` table. */
 export const DEFAULT_EMOTIONS = [

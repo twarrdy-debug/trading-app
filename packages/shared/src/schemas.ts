@@ -4,6 +4,8 @@ import {
   ASSET_CLASSES,
   BIASES,
   DIRECTIONS,
+  EVENT_CATEGORIES,
+  EVENT_IMPACTS,
   LEVEL_TYPES,
   MARKETS,
   MEASURE_UNITS,
@@ -188,6 +190,31 @@ export const addChecklistItemSchema = z.object({ label: z.string().trim().min(1)
 export const updateChecklistItemSchema = z
   .object({ label: z.string().trim().min(1).max(200), checked: z.boolean() })
   .partial();
+
+// --- Economic calendar -------------------------------------------------------
+
+/** Comma-separated list in a query string, e.g. "USD,EUR". */
+const csv = <T extends readonly [string, ...string[]]>(values: T) =>
+  z
+    .string()
+    .transform((s) => s.split(',').map((v) => v.trim()).filter(Boolean))
+    .pipe(z.array(z.enum(values)))
+    .optional();
+
+export const calendarQuerySchema = z.object({
+  /** Local calendar days (user time zone), inclusive. */
+  from: isoDate,
+  to: isoDate,
+  currencies: z
+    .string()
+    .transform((s) => s.split(',').map((v) => v.trim().toUpperCase()).filter(Boolean))
+    .optional(),
+  impacts: csv(EVENT_IMPACTS),
+  categories: csv(EVENT_CATEGORIES),
+  instrumentId: z.uuid().optional(),
+});
+
+export type CalendarQuery = z.infer<typeof calendarQuerySchema>;
 
 export type UpdateSettingsInput = z.infer<typeof updateSettingsSchema>;
 export type CreateInstrumentInput = z.infer<typeof createInstrumentSchema>;

@@ -4,6 +4,7 @@ import {
   formatDayLabel,
   toLocalDate,
   validatePriceSides,
+  LOSS_STREAK_ALERT,
   type CreateTradeInput,
   type FxRateSource,
   type TradeFilters,
@@ -38,6 +39,13 @@ async function loadInstrument(db: DB, id: string): Promise<Instrument> {
   const [instrument] = await db.select().from(instruments).where(eq(instruments.id, id));
   if (!instrument) throw badRequest('Nieznany instrument');
   return instrument;
+}
+
+/** Futures trade in whole contracts; CFD lots may be fractional. */
+function assertPositionSize(instrument: Instrument, size: number) {
+  if (instrument.market === 'futures' && !Number.isInteger(size)) {
+    throw badRequest(`${instrument.symbol}: futures handluje się pełnymi kontraktami (1, 2, 3…)`);
+  }
 }
 
 /** Fills educator/source from the linked signal and checks the educator exists. */
@@ -136,6 +144,7 @@ export async function createTrade(ctx: TradeContext, user: CurrentUser, input: C
   const { db } = ctx;
   const { emotionKeys, ...draft } = input;
   const instrument = await loadInstrument(db, draft.instrumentId);
+  assertPositionSize(instrument, draft.positionSize);
   const source = await resolveSource(db, draft);
   await assertEmotionKeys(db, emotionKeys);
   const { columns, warning } = await deriveColumns(ctx, user, instrument, draft, {
@@ -182,6 +191,7 @@ export async function updateTrade(ctx: TradeContext, user: CurrentUser, id: stri
   if (fields.source === 'own') Object.assign(draft, { educatorId: null, signalId: null });
 
   const instrument = await loadInstrument(db, draft.instrumentId);
+  assertPositionSize(instrument, draft.positionSize);
   const source = await resolveSource(db, draft);
   if (emotionKeys) await assertEmotionKeys(db, emotionKeys);
   // A manually entered rate is kept until replaced; sending fxRate: null switches back to automatic.
@@ -310,6 +320,37 @@ export async function deleteTrade(db: DB, user: CurrentUser, id: string) {
     .where(and(eq(trades.id, id), eq(trades.userId, user.id)))
     .returning({ id: trades.id });
   if (!deleted) throw notFound('Nie znaleziono transakcji');
+}
+
+// --- Trading monitor ---------------------------------------------------------
+
+/**
+ * Today's discipline check: trades taken against the daily limit, and losing trades in a row
+ * (counted from the most recent closed trade of the day). `alert` fires at LOSS_STREAK_ALERT.
+ */
+export async function tradingMonitor(db: DB, user: CurrentUser) {
+  const today = toLocalDate(new Date(), user.timezone);
+  const rows = await selectNumbered(db, user.id).where(eq(trades.tradeDate, today)).orderBy(trades.openedAt);
+  const closed = rows
+    .filter((t) => t.exitPrice != null)
+    .sort((a, b) => (a.closedAt ?? a.openedAt).getTime() - (b.closedAt ?? b.openedAt).getTime());
+
+  let lossStreak = 0;
+  for (let i = closed.length - 1; i >= 0 && (closed[i]!.resultUnits ?? 0) < 0; i--) lossStreak++;
+  const streakTrades = closed.slice(closed.length - lossStreak);
+
+  return {
+    date: today,
+    tradesToday: rows.length,
+    maxTradesPerDay: user.maxTradesPerDay,
+    overLimit: user.maxTradesPerDay != null && rows.length > user.maxTradesPerDay,
+    lossStreak,
+    lossStreakAlert: LOSS_STREAK_ALERT,
+    alert: lossStreak >= LOSS_STREAK_ALERT,
+    /** Identifies the streak, so a dismissed alert comes back after the next loss. */
+    streakKey: streakTrades.map((t) => t.id).join(','),
+    streakLabels: streakTrades.map((t) => formatDayLabel(t.dayIndex, t.tradeDate, t.direction)),
+  };
 }
 
 // --- Statistics --------------------------------------------------------------

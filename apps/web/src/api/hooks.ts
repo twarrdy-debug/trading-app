@@ -1,4 +1,7 @@
 import type {
+  BasisOverview,
+  CalendarRefresh,
+  CalendarResponse,
   DailySpread,
   Educator,
   Emotion,
@@ -8,6 +11,7 @@ import type {
   TradeList,
   TradeMutation,
   TradeStats,
+  TradingMonitor,
 } from '@trading/api/types';
 import type { CreateTradeInput, ParsedSignal, TradeFilters, UpdateSettingsInput } from '@trading/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -131,5 +135,58 @@ export function useCreateEducator() {
   return useMutation({
     mutationFn: (displayName: string) => api<Educator>('/educators', { method: 'POST', json: { displayName } }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['educators'] }),
+  });
+}
+
+/** Latest measured CFD/futures differences; the server re-measures every few hours. */
+export const useBasis = () =>
+  useQuery({ queryKey: ['basis'], queryFn: () => api<BasisOverview>('/basis'), refetchInterval: 5 * 60_000 });
+
+export function useRefreshBasis() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api<{ results: { pairKey: string; status: string; message: string | null }[]; overview: BasisOverview }>('/basis/refresh', {
+        method: 'POST',
+      }),
+    onSuccess: (res) => client.setQueryData(['basis'], res.overview),
+  });
+}
+
+/** Today's discipline check; under the 'trades' key so every trade change refreshes it. */
+export const useTradingMonitor = () =>
+  useQuery({ queryKey: ['trades', 'monitor'], queryFn: () => api<TradingMonitor>('/trades/monitor'), refetchInterval: 60_000 });
+
+export interface CalendarParams {
+  from: string;
+  to: string;
+  currencies?: string[];
+  impacts?: string[];
+  categories?: string[];
+  instrumentId?: string;
+}
+
+export const useCalendar = (p: CalendarParams) =>
+  useQuery({
+    queryKey: ['calendar', p],
+    queryFn: () =>
+      api<CalendarResponse>(
+        `/calendar${qs({
+          from: p.from,
+          to: p.to,
+          currencies: p.currencies?.join(','),
+          impacts: p.impacts?.join(','),
+          categories: p.categories?.join(','),
+          instrumentId: p.instrumentId,
+        })}`,
+      ),
+    placeholderData: (previous) => previous,
+  });
+
+export function useRefreshCalendar() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<CalendarRefresh>('/calendar/refresh', { method: 'POST' }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['calendar'] }),
   });
 }

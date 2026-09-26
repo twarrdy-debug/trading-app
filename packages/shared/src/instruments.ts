@@ -34,13 +34,15 @@ export interface CfdFuturesPair {
   cfd: string;
   mini: string;
   micro: string;
+  /** Alert when the measured futures − CFD difference moves by more than this many points. */
+  alertPoints: number;
 }
 
 export const CFD_FUTURES_PAIRS: readonly CfdFuturesPair[] = [
-  { key: 'nasdaq', label: 'Nasdaq 100', cfd: 'US100', mini: 'NQ1', micro: 'MNQ1' },
-  { key: 'sp500', label: 'S&P 500', cfd: 'US500', mini: 'ES1', micro: 'MES1' },
-  { key: 'dow', label: 'Dow Jones', cfd: 'US30', mini: 'YM1', micro: 'MYM1' },
-  { key: 'gold', label: 'Złoto', cfd: 'XAUUSD', mini: 'GC1', micro: 'MGC1' },
+  { key: 'nasdaq', label: 'Nasdaq 100', cfd: 'US100', mini: 'NQ1', micro: 'MNQ1', alertPoints: 10 },
+  { key: 'sp500', label: 'S&P 500', cfd: 'US500', mini: 'ES1', micro: 'MES1', alertPoints: 3 },
+  { key: 'dow', label: 'Dow Jones', cfd: 'US30', mini: 'YM1', micro: 'MYM1', alertPoints: 30 },
+  { key: 'gold', label: 'Złoto', cfd: 'XAUUSD', mini: 'GC1', micro: 'MGC1', alertPoints: 2 },
 ];
 
 /** The pair a symbol belongs to, on either side ("NAS100", "NQ1!", "MGC1" …). */

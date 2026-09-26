@@ -29,6 +29,10 @@ import {
 
 const priceText = (value: number | null | undefined) => (value == null ? '' : String(value).replace('.', ','));
 
+/** Common position sizes offered as one-click presets. */
+const CFD_SIZES = [0.01, 0.1, 0.5, 1];
+const FUTURES_SIZES = [1, 2, 3, 5];
+
 interface Props {
   user: PublicUser;
   instruments: Instrument[];
@@ -54,7 +58,6 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
   const [stopLoss, setStopLoss] = useState(priceText(trade?.stopLoss));
   const [takeProfit, setTakeProfit] = useState(priceText(trade?.takeProfit));
   const [size, setSize] = useState(priceText(trade?.positionSize));
-  const [fees, setFees] = useState(priceText(trade?.fees));
   const [fxRate, setFxRate] = useState(trade?.fxRateSource === 'manual' ? priceText(trade.fxRate) : '');
   const [notes, setNotes] = useState(trade?.notes ?? '');
   const [source, setSource] = useState<TradeSource>(trade?.source ?? 'own');
@@ -103,7 +106,6 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
       stopLoss: parseDecimal(stopLoss),
       takeProfit: parseDecimal(takeProfit),
       positionSize,
-      fees: parseDecimal(fees),
       fxRate: sameCurrency ? 1 : parseDecimal(fxRate),
     });
   })();
@@ -142,6 +144,10 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
       setErrors(['Uzupełnij instrument, cenę wejścia i wielkość pozycji.']);
       return;
     }
+    if (instrument.market === 'futures' && !Number.isInteger(positionSize)) {
+      setErrors(['Futures handluje się pełnymi kontraktami (1, 2, 3…).']);
+      return;
+    }
     if (source === 'educator' && !educatorId) {
       setErrors(['Wybierz edukatora, od którego pochodzi sygnał.']);
       return;
@@ -163,7 +169,6 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
         stopLoss: parseDecimal(stopLoss) ?? null,
         takeProfit: parseDecimal(takeProfit) ?? null,
         positionSize,
-        fees: parseDecimal(fees) ?? null,
         fxRate: parseDecimal(fxRate) ?? null,
         notes: notes.trim() || null,
         source,
@@ -186,7 +191,8 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
 
   const busy = saveTrade.isPending || upload.isPending || saveSpread.isPending;
   const unit = instrument ? UNIT_LABEL[instrument.measureUnit] : '';
-  const sizeLabel = instrument?.market === 'futures' ? 'Kontrakty' : 'Loty';
+  const isFutures = instrument?.market === 'futures';
+  const sizeLabel = isFutures ? 'Kontrakty' : 'Loty';
   const cfd = instruments.filter((i) => i.market === 'cfd');
   const futures = instruments.filter((i) => i.market === 'futures');
 
@@ -279,12 +285,35 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
         <Field label="Take profit">
           <Input inputMode="decimal" value={takeProfit} onChange={(e) => setTakeProfit(e.target.value)} />
         </Field>
-        <Field label={sizeLabel}>
-          <Input inputMode="decimal" value={size} onChange={(e) => setSize(e.target.value)} required />
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Field label={sizeLabel} hint={isFutures ? 'pełne kontrakty' : 'dowolna wielkość'}>
+          <Input
+            inputMode={isFutures ? 'numeric' : 'decimal'}
+            value={size}
+            onChange={(e) => setSize(isFutures ? e.target.value.replace(/\D/g, '') : e.target.value)}
+            required
+          />
         </Field>
-        <Field label={`Prowizje ${account}`}>
-          <Input inputMode="decimal" value={fees} onChange={(e) => setFees(e.target.value)} />
-        </Field>
+        <div role="group" aria-label={`Szybki wybór: ${sizeLabel.toLowerCase()}`} className="flex gap-1.5">
+          {(isFutures ? FUTURES_SIZES : CFD_SIZES).map((preset) => {
+            const active = parseDecimal(size) === preset;
+            return (
+              <button
+                key={preset}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setSize(priceText(preset))}
+                className={`h-9 grow border font-mono text-[13px] transition ${
+                  active ? 'border-accent bg-accent/15 text-ink' : 'border-line text-dim hover:text-ink'
+                }`}
+              >
+                {priceText(preset)}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {instrument && !sameCurrency && (

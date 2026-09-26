@@ -1,7 +1,8 @@
 import { Link, Outlet } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
-import { useMe, useUpdateSettings } from '../api/hooks.ts';
+import { useBasis, useMe, useTradingMonitor, useUpdateSettings } from '../api/hooks.ts';
 import { Segmented } from '../components/ui/Field.tsx';
+import { tradesWord } from '../features/journal/MonitorPanel.tsx';
 import { SettingsDialog } from '../features/settings/SettingsDialog.tsx';
 import { ACCENT_OPTIONS, applyTheme, DEFAULT_ACCENT } from '../lib/theme.ts';
 
@@ -15,6 +16,49 @@ const NAV = [
   { to: '/kalendarz', label: 'Kalendarz' },
   { to: '/sygnaly', label: 'Sygnały' },
 ] as const;
+
+const DISMISSED_KEY = 'monitor-dismissed-streak';
+
+/** Page-wide warning after too many losing trades in a row; comes back after the next loss. */
+function LossStreakBanner() {
+  const { data: m } = useTradingMonitor();
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(DISMISSED_KEY);
+    } catch {
+      return null;
+    }
+  });
+  if (!m?.alert || dismissed === m.streakKey) return null;
+
+  const dismiss = () => {
+    setDismissed(m.streakKey);
+    try {
+      localStorage.setItem(DISMISSED_KEY, m.streakKey);
+    } catch {
+      // Without storage the banner simply shows again after a reload.
+    }
+  };
+
+  return (
+    <div role="alert" className="flex flex-wrap items-center gap-3 border-b border-sell bg-sell px-4 py-3 text-on-side md:px-8">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden className="shrink-0">
+        <path d="M12 3 2 21h20L12 3Z" />
+        <path d="M12 10v5M12 18v.01" />
+      </svg>
+      <p className="m-0 grow text-sm font-semibold tracking-[0.04em]">
+        {m.lossStreak} {tradesWord(m.lossStreak)} z rzędu skończyły się niepowodzeniem. Trzymaj się zasad i nie overtraduj!
+      </p>
+      <button
+        type="button"
+        onClick={dismiss}
+        className="h-9 border border-current px-3 text-xs font-bold tracking-[0.14em] uppercase hover:bg-black/10"
+      >
+        Rozumiem
+      </button>
+    </div>
+  );
+}
 
 function Clock({ timezone }: { timezone: string }) {
   const [now, setNow] = useState(() => new Date());
@@ -36,6 +80,9 @@ export function AppShell() {
   const { data: me } = useMe();
   const update = useUpdateSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const basis = useBasis();
+  // The calculator covers gold only, so only its difference alert matters here.
+  const basisAlert = basis.data?.find((p) => p.pairKey === 'gold')?.alert ?? false;
 
   const theme = me?.settings.theme ?? 'dark';
   const accent = me?.settings.accentColor ?? DEFAULT_ACCENT;
@@ -60,6 +107,9 @@ export function AppShell() {
               activeOptions={{ exact: item.to === '/' }}
             >
               {item.label}
+              {item.to === '/kalkulator' && basisAlert && (
+                <span className="ml-1.5 inline-block size-2 rotate-45 bg-sell align-middle" title="Różnica CFD/futures się zmieniła" />
+              )}
             </Link>
           ))}
         </nav>
@@ -119,6 +169,7 @@ export function AppShell() {
           </Link>
         ))}
       </nav>
+      <LossStreakBanner />
       <Outlet />
       {me && settingsOpen && <SettingsDialog user={me} onClose={() => setSettingsOpen(false)} />}
     </div>

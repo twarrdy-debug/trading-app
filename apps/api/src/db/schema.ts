@@ -2,6 +2,7 @@ import {
   ASSET_CLASSES,
   BIASES,
   DIRECTIONS,
+  EVENT_CATEGORIES,
   EVENT_IMPACTS,
   FX_RATE_SOURCES,
   LEVEL_SOURCES,
@@ -45,6 +46,7 @@ export const levelSource = pgEnum('level_source', LEVEL_SOURCES);
 export const timeframe = pgEnum('timeframe', TIMEFRAMES);
 export const bias = pgEnum('bias', BIASES);
 export const eventImpact = pgEnum('event_impact', EVENT_IMPACTS);
+export const eventCategory = pgEnum('event_category', EVENT_CATEGORIES);
 export const theme = pgEnum('theme', THEMES);
 
 // Prices and money are exact decimals, read back as JS numbers.
@@ -259,6 +261,28 @@ export const fxRates = pgTable(
   (t) => [primaryKey({ columns: [t.date, t.base, t.quote] })],
 );
 
+/**
+ * Measured difference between a CFD's reference price and its futures, per pair
+ * (CFD_FUTURES_PAIRS). `live` means both quotes were current and taken within minutes
+ * of each other; outside market hours the cash index is frozen, so such snapshots are
+ * shown with a warning and never used for alerts.
+ */
+export const basisSnapshots = pgTable(
+  'basis_snapshots',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    pairKey: text('pair_key').notNull(),
+    cfdPrice: priceCol('cfd_price').notNull(),
+    futuresPrice: priceCol('futures_price').notNull(),
+    difference: priceCol('difference').notNull(),
+    cfdQuotedAt: timestamp('cfd_quoted_at', { withTimezone: true }).notNull(),
+    futuresQuotedAt: timestamp('futures_quoted_at', { withTimezone: true }).notNull(),
+    live: boolean('live').notNull(),
+    measuredAt: timestamp('measured_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('basis_pair_measured_idx').on(t.pairKey, t.measuredAt)],
+);
+
 // --- Daily analysis ----------------------------------------------------------
 
 export const liquidityLevels = pgTable(
@@ -344,6 +368,8 @@ export const economicEvents = pgTable(
     title: text('title').notNull(),
     currency: char('currency', { length: 3 }).notNull(),
     impact: eventImpact('impact').notNull(),
+    /** Derived from the title by categorizeEvent(); Forex Factory has no event type. */
+    category: eventCategory('category').notNull().default('other'),
     eventTime: timestamp('event_time', { withTimezone: true }).notNull(),
     forecast: text('forecast'),
     previous: text('previous'),

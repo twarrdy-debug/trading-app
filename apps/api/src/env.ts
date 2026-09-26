@@ -11,6 +11,10 @@ const envSchema = z.object({
   DATABASE_URL: z.string().default('./.data/pglite'),
   UPLOAD_DIR: z.string().default('./.data/uploads'),
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
+  /** How often to measure the CFD/futures difference; 0 turns the scheduler off. */
+  BASIS_INTERVAL_HOURS: z.coerce.number().min(0).default(4),
+  /** How often to fetch the Forex Factory calendar; 0 turns it off. */
+  CALENDAR_INTERVAL_HOURS: z.coerce.number().min(0).default(2),
   /** Until accounts exist, every request acts as this user (created by `npm run db:seed`). */
   DEV_USER_EMAIL: z.string().default('admin@trading.local'),
 });

@@ -7,7 +7,7 @@ import { Button } from '../../components/ui/Button.tsx';
 import { Panel } from '../../components/ui/Panel.tsx';
 import { Gauge, Stat } from '../../components/ui/Stat.tsx';
 import { formatMoney, formatNumber, formatPercent } from '../../lib/format.ts';
-import { TodayPanel } from './TodayPanel.tsx';
+import { MonitorPanel } from './MonitorPanel.tsx';
 import { TradeForm } from './TradeForm.tsx';
 import { TradeFilters, TradeTable } from './TradeTable.tsx';
 
@@ -99,7 +99,7 @@ export function JournalPage() {
       </main>
 
       <aside className="flex w-full shrink-0 flex-col gap-5 lg:w-[380px]">
-        <TodayPanel today={today} limit={me.settings.maxTradesPerDay} />
+        <MonitorPanel />
         {notice && (
           <div role="status" className="flex flex-col gap-1.5 border border-accent p-4 text-[13px]">
             <div className="flex items-center justify-between gap-2">

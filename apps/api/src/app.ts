@@ -19,11 +19,15 @@ import type { Env } from './env.ts';
 import { HttpError } from './errors.ts';
 import { currentUserPlugin } from './plugins/current-user.ts';
 import { analysisRoutes } from './routes/analysis.ts';
+import { basisRoutes } from './routes/basis.ts';
+import { calendarRoutes } from './routes/calendar.ts';
 import { meRoutes } from './routes/me.ts';
 import { referenceRoutes } from './routes/reference.ts';
 import { signalRoutes } from './routes/signals.ts';
 import { spreadRoutes } from './routes/spreads.ts';
 import { tradeRoutes } from './routes/trades.ts';
+import { liveQuoteProvider, type QuoteProvider } from './services/basis.ts';
+import { forexFactorySource, type CalendarSource } from './services/calendar.ts';
 import { frankfurterProvider, type FxProvider } from './services/fx.ts';
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -32,11 +36,15 @@ export async function buildApp({
   db,
   env,
   fx = frankfurterProvider,
+  quotes = liveQuoteProvider,
+  calendar = forexFactorySource,
   logger = true,
 }: {
   db: DB;
   env: Env;
   fx?: FxProvider;
+  quotes?: QuoteProvider;
+  calendar?: CalendarSource;
   logger?: boolean;
 }) {
   const app = Fastify({ logger }).withTypeProvider<ZodTypeProvider>();
@@ -48,6 +56,8 @@ export async function buildApp({
   app.decorate('db', db);
   app.decorate('env', env);
   app.decorate('fx', fx);
+  app.decorate('quotes', quotes);
+  app.decorate('calendar', calendar);
   app.decorate('uploadDir', uploadDir);
 
   app.setErrorHandler((error, req, reply) => {
@@ -84,6 +94,8 @@ export async function buildApp({
   await app.register(referenceRoutes);
   await app.register(tradeRoutes);
   await app.register(spreadRoutes);
+  await app.register(basisRoutes);
+  await app.register(calendarRoutes);
   await app.register(signalRoutes);
   await app.register(analysisRoutes);
 
