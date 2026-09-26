@@ -1,0 +1,26 @@
+{
+  "name": "trading-app",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev -w @trading/api",
+    "db:generate": "npm run db:generate -w @trading/api",
+    "db:migrate": "npm run db:migrate -w @trading/api",
+    "db:seed": "npm run db:seed -w @trading/api",
+    "test": "vitest run",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  }
+}
