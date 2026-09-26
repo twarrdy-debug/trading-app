@@ -14,6 +14,7 @@ import {
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
 import type { DB } from './db/client.ts';
+import './fastify-context.ts';
 import type { Env } from './env.ts';
 import { HttpError } from './errors.ts';
 import { currentUserPlugin } from './plugins/current-user.ts';
@@ -24,15 +25,6 @@ import { signalRoutes } from './routes/signals.ts';
 import { spreadRoutes } from './routes/spreads.ts';
 import { tradeRoutes } from './routes/trades.ts';
 import { frankfurterProvider, type FxProvider } from './services/fx.ts';
-
-declare module 'fastify' {
-  interface FastifyInstance {
-    db: DB;
-    env: Env;
-    fx: FxProvider;
-    uploadDir: string;
-  }
-}
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 

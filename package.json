@@ -7,7 +7,11 @@
     "packages/*"
   ],
   "scripts": {
+    "dev": "concurrently -k -n api,web -c yellow,cyan \"npm run dev -w @trading/api\" \"npm run dev -w @trading/web\"",
+    "dev:lan": "concurrently -k -n api,web -c yellow,cyan \"npm run dev -w @trading/api\" \"npm run dev -w @trading/web -- --host\"",
     "dev:api": "npm run dev -w @trading/api",
+    "dev:web": "npm run dev -w @trading/web",
+    "build": "npm run build -w @trading/web",
     "db:generate": "npm run db:generate -w @trading/api",
     "db:migrate": "npm run db:migrate -w @trading/api",
     "db:seed": "npm run db:seed -w @trading/api",
@@ -19,6 +23,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
+    "concurrently": "^10.0.5",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.2"

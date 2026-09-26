@@ -4,7 +4,7 @@ Web app for day traders: a trading journal, daily instrument analysis, an econom
 
 ## Working agreement
 
-- Work in stages and show the result after each one before moving on. Order: 1) data model + API skeleton (done, extended with CFD/futures, spreads and FX), 2) visual direction, 3) journal + stats UI, 4) daily analysis + swing/equal high-low detection from OHLC, 5) economic calendar (Forex Factory feed), later: accounts, e-mail, push.
+- Work in stages and show the result after each one before moving on. Order: 1) data model + API skeleton (done, extended with CFD/futures, spreads and FX), 2) visual direction (done: A), 3) journal + stats UI (done), 4) daily analysis + swing/equal high-low detection from OHLC, 5) economic calendar (Forex Factory feed), later: accounts, e-mail, push.
 - The frontend must look distinctive, not like a generic AI-generated app. Ask the owner before deciding how tiles and buttons look. The chosen style is a "modern cockpit", direction **A · Awionika**: a HUD look with hairline frames and accent corner brackets, chamfered (clip-path) buttons, Chakra Petch for UI text and IBM Plex Mono for numbers, default accent #FFB020. The mockup is at https://claude.ai/artifact/BHAQoWCwjLictunAe4oJRC. Keep every visual decision in design tokens (CSS variables) and shared components so the look can be swapped later. There will be dark and light themes, and the user picks one accent color. Buy/long is green and sell/short is red.
 
 ## Layout
@@ -16,15 +16,25 @@ npm workspaces monorepo:
   - `src/db/schema.ts`: all tables. Migrations are in `apps/api/drizzle/`.
   - `src/routes/*`: HTTP routes. Business logic lives in `src/services/` (the trade logic is in `services/trades.ts`).
   - `src/plugins/current-user.ts`: resolves `req.user`, plus the `requireRole()` helper.
-- `apps/web` and `apps/mobile` come in later stages.
+- `apps/api/src/types.ts`: JSON response types for clients (`import type { Trade } from '@trading/api/types'`). They are derived from the service return types, so an API change surfaces as a type error in the web app. The Fastify decorations live in `src/fastify-context.ts` so this import doesn't pull in the whole app.
+- `apps/web`: React 19 + Vite + TanStack Query/Router + Tailwind v4.
+  - `src/styles.css`: **all design tokens** (colors per theme, fonts, chamfer/bracket sizes) as CSS variables mapped into Tailwind (`bg-panel`, `text-dim`, `bg-accent`…). `--accent` and `--on-accent` are set at runtime from the user's settings (`lib/theme.ts`).
+  - `src/components/ui/`: Button (chamfered primary/buy/sell), Panel + Brackets (HUD corners), Field/Input/Select/Segmented, Stat/Gauge/Segments. Screens use only these components and tokens, never raw colors, so the look can be swapped in one place.
+  - `src/components/charts/`: EquityChart (d3-scale/d3-shape SVG with crosshair tooltip) and BarList (HTML bars that double as the table view).
+  - `src/features/journal|stats|settings`: the screens. `src/api/hooks.ts` holds all React Query hooks.
+  - In development Vite proxies `/api/*` (prefix stripped) and `/files/*` to the API on port 3001.
+- `apps/mobile` comes in a later stage.
 
 ## Commands
 
 ```sh
 npm install
-npm run dev:api        # API on http://127.0.0.1:3001, OpenAPI docs at /docs
+npm run dev            # API (http://127.0.0.1:3001, docs at /docs) + web app (http://localhost:5173)
+npm run dev:api        # API only
+npm run dev:lan        # same as dev, but the web app is also reachable from other devices on the network (no login yet!)
 npm test               # vitest: shared unit tests + API integration tests (in-memory DB)
 npm run typecheck
+npm run build          # production build of the web app
 npm run db:generate    # after editing schema.ts: create a new SQL migration
 ```
 
@@ -47,6 +57,7 @@ In development the server applies migrations and seeds (roles, emotions, instrum
 - **Emotions** are a fixed seeded list (`DEFAULT_EMOTIONS`), and a trade can have several.
 - **Signals** have 1..n take-profit levels (TP1, TP2…). Signals with prices on the wrong side are rejected, while trades only get warnings. A trade linked to a signal gets `source = educator` and inherits the signal's educator.
 - **Roles:** admin, educator, user, vip. Permissions per role are still to be designed. For now only publishing signals (educator/admin) and managing instruments or educators (admin) are restricted.
+- **CFD ↔ futures calculator** (web `/kalkulator`, logic in `packages/shared/src/instruments.ts`): pairs are US100↔NQ1/MNQ1, US500↔ES1/MES1, US30↔YM1/MYM1 and XAUUSD↔GC1/MGC1 (`CFD_FUTURES_PAIRS`). The page has an instrument select (any CFD, mini or micro symbol) with a price field that shows every counterpart: CFD → both futures contracts, futures → the CFD plus its mini/micro sibling (same price) and a whole-signal converter. The difference between the markets comes either from two current prices, converted by point difference (`offset`) or price ratio (`ratio`), or from a point offset (futures − CFD) the user types directly. Futures prices are rounded to the tick. Risk and reward per contract come from the instruments' `unitSize`/`unitValue`. It runs entirely in the client, and the last basis per pair is kept in localStorage.
 - **Checklist:** one per user × instrument × day. It is created on first read with the default items, and the response also includes higher-timeframe levels (H4+) and that day's economic events for the instrument's currencies.
 
 ## Auth (temporary)

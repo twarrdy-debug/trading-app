@@ -4,6 +4,7 @@ import type { FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 import { users } from '../db/schema.ts';
 import { forbidden, HttpError } from '../errors.ts';
+import type {} from '../fastify-context.ts';
 
 export type CurrentUser = typeof users.$inferSelect;
 
