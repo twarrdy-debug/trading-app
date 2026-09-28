@@ -1,0 +1,135 @@
+import type { TradeStats } from '@trading/api/types';
+import { Panel } from '../../components/ui/Panel.tsx';
+import { Gauge, Stat } from '../../components/ui/Stat.tsx';
+import { useT } from '../../i18n/index.tsx';
+import { formatDate, formatMoney, formatNumber } from '../../lib/format.ts';
+
+export type AccountOverview = NonNullable<TradeStats['account']>;
+
+const pct = (value: number, signed = false) => `${formatNumber(value, signed)}%`;
+/** Drawdown usage from which the prop limit is shown in red. */
+const DANGER_PCT = 80;
+
+/** Account tiles on the statistics page: balance, drawdown and, for prop accounts, the limit. */
+export function AccountTiles({ account, currency }: { account: AccountOverview; currency: string }) {
+  const t = useT().account;
+  const money = (value: number) => `${formatMoney(value, false)} ${currency}`;
+  const prop = account.prop;
+  const danger = prop != null && (prop.breached || prop.usedPct >= DANGER_PCT);
+  const balanceTiles = (
+    <>
+      <Stat
+        label={account.type === 'prop' ? `${t.balance} · Prop` : `${t.balance} · Live`}
+        value={formatMoney(account.balance, false)}
+        foot={`${currency} · ${t.startBalance(formatMoney(account.size, false))}${account.startDate ? ` · ${t.sinceStart(formatDate(account.startDate))}` : ''}`}
+      />
+      <Stat
+        label={t.returnAll}
+        value={pct(account.returnPct, true)}
+        tone={account.pnl > 0 ? 'buy' : account.pnl < 0 ? 'sell' : 'ink'}
+        foot={`${formatMoney(account.pnl)} ${currency}`}
+      />
+      <Stat
+        label={t.currentDrawdown}
+        value={pct(account.currentDrawdownPct)}
+        tone={account.currentDrawdown > 0 ? 'sell' : 'ink'}
+        foot={t.maxDrawdown(pct(account.maxDrawdownPct), money(account.maxDrawdown))}
+      />
+    </>
+  );
+  const propTiles = prop && (
+    <>
+      <Stat
+        label={t.limitUsed(pct(prop.maxDrawdownPct))}
+        value={pct(prop.usedPct)}
+        tone={danger ? 'sell' : 'ink'}
+        visual={<Gauge percent={prop.usedPct} tone={danger ? 'sell' : 'accent'} />}
+        foot={prop.breached ? t.breached : t.remaining(money(prop.remaining), formatMoney(prop.floor, false))}
+      />
+      {prop.target && (
+        <Stat
+          label={t.target(pct(prop.target.pct))}
+          value={pct(prop.target.progressPct)}
+          tone={prop.target.reached ? 'buy' : 'ink'}
+          visual={<Gauge percent={prop.target.progressPct} tone={prop.target.reached ? 'buy' : 'accent'} />}
+          foot={prop.target.reached ? t.targetReached : t.targetRemaining(money(prop.target.remaining), formatMoney(prop.target.balance, false))}
+        />
+      )}
+    </>
+  );
+
+  // Live: 3 tiles. Prop: 4 in one row. Prop with a target: 3, then limit and target side by side.
+  if (prop?.target) {
+    return (
+      <>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">{balanceTiles}</div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">{propTiles}</div>
+      </>
+    );
+  }
+  return (
+    <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${prop ? 'xl:grid-cols-4' : 'xl:grid-cols-3'}`}>
+      {balanceTiles}
+      {propTiles}
+    </div>
+  );
+}
+
+/** Compact account summary in the journal's side column. */
+export function AccountPanel({ account, currency }: { account: AccountOverview; currency: string }) {
+  const t = useT().account;
+  const prop = account.prop;
+  const danger = prop != null && (prop.breached || prop.usedPct >= DANGER_PCT);
+  return (
+    <Panel
+      title={account.type === 'prop' ? t.propTitle : t.liveTitle}
+      actions={<span className="font-mono text-xs text-dim">{`${formatMoney(account.size, false)} ${currency}`}</span>}
+    >
+      <div className="flex flex-col gap-4 px-5 pt-1 pb-5">
+        <div className="flex items-end justify-between gap-3">
+          <div className="flex flex-col gap-0.5">
+            <span className="eyebrow">{t.balance}</span>
+            <span className="text-2xl font-bold tracking-tight tabular-nums">{formatMoney(account.balance, false)}</span>
+          </div>
+          <span className={`font-mono text-sm ${account.pnl > 0 ? 'text-buy' : account.pnl < 0 ? 'text-sell' : 'text-dim'}`}>
+            {formatMoney(account.pnl)} · {pct(account.returnPct, true)}
+          </span>
+        </div>
+        {prop ? (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-baseline justify-between text-[13px]">
+              <span className="font-semibold">{`${t.ddLimit} · ${pct(prop.maxDrawdownPct)}`}</span>
+              <span className={`font-mono ${danger ? 'text-sell' : ''}`}>{pct(prop.usedPct)}</span>
+            </div>
+            <div className="h-2 rounded-full bg-grid" role="meter" aria-valuenow={prop.usedPct} aria-valuemin={0} aria-valuemax={100} aria-label={t.ddLimit}>
+              <div className={`h-2 rounded-full ${danger ? 'bg-sell' : 'bg-accent'}`} style={{ width: `${Math.max(prop.usedPct, prop.usedPct > 0 ? 2 : 0)}%` }} />
+            </div>
+            <span className={`text-[13px] ${prop.breached ? 'font-semibold text-sell' : 'text-dim'}`}>
+              {prop.breached ? t.breached : t.remaining(`${formatMoney(prop.remaining, false)} ${currency}`, formatMoney(prop.floor, false))}
+            </span>
+            {prop.target && (
+              <>
+                <div className="mt-2 flex items-baseline justify-between text-[13px]">
+                  <span className="font-semibold">{t.target(pct(prop.target.pct))}</span>
+                  <span className={`font-mono ${prop.target.reached ? 'text-buy' : ''}`}>{pct(prop.target.progressPct)}</span>
+                </div>
+                <div className="h-2 rounded-full bg-grid" role="meter" aria-valuenow={prop.target.progressPct} aria-valuemin={0} aria-valuemax={100} aria-label={t.target(pct(prop.target.pct))}>
+                  <div className="h-2 rounded-full bg-buy" style={{ width: `${prop.target.progressPct}%` }} />
+                </div>
+                <span className={`text-[13px] ${prop.target.reached ? 'font-semibold text-buy' : 'text-dim'}`}>
+                  {prop.target.reached
+                    ? t.targetReached
+                    : t.targetRemaining(`${formatMoney(prop.target.remaining, false)} ${currency}`, formatMoney(prop.target.balance, false))}
+                </span>
+              </>
+            )}
+          </div>
+        ) : (
+          <span className="text-[13px] text-dim">
+            {t.currentDrawdown}: {pct(account.currentDrawdownPct)} · {t.maxDrawdown(pct(account.maxDrawdownPct), formatMoney(account.maxDrawdown, false))}
+          </span>
+        )}
+      </div>
+    </Panel>
+  );
+}

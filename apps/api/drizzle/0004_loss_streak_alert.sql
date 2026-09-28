@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "loss_streak_alert" smallint DEFAULT 3 NOT NULL;

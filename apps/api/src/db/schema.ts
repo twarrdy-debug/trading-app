@@ -14,6 +14,9 @@ import {
   THEMES,
   TIMEFRAMES,
   TRADE_SOURCES,
+  LANGUAGES,
+  ACCOUNT_TYPES,
+  LOSS_ALERT_MODES,
 } from '@trading/shared';
 import { relations } from 'drizzle-orm';
 import {
@@ -48,6 +51,9 @@ export const bias = pgEnum('bias', BIASES);
 export const eventImpact = pgEnum('event_impact', EVENT_IMPACTS);
 export const eventCategory = pgEnum('event_category', EVENT_CATEGORIES);
 export const theme = pgEnum('theme', THEMES);
+export const language = pgEnum('language', LANGUAGES);
+export const accountType = pgEnum('account_type', ACCOUNT_TYPES);
+export const lossAlertMode = pgEnum('loss_alert_mode', LOSS_ALERT_MODES);
 
 // Prices and money are exact decimals, read back as JS numbers.
 const priceCol = (name: string) => numeric(name, { precision: 18, scale: 6, mode: 'number' });
@@ -76,9 +82,19 @@ export const users = pgTable('users', {
   role: roleKey('role').notNull().default('user').references(() => roles.key),
   accountCurrency: char('account_currency', { length: 3 }).notNull().default('USD'),
   theme: theme('theme').notNull().default('dark'),
+  language: language('language').notNull().default('pl'),
   accentColor: text('accent_color'),
   timezone: text('timezone').notNull().default('Europe/Warsaw'),
   maxTradesPerDay: smallint('max_trades_per_day'),
+  /** Losses that trigger the overtrading warning, counted as `lossAlertMode` says. */
+  lossStreakAlert: smallint('loss_streak_alert').notNull().default(3),
+  lossAlertMode: lossAlertMode('loss_alert_mode').notNull().default('streak'),
+  /** Optional account profile (see updateSettingsSchema); stats against the account need a type and a size. */
+  accountType: accountType('account_type'),
+  accountSize: moneyCol('account_size'),
+  maxDrawdownPct: numeric('max_drawdown_pct', { precision: 5, scale: 2, mode: 'number' }),
+  profitTargetPct: numeric('profit_target_pct', { precision: 6, scale: 2, mode: 'number' }),
+  accountStartDate: date('account_start_date'),
   ...timestamps,
 });
 
@@ -191,11 +207,14 @@ export const trades = pgTable(
     source: tradeSource('source').notNull().default('own'),
     educatorId: uuid('educator_id').references(() => users.id),
     signalId: uuid('signal_id').references(() => signals.id, { onDelete: 'set null' }),
+    /** Position id on the trading platform for imported trades ("mt5:<account>:<position>"); prevents duplicates. */
+    externalId: text('external_id'),
     ...timestamps,
   },
   (t) => [
     index('trades_user_date_idx').on(t.userId, t.tradeDate, t.openedAt),
     index('trades_user_instrument_idx').on(t.userId, t.instrumentId),
+    uniqueIndex('trades_user_external_idx').on(t.userId, t.externalId),
   ],
 );
 

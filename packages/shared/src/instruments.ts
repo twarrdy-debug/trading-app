@@ -1,8 +1,12 @@
+import type { Language } from './enums.ts';
+
 /** Other names educators and brokers use for the same instrument. */
 const SYMBOL_ALIASES: Record<string, string> = {
   GOLD: 'XAUUSD',
   NAS100: 'US100',
   NDX: 'US100',
+  NDX100: 'US100',
+  USA100: 'US100',
   USTEC: 'US100',
   US100: 'US100',
   DJ30: 'US30',
@@ -11,6 +15,10 @@ const SYMBOL_ALIASES: Record<string, string> = {
   SP500: 'US500',
   SPX500: 'US500',
   SPX: 'US500',
+  USA500: 'US500',
+  US500: 'US500',
+  USA30: 'US30',
+  US30: 'US30',
   NQ: 'NQ1',
   MNQ: 'MNQ1',
   ES: 'ES1',
@@ -27,10 +35,35 @@ export function normalizeSymbol(raw: string): string {
   return SYMBOL_ALIASES[symbol] ?? symbol;
 }
 
+/** Futures month codes, as in NQZ24 or MGCG5. */
+const FUTURES_CONTRACT = /^(M?NQ|M?ES|M?YM|M?GC)[FGHJKMNQUVXZ]\d{1,2}$/;
+
+/**
+ * Candidate app symbols for a broker symbol from a platform export (MT5):
+ * "US100.cash", "XAUUSDm", "NAS100_i", "NQZ24" …
+ */
+export function brokerSymbolCandidates(raw: string): string[] {
+  const upper = raw.trim().toUpperCase();
+  const base = upper.split(/[._#@]/)[0] ?? upper;
+  const noSuffix = base.replace(/(CASH|PRO|ECN|RAW|STD|\+|-|M)$/, '');
+  const contract = base.match(FUTURES_CONTRACT)?.[1];
+  const names = [upper, base, noSuffix, ...(contract ? [contract] : [])];
+  return [...new Set(names.flatMap((s) => [s, normalizeSymbol(s)]))];
+}
+
+/** The instrument a broker symbol most likely refers to, if any. */
+export function matchBrokerSymbol<T extends { symbol: string }>(raw: string, instruments: readonly T[]): T | undefined {
+  for (const candidate of brokerSymbolCandidates(raw)) {
+    const found = instruments.find((i) => i.symbol === candidate);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 /** CFD and futures quoting the same underlying. Mini and micro contracts share one price. */
 export interface CfdFuturesPair {
   key: string;
-  label: string;
+  label: Record<Language, string>;
   cfd: string;
   mini: string;
   micro: string;
@@ -39,10 +72,10 @@ export interface CfdFuturesPair {
 }
 
 export const CFD_FUTURES_PAIRS: readonly CfdFuturesPair[] = [
-  { key: 'nasdaq', label: 'Nasdaq 100', cfd: 'US100', mini: 'NQ1', micro: 'MNQ1', alertPoints: 10 },
-  { key: 'sp500', label: 'S&P 500', cfd: 'US500', mini: 'ES1', micro: 'MES1', alertPoints: 3 },
-  { key: 'dow', label: 'Dow Jones', cfd: 'US30', mini: 'YM1', micro: 'MYM1', alertPoints: 30 },
-  { key: 'gold', label: 'Złoto', cfd: 'XAUUSD', mini: 'GC1', micro: 'MGC1', alertPoints: 2 },
+  { key: 'nasdaq', label: { pl: 'Nasdaq 100', en: 'Nasdaq 100' }, cfd: 'US100', mini: 'NQ1', micro: 'MNQ1', alertPoints: 10 },
+  { key: 'sp500', label: { pl: 'S&P 500', en: 'S&P 500' }, cfd: 'US500', mini: 'ES1', micro: 'MES1', alertPoints: 3 },
+  { key: 'dow', label: { pl: 'Dow Jones', en: 'Dow Jones' }, cfd: 'US30', mini: 'YM1', micro: 'MYM1', alertPoints: 30 },
+  { key: 'gold', label: { pl: 'Złoto', en: 'Gold' }, cfd: 'XAUUSD', mini: 'GC1', micro: 'MGC1', alertPoints: 2 },
 ];
 
 /** The pair a symbol belongs to, on either side ("NAS100", "NQ1!", "MGC1" …). */

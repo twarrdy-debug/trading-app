@@ -1,6 +1,7 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { strToU8, zipSync } from 'fflate';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp, type App } from '../src/app.ts';
 import { createDatabase, type Database } from '../src/db/client.ts';
@@ -454,17 +455,36 @@ describe('trading monitor', () => {
 
   it('alerts after three losing trades in a row today', async () => {
     const created = [await trade(40, 3995), await trade(30, 3990)];
-    expect((await app.inject({ url: '/trades/monitor' })).json()).toMatchObject({ lossStreak: 2, alert: false });
+    expect((await app.inject({ url: '/trades/monitor' })).json()).toMatchObject({ lossCount: 2, alert: false });
 
     created.push(await trade(20, 3998));
     const monitor = (await app.inject({ url: '/trades/monitor' })).json();
-    expect(monitor).toMatchObject({ lossStreak: 3, lossStreakAlert: 3, alert: true, tradesToday: 3, overLimit: true });
-    expect(monitor.streakLabels).toHaveLength(3);
+    expect(monitor).toMatchObject({ lossMode: 'streak', lossCount: 3, lossLimit: 3, alert: true, tradesToday: 3, overLimit: true });
+    expect(monitor.lossLabels).toHaveLength(3);
 
     // A win resets the streak.
     created.push(await trade(10, 4010));
-    expect((await app.inject({ url: '/trades/monitor' })).json()).toMatchObject({ lossStreak: 0, alert: false });
+    expect((await app.inject({ url: '/trades/monitor' })).json()).toMatchObject({ lossCount: 0, alert: false });
+
+    // Counting every loss of the day, the win no longer resets the count.
+    await app.inject({ method: 'PATCH', url: '/me', payload: { lossAlertMode: 'day' } });
+    const daily = (await app.inject({ url: '/trades/monitor' })).json();
+    expect(daily).toMatchObject({ lossMode: 'day', lossCount: 3, alert: true });
+    expect(daily.alertKey).toMatch(/^day:/);
+    await app.inject({ method: 'PATCH', url: '/me', payload: { lossAlertMode: 'streak' } });
     for (const id of created) await app.inject({ method: 'DELETE', url: `/trades/${id}` });
+  });
+
+  it('uses the losing streak threshold from the settings', async () => {
+    const me = (await app.inject({ method: 'PATCH', url: '/me', payload: { lossStreakAlert: 2 } })).json();
+    expect(me.settings.lossStreakAlert).toBe(2);
+    const created = [await trade(40, 3995), await trade(30, 3990)];
+    expect((await app.inject({ url: '/trades/monitor' })).json()).toMatchObject({ lossCount: 2, lossLimit: 2, alert: true });
+    for (const id of created) await app.inject({ method: 'DELETE', url: `/trades/${id}` });
+
+    const tooHigh = await app.inject({ method: 'PATCH', url: '/me', payload: { lossStreakAlert: 50 } });
+    expect(tooHigh.statusCode).toBe(400);
+    await app.inject({ method: 'PATCH', url: '/me', payload: { lossStreakAlert: 3 } });
   });
 
   it('accepts only whole futures contracts', async () => {
@@ -577,5 +597,216 @@ describe('daily analysis', () => {
 
     const other = (await app.inject({ url: `/checklists/${ids.NQ1}/2025-09-26` })).json();
     expect(other.id).not.toBe(checklist.id);
+  });
+});
+
+describe('language', () => {
+  it('answers in English after switching the language', async () => {
+    const me = (await app.inject({ method: 'PATCH', url: '/me', payload: { language: 'en' } })).json();
+    expect(me.settings.language).toBe('en');
+
+    const emotions = (await app.inject({ url: '/emotions' })).json();
+    expect(emotions[0]).toEqual({ key: 'calm', label: 'Calm' });
+
+    const bad = await app.inject({ method: 'PATCH', url: '/me', payload: { accentColor: 'red' } });
+    expect(bad.json()).toMatchObject({ error: 'Invalid data', issues: [{ message: 'Colour in #RRGGBB format' }] });
+
+    const unknown = await post('/trades', {
+      instrumentId: '00000000-0000-4000-8000-000000000000',
+      direction: 'long',
+      openedAt: '2025-09-26T08:00:00Z',
+      entryPrice: 1,
+      positionSize: 1,
+    });
+    expect(unknown.json().error).toBe('Unknown instrument');
+
+    const warned = await post('/trades', {
+      instrumentId: ids.XAUUSD,
+      direction: 'long',
+      openedAt: '2025-09-20T08:00:00Z',
+      entryPrice: 4400,
+      stopLoss: 4410,
+      positionSize: 0.1,
+    });
+    expect(warned.json().warnings).toEqual(['SL should be below the entry price']);
+    await app.inject({ method: 'DELETE', url: `/trades/${warned.json().trade.id}` });
+
+    const stats = (await app.inject({ url: '/trades/stats' })).json();
+    expect(stats.bySource.map((b: { key: string }) => b.key)).toContain('Own analysis');
+    expect(stats.summary).not.toHaveProperty('spreadCost');
+
+    await app.inject({ method: 'PATCH', url: '/me', payload: { language: 'pl' } });
+  });
+});
+
+/** multipart/form-data body with text fields first and one file. */
+function multipart(fields: Record<string, string>, file: { name: string; content: Buffer }) {
+  const boundary = 'importboundary';
+  const parts = Object.entries(fields).map(
+    ([name, value]) => `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
+  );
+  const payload = Buffer.concat([
+    Buffer.from(parts.join('')),
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${file.name}"\r\nContent-Type: application/octet-stream\r\n\r\n`),
+    file.content,
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+  return { payload, headers: { 'content-type': `multipart/form-data; boundary=${boundary}` } };
+}
+
+describe('MT5 import', () => {
+  const report = readFileSync(new URL('../../../packages/shared/test/fixtures/mt5-report.html', import.meta.url));
+  // MT5 writes UTF-16 LE with a BOM.
+  const utf16 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(report.toString('utf8'), 'utf16le')]);
+  let trader: Record<string, string>;
+
+  const importFile = (fields: Record<string, string>, content = utf16, name = 'ReportHistory-12345678.html') => {
+    const body = multipart(fields, { name, content });
+    return app.inject({ method: 'POST', url: '/trades/import/mt5', payload: body.payload, headers: { ...body.headers, ...trader } });
+  };
+
+  beforeAll(async () => {
+    const user = (await post('/educators', { displayName: 'Importer' })).json();
+    trader = { 'x-user-id': user.id };
+  });
+
+  it('previews positions without saving them', async () => {
+    const res = await importFile({});
+    expect(res.statusCode).toBe(200);
+    const preview = res.json();
+    expect(preview).toMatchObject({
+      account: '12345678',
+      currency: 'USD',
+      summary: { total: 3, ready: 2, unknownSymbol: 1, imported: 0 },
+      unknownSymbols: ['GER40'],
+    });
+    expect(preview.positions[0]).toMatchObject({
+      instrumentSymbol: 'XAUUSD',
+      direction: 'long',
+      openedAt: '2026-09-25T07:15:23.000Z',
+      resultUnits: 190,
+      status: 'ready',
+    });
+    expect(preview.positions[1]).toMatchObject({ symbol: 'US100.cash', instrumentSymbol: 'US100', resultUnits: -32 });
+    const list = (await app.inject({ url: '/trades', headers: trader })).json();
+    expect(list.total).toBe(0);
+  });
+
+  it('imports with a symbol mapping and skips positions imported before', async () => {
+    const res = await importFile({ commit: 'true', symbolMap: JSON.stringify({ GER40: ids.US30 }) });
+    expect(res.json().summary).toMatchObject({ imported: 3, ready: 0 });
+
+    const list = (await app.inject({ url: '/trades', headers: trader })).json();
+    expect(list.total).toBe(3);
+    const gold = list.items.find((t: { instrument: { symbol: string } }) => t.instrument.symbol === 'XAUUSD');
+    expect(gold).toMatchObject({
+      externalId: 'mt5:12345678:50001',
+      positionSize: 0.1,
+      stopLoss: 4360,
+      fees: 0.7,
+      pnlAccount: 189.3,
+      closedAt: '2026-09-25T08:02:10.000Z',
+    });
+    expect(gold.notes).toContain('#50001');
+
+    const again = (await importFile({ commit: 'true', symbolMap: JSON.stringify({ GER40: ids.US30 }) })).json();
+    expect(again.summary).toMatchObject({ imported: 0, duplicate: 3 });
+    expect((await app.inject({ url: '/trades', headers: trader })).json().total).toBe(3);
+  });
+
+  it('reads the Open XML (.xlsx) report', async () => {
+    const shared = ['Account:', '99887766 (USD, Broker, real)', 'XAUUSD', 'sell'];
+    const cell = (ref: string, value: string | number) =>
+      typeof value === 'number' ? `<c r="${ref}"><v>${value}</v></c>` : `<c r="${ref}" t="s"><v>${shared.indexOf(value)}</v></c>`;
+    const inline = (ref: string, text: string) => `<c r="${ref}" t="inlineStr"><is><t>${text}</t></is></c>`;
+    const sheet = `<?xml version="1.0"?><worksheet><sheetData>
+      <row r="1">${cell('A1', 'Account:')}${cell('D1', '99887766 (USD, Broker, real)')}</row>
+      <row r="2">${inline('A2', '2026.09.24 09:00:00')}<c r="B2"><v>777</v></c>${cell('C2', 'XAUUSD')}${cell('D2', 'sell')}${cell('E2', 0.2)}${cell('F2', 4400)}<c r="G2"/><c r="H2"/>${inline('I2', '2026.09.24 10:00:00')}${cell('J2', 4390)}${cell('K2', 0)}${cell('L2', 0)}${cell('M2', 200)}</row>
+    </sheetData></worksheet>`;
+    const sst = `<?xml version="1.0"?><sst>${shared.map((s) => `<si><t>${s}</t></si>`).join('')}</sst>`;
+    const xlsx = Buffer.from(zipSync({ 'xl/worksheets/sheet1.xml': strToU8(sheet), 'xl/sharedStrings.xml': strToU8(sst) }));
+
+    const preview = (await importFile({ timezone: 'UTC' }, xlsx, 'ReportHistory.xlsx')).json();
+    expect(preview).toMatchObject({ account: '99887766', summary: { total: 1, ready: 1 } });
+    expect(preview.positions[0]).toMatchObject({ direction: 'short', volume: 0.2, openedAt: '2026-09-24T09:00:00.000Z', resultUnits: 100 });
+  });
+
+  it('rejects files that are not MT5 reports', async () => {
+    const res = await importFile({}, Buffer.from('just some text'), 'notes.txt');
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/Nie rozpoznano pliku/);
+    const noFile = await app.inject({
+      method: 'POST',
+      url: '/trades/import/mt5',
+      ...multipart({ timezone: 'Mars/Base' }, { name: 'r.html', content: utf16 }),
+    });
+    expect(noFile.statusCode).toBe(400);
+  });
+});
+
+describe('account profile', () => {
+  let trader: Record<string, string>;
+  const patch = (payload: object) => app.inject({ method: 'PATCH', url: '/me', payload, headers: trader });
+  const stats = async () => (await app.inject({ url: '/trades/stats', headers: trader })).json();
+  // XAUUSD: 1 lot, 1 pip (0.1) = 10 USD, so 0.1 lot moves 1 USD per 0.1.
+  const trade = (day: string, exitPrice: number) =>
+    post(
+      '/trades',
+      { instrumentId: ids.XAUUSD, direction: 'long', openedAt: `${day}T08:00:00Z`, closedAt: `${day}T09:00:00Z`, entryPrice: 4000, exitPrice, positionSize: 1 },
+      trader,
+    );
+
+  beforeAll(async () => {
+    const user = (await post('/educators', { displayName: 'Prop trader' })).json();
+    trader = { 'x-user-id': user.id };
+    await trade('2026-09-01', 4005); // +500
+    await trade('2026-09-02', 3997); // −300
+    await trade('2026-09-03', 3996); // −400
+  });
+
+  it('is optional: no account figures without a profile', async () => {
+    const s = await stats();
+    expect(s.account).toBeNull();
+    expect(s.summary).toMatchObject({ pnl: -200, maxDrawdown: 700, returnPct: null, maxDrawdownPct: null });
+  });
+
+  it('requires the size, and the drawdown for prop accounts', async () => {
+    expect((await patch({ accountType: 'live' })).json().error).toBe('Podaj wielkość konta');
+    expect((await patch({ accountType: 'prop', accountSize: 10_000 })).statusCode).toBe(400);
+  });
+
+  it('measures a prop account against its static maximum drawdown', async () => {
+    const me = (await patch({ accountType: 'prop', accountSize: 10_000, maxDrawdownPct: 10 })).json();
+    expect(me.settings.account).toEqual({ type: 'prop', size: 10_000, maxDrawdownPct: 10, profitTargetPct: null, startDate: null });
+
+    const s = await stats();
+    expect(s.summary).toMatchObject({ returnPct: -2, maxDrawdown: 700, maxDrawdownPct: 7 });
+    expect(s.account).toMatchObject({
+      balance: 9800,
+      pnl: -200,
+      returnPct: -2,
+      currentDrawdown: 700,
+      maxDrawdown: 700,
+      trades: 3,
+      prop: { limit: 1000, floor: 9000, used: 200, remaining: 800, usedPct: 20, breached: false, target: null },
+    });
+
+    await patch({ profitTargetPct: 8 });
+    expect((await stats()).account.prop.target).toEqual({ pct: 8, amount: 800, balance: 10_800, progressPct: 0, remaining: 1000, reached: false });
+  });
+
+  it('counts only trades since the account start and switches off again', async () => {
+    const s = (await patch({ accountStartDate: '2026-09-02' }), await stats());
+    expect(s.account).toMatchObject({ balance: 9300, trades: 2, prop: { used: 700, remaining: 300, usedPct: 70 } });
+    // From the first day again, with a big win on top: +500 −300 −400 +1200.
+    await patch({ accountStartDate: '2026-09-01', profitTargetPct: 4 });
+    await trade('2026-09-04', 4012); // +1200 → balance 11000, pnl +1000
+    expect((await stats()).account.prop.target).toMatchObject({ amount: 400, progressPct: 100, remaining: 0, reached: true });
+
+    await patch({ accountType: 'live', accountStartDate: null });
+    expect((await stats()).account).toMatchObject({ type: 'live', balance: 11_000, prop: null });
+
+    await patch({ accountType: null });
+    expect((await stats()).account).toBeNull();
   });
 });

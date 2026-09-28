@@ -17,6 +17,7 @@ import type { DB } from './db/client.ts';
 import './fastify-context.ts';
 import type { Env } from './env.ts';
 import { HttpError } from './errors.ts';
+import { isMessageKey, t } from './i18n.ts';
 import { currentUserPlugin } from './plugins/current-user.ts';
 import { analysisRoutes } from './routes/analysis.ts';
 import { basisRoutes } from './routes/basis.ts';
@@ -61,20 +62,25 @@ export async function buildApp({
   app.decorate('uploadDir', uploadDir);
 
   app.setErrorHandler((error, req, reply) => {
+    // The user is missing when the error happens before it is resolved (e.g. unknown user).
+    const language = req.user?.language ?? 'pl';
     if (hasZodFastifySchemaValidationErrors(error)) {
       return reply.status(400).send({
-        error: 'Błędne dane',
-        issues: error.validation.map((v) => ({ path: v.instancePath, message: v.message })),
+        error: t(language, 'invalidData'),
+        issues: error.validation.map((v) => ({
+          path: v.instancePath,
+          message: v.message && isMessageKey(v.message) ? t(language, v.message) : v.message,
+        })),
       });
     }
     if (error instanceof HttpError) {
-      return reply.status(error.statusCode).send({ error: error.message, details: error.details });
+      return reply.status(error.statusCode).send({ error: t(language, error.key, error.params), details: error.details });
     }
     const status = (error as { statusCode?: number }).statusCode ?? 500;
     if (status >= 500) req.log.error(error);
     return reply
       .status(status)
-      .send({ error: status >= 500 ? 'Błąd serwera' : (error as Error).message });
+      .send({ error: status >= 500 ? t(language, 'serverError') : (error as Error).message });
   });
 
   await app.register(cors, { origin: env.CORS_ORIGIN.split(','), methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] });

@@ -1,34 +1,46 @@
-import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
+import { createContext, useId, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
+
+/** Id of the enclosing field label, so custom controls (Select) can be named by it. */
+export const FieldLabelContext = createContext<string | undefined>(undefined);
 
 const control =
-  'w-full border border-line bg-bg px-3 font-mono text-sm text-ink placeholder:text-dim/70 hover:border-dim focus:border-accent';
+  'w-full rounded-(--radius-control) border border-line bg-raised px-3 font-mono text-sm text-ink placeholder:text-dim/70 transition hover:border-dim/40 focus:border-accent-ink focus:bg-panel';
+
+/** Pill toggle (size presets, emotions, filters): neutral chip, accent-tinted when active. */
+export const toggleClass = (active: boolean) =>
+  `rounded-(--radius-chip) border transition ${
+    active ? 'border-accent bg-accent/15 text-ink font-semibold' : 'border-line bg-panel text-dim hover:text-ink hover:bg-raised'
+  }`;
 
 interface FieldProps {
   label: ReactNode;
+  /** Short note on the right of the label (a few words). */
   hint?: ReactNode;
+  /** Longer explanation under the control. */
+  help?: ReactNode;
   className?: string;
   children: ReactNode;
 }
 
 /** Label above a control; `hint` renders on the right of the label. */
-export function Field({ label, hint, className = '', children }: FieldProps) {
+export function Field({ label, hint, help, className = '', children }: FieldProps) {
+  const labelId = useId();
   return (
     <label className={`flex min-w-0 flex-col gap-1.5 ${className}`}>
       <span className="flex items-baseline justify-between gap-2">
-        <span className="eyebrow">{label}</span>
-        {hint && <span className="font-mono text-[11px] text-dim">{hint}</span>}
+        <span id={labelId} className="eyebrow min-w-0 truncate">
+          {label}
+        </span>
+        {hint && <span className="shrink-0 text-[11px] whitespace-nowrap text-dim">{hint}</span>}
       </span>
-      {children}
+      <FieldLabelContext.Provider value={labelId}>{children}</FieldLabelContext.Provider>
+      {help && <span className="text-xs text-dim">{help}</span>}
     </label>
   );
 }
 
 export const Input = ({ className = '', ...props }: InputHTMLAttributes<HTMLInputElement>) => (
   <input className={`h-11 ${control} ${className}`} {...props} />
-);
-
-export const Select = ({ className = '', ...props }: SelectHTMLAttributes<HTMLSelectElement>) => (
-  <select className={`h-11 ${control} font-sans ${className}`} {...props} />
 );
 
 export const Textarea = ({ className = '', ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) => (
@@ -48,15 +60,15 @@ export function Segmented<T extends string>({
   label: string;
 }) {
   return (
-    <div role="group" aria-label={label} className="chamfer-sm inline-flex gap-0.5 bg-chip p-[3px]">
+    <div role="group" aria-label={label} className="inline-flex gap-0.5 rounded-(--radius-control) bg-chip p-[3px]">
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
           aria-pressed={o.value === value}
           onClick={() => onChange(o.value)}
-          className={`h-8 px-3 text-xs font-semibold tracking-[0.1em] uppercase transition ${
-            o.value === value ? 'bg-panel text-ink' : 'text-dim hover:text-ink'
+          className={`h-8 rounded-[9px] px-3 text-xs transition ${
+            o.value === value ? 'bg-panel font-bold text-ink shadow-sm' : 'font-medium text-dim hover:text-ink'
           }`}
         >
           {o.label}

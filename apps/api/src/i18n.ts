@@ -1,0 +1,112 @@
+import type { Language } from '@trading/shared';
+
+type Params = Record<string, string | number>;
+
+/**
+ * API messages in every app language. Errors are thrown with a key (see errors.ts) and
+ * translated into the acting user's language when the response is sent.
+ */
+const pl = {
+  notFound: 'Nie znaleziono',
+  forbidden: 'Brak uprawnień',
+  invalidData: 'Błędne dane',
+  serverError: 'Błąd serwera',
+  unknownUser: 'Nieznany użytkownik',
+  instrumentExists: 'Instrument {symbol} już istnieje',
+  emailExists: 'Użytkownik z tym adresem e-mail już istnieje',
+  noFile: 'Brak pliku',
+  imageFormats: 'Dozwolone formaty: PNG, JPG, WEBP',
+  fileTooLarge: 'Plik jest za duży (maks. 10 MB)',
+  screenshotNotFound: 'Nie znaleziono zrzutu ekranu',
+  unknownInstrument: 'Nieznany instrument',
+  instrumentMissing: 'Instrument {symbol} nie jest dodany w aplikacji',
+  levelNotFound: 'Nie znaleziono poziomu',
+  checklistItemNotFound: 'Nie znaleziono pozycji checklisty',
+  rateUnavailable: 'Kurs chwilowo niedostępny',
+  signalNotFound: 'Nie znaleziono sygnału',
+  signalNoTp: 'Sygnał nie ma TP{level}',
+  checkSignalPrices: 'Sprawdź ceny sygnału',
+  unknownSignal: 'Nieznany sygnał',
+  unknownEducator: 'Nieznany edukator',
+  chooseEducator: 'Wybierz edukatora lub sygnał',
+  unknownEmotions: 'Nieznane emocje: {keys}',
+  futuresWholeContracts: '{symbol}: futures handluje się pełnymi kontraktami (1, 2, 3…)',
+  tradeNotFound: 'Nie znaleziono transakcji',
+  fxFailed: 'Nie udało się pobrać kursu {pair}. Wpisz go ręcznie, aby policzyć wynik w walucie konta',
+  fxManual: 'Brak automatycznego kursu {pair}. Wpisz go ręcznie, aby policzyć wynik w walucie konta',
+  calendarRecent: 'Kalendarz był odświeżany kilka minut temu',
+  calendarFailed: 'Nie udało się pobrać kalendarza: {reason}',
+  basisUnchanged: 'Brak nowych notowań (rynek zamknięty)',
+  basisFailed: 'Nie udało się pobrać cen: {reason}',
+  statsOwnAnalysis: 'Własna analiza',
+  statsEducator: 'Edukator: {name}',
+  statsUnknownEducator: 'nieznany',
+  'validation.currencyCode': 'Kod waluty musi mieć 3 litery, np. USD',
+  'validation.colorFormat': 'Kolor w formacie #RRGGBB',
+  'validation.timezone': 'Nieznana strefa czasowa',
+  'validation.educatorOrSignal': 'Wybierz edukatora lub sygnał',
+  accountSizeRequired: 'Podaj wielkość konta',
+  maxDrawdownRequired: 'Podaj maksymalny drawdown konta prop',
+  mt5UnsupportedFile: 'Nie rozpoznano pliku. Wyeksportuj raport historii z MT5 jako HTML lub Open XML (.xlsx)',
+  mt5NoPositions: 'W raporcie nie ma zamkniętych pozycji. Sprawdź, czy wybrano okres z transakcjami',
+  mt5CurrencyMismatch: 'Raport jest w {report}, a waluta konta w aplikacji to {account}. Wynik zostanie przeliczony po kursie',
+  mt5Note: 'Import z MT5, pozycja #{position}. Wynik w MT5: {profit} {currency}',
+} as const;
+
+export type MessageKey = keyof typeof pl;
+
+const en: Record<MessageKey, string> = {
+  notFound: 'Not found',
+  forbidden: 'Permission denied',
+  invalidData: 'Invalid data',
+  serverError: 'Server error',
+  unknownUser: 'Unknown user',
+  instrumentExists: 'Instrument {symbol} already exists',
+  emailExists: 'A user with this e-mail address already exists',
+  noFile: 'No file',
+  imageFormats: 'Allowed formats: PNG, JPG, WEBP',
+  fileTooLarge: 'The file is too large (max 10 MB)',
+  screenshotNotFound: 'Screenshot not found',
+  unknownInstrument: 'Unknown instrument',
+  instrumentMissing: 'Instrument {symbol} is not set up in the app',
+  levelNotFound: 'Level not found',
+  checklistItemNotFound: 'Checklist item not found',
+  rateUnavailable: 'Exchange rate temporarily unavailable',
+  signalNotFound: 'Signal not found',
+  signalNoTp: 'The signal has no TP{level}',
+  checkSignalPrices: 'Check the signal prices',
+  unknownSignal: 'Unknown signal',
+  unknownEducator: 'Unknown educator',
+  chooseEducator: 'Choose an educator or a signal',
+  unknownEmotions: 'Unknown emotions: {keys}',
+  futuresWholeContracts: '{symbol}: futures trade in whole contracts (1, 2, 3…)',
+  tradeNotFound: 'Trade not found',
+  fxFailed: 'Could not fetch the {pair} rate. Enter it manually to get the result in your account currency',
+  fxManual: 'No automatic {pair} rate. Enter it manually to get the result in your account currency',
+  calendarRecent: 'The calendar was refreshed a few minutes ago',
+  calendarFailed: 'Could not fetch the calendar: {reason}',
+  basisUnchanged: 'No new quotes (market closed)',
+  basisFailed: 'Could not fetch prices: {reason}',
+  statsOwnAnalysis: 'Own analysis',
+  statsEducator: 'Educator: {name}',
+  statsUnknownEducator: 'unknown',
+  'validation.currencyCode': 'The currency code must have 3 letters, e.g. USD',
+  'validation.colorFormat': 'Colour in #RRGGBB format',
+  'validation.timezone': 'Unknown time zone',
+  'validation.educatorOrSignal': 'Choose an educator or a signal',
+  accountSizeRequired: 'Enter the account size',
+  maxDrawdownRequired: 'Enter the prop account maximum drawdown',
+  mt5UnsupportedFile: 'File not recognised. Export the history report from MT5 as HTML or Open XML (.xlsx)',
+  mt5NoPositions: 'The report has no closed positions. Check that the chosen period has trades',
+  mt5CurrencyMismatch: 'The report is in {report} and your account currency in the app is {account}. Results will be converted at the exchange rate',
+  mt5Note: 'Imported from MT5, position #{position}. MT5 result: {profit} {currency}',
+};
+
+const MESSAGES: Record<Language, Record<MessageKey, string>> = { pl, en };
+
+export const isMessageKey = (value: string): value is MessageKey => value in pl;
+
+/** Message in the given language, with {placeholders} filled from `params`. */
+export function t(language: Language, key: MessageKey, params: Params = {}): string {
+  return MESSAGES[language][key].replace(/\{(\w+)\}/g, (whole, name: string) => (name in params ? String(params[name]) : whole));
+}

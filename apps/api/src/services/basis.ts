@@ -63,14 +63,14 @@ export type MeasureResult =
 
 export async function measureBasis(db: DB, quotes: QuoteProvider, pairKey: string, now = new Date()): Promise<MeasureResult> {
   const sources = BASIS_SOURCES[pairKey];
-  if (!sources) return { pairKey, status: 'error', message: `Nieznana para ${pairKey}` };
+  if (!sources) return { pairKey, status: 'error', message: `unknown pair ${pairKey}` };
 
   let cfd: Quote;
   let futures: Quote;
   try {
     [cfd, futures] = await Promise.all([quotes.fetchQuote(sources.cfd), quotes.fetchQuote(sources.futures)]);
   } catch (err) {
-    return { pairKey, status: 'error', message: `Nie udało się pobrać cen: ${(err as Error).message}` };
+    return { pairKey, status: 'error', message: (err as Error).message };
   }
 
   // No new futures trade since the last snapshot (weekend, holiday): nothing to record.
@@ -81,7 +81,7 @@ export async function measureBasis(db: DB, quotes: QuoteProvider, pairKey: strin
     .orderBy(desc(basisSnapshots.measuredAt))
     .limit(1);
   if (latest && latest.futuresQuotedAt.getTime() === futures.time.getTime()) {
-    return { pairKey, status: 'unchanged', message: 'Brak nowych notowań (rynek zamknięty)' };
+    return { pairKey, status: 'unchanged', message: 'no new quotes' };
   }
 
   const live =

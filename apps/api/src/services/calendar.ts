@@ -124,14 +124,14 @@ export type RefreshResult =
 export async function refreshCalendar(db: DB, source: CalendarSource, { force = false } = {}): Promise<RefreshResult> {
   const last = await lastFetchedAt(db);
   if (!force && last && Date.now() - last.getTime() < MIN_REFRESH_MS) {
-    return { status: 'recent', message: 'Kalendarz był odświeżany kilka minut temu', fetchedAt: last.toISOString() };
+    return { status: 'recent', message: 'refreshed a few minutes ago', fetchedAt: last.toISOString() };
   }
   try {
     const now = new Date();
     const result = await importWeek(db, await source.fetchWeek(), now);
     return { status: 'updated', ...result, fetchedAt: now.toISOString() };
   } catch (err) {
-    return { status: 'error', message: `Nie udało się pobrać kalendarza: ${(err as Error).message}`, fetchedAt: last?.toISOString() ?? null };
+    return { status: 'error', message: (err as Error).message, fetchedAt: last?.toISOString() ?? null };
   }
 }
 

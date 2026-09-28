@@ -33,7 +33,7 @@ export const currentUserPlugin = fp(async (app) => {
         ? await app.db.select().from(users).where(eq(users.id, override))
         : await app.db.select().from(users).where(eq(users.email, app.env.DEV_USER_EMAIL));
 
-    if (!user) throw new HttpError(401, 'Nieznany użytkownik');
+    if (!user) throw new HttpError(401, 'unknownUser');
     req.user = user;
   });
 });

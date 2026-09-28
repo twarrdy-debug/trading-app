@@ -9,13 +9,16 @@ import {
   toLocalDate,
   type EventCategory,
   type EventImpact,
+  type Language,
 } from '@trading/shared';
 import { useEffect, useState } from 'react';
 import { useCalendar, useInstruments, useMe, useRefreshCalendar } from '../../api/hooks.ts';
 import { Button } from '../../components/ui/Button.tsx';
-import { Segmented, Select } from '../../components/ui/Field.tsx';
+import { Segmented, toggleClass } from '../../components/ui/Field.tsx';
 import { Panel } from '../../components/ui/Panel.tsx';
-import { addDays } from '../../lib/format.ts';
+import { Select } from '../../components/ui/Select.tsx';
+import { useLanguage, useT } from '../../i18n/index.tsx';
+import { addDays, currentLocale, formatDate } from '../../lib/format.ts';
 
 type View = 'day' | 'week' | 'month';
 
@@ -30,8 +33,6 @@ const IMPACT_COLOR: Record<EventImpact, string> = {
   holiday: '#8B98A5',
 };
 
-const WEEKDAYS = ['Pn', 'Wt', 'Śr', 'Cz', 'Pt', 'So', 'Nd'];
-const MONTHS = ['Styczeń', 'Luty', 'Marzec', 'Kwiecień', 'Maj', 'Czerwiec', 'Lipiec', 'Sierpień', 'Wrzesień', 'Październik', 'Listopad', 'Grudzień'];
 
 const FILTERS_KEY = 'calendar-filters';
 
@@ -51,9 +52,9 @@ function loadFilters(): Filters {
   }
 }
 
-/** "XAUUSD, GC1, MGC1, NQ1…" → "Złoto, Nasdaq 100…": one chip per market instead of per contract. */
-function markets(symbols: string[]): string[] {
-  return [...new Set(symbols.map((s) => findPairBySymbol(s)?.pair.label ?? s))];
+/** "XAUUSD, GC1, MGC1, NQ1…" → "Gold, Nasdaq 100…": one chip per market instead of per contract. */
+function markets(symbols: string[], language: Language): string[] {
+  return [...new Set(symbols.map((s) => findPairBySymbol(s)?.pair.label[language] ?? s))];
 }
 
 /** Monday = 0 … Sunday = 6. */
@@ -79,12 +80,14 @@ function rangeFor(view: View, date: string) {
 }
 
 const longDate = (date: string) =>
-  new Intl.DateTimeFormat('pl-PL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${date}T12:00:00Z`));
+  new Intl.DateTimeFormat(currentLocale(), { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${date}T12:00:00Z`));
 
 export function ImpactFlag({ impact, size = 16 }: { impact: EventImpact; size?: number }) {
+  const t = useT().calendar;
+  const label = t.impactLabel(EVENT_IMPACT_LABELS[useLanguage()][impact]);
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" role="img" aria-label={`Wpływ: ${EVENT_IMPACT_LABELS[impact]}`} className="shrink-0">
-      <title>{`Wpływ: ${EVENT_IMPACT_LABELS[impact]}`}</title>
+    <svg width={size} height={size} viewBox="0 0 16 16" role="img" aria-label={label} className="shrink-0">
+      <title>{label}</title>
       <path d="M3 1.5v13" stroke="var(--dim)" strokeWidth="1.5" strokeLinecap="round" />
       <path d="M3.8 2h9.2l-2.4 3.5L13 9H3.8Z" fill={IMPACT_COLOR[impact]} />
     </svg>
@@ -98,9 +101,7 @@ function Chip({ active, onClick, children, label }: { active: boolean; onClick: 
       aria-pressed={active}
       aria-label={label}
       onClick={onClick}
-      className={`flex h-8 items-center gap-1.5 border px-2.5 text-xs font-semibold tracking-[0.06em] transition ${
-        active ? 'border-accent bg-accent/15 text-ink' : 'border-line text-dim hover:text-ink'
-      }`}
+      className={`flex h-8 items-center gap-1.5 px-2.5 text-xs ${toggleClass(active)}`}
     >
       {children}
     </button>
@@ -108,10 +109,12 @@ function Chip({ active, onClick, children, label }: { active: boolean; onClick: 
 }
 
 function EventRow({ event, timezone, compact = false }: { event: CalendarEvent; timezone: string; compact?: boolean }) {
+  const t = useT().calendar;
+  const language = useLanguage();
   const time =
     event.impact === 'holiday'
-      ? 'Cały dzień'
-      : new Intl.DateTimeFormat('pl-PL', { hour: '2-digit', minute: '2-digit', timeZone: timezone }).format(new Date(event.eventTime));
+      ? t.allDay
+      : new Intl.DateTimeFormat(currentLocale(), { hour: '2-digit', minute: '2-digit', timeZone: timezone }).format(new Date(event.eventTime));
   return (
     <li
       className={`grid items-center gap-x-3 gap-y-1 border-b border-line px-5 py-3 last:border-b-0 ${
@@ -126,21 +129,21 @@ function EventRow({ event, timezone, compact = false }: { event: CalendarEvent; 
       <span className="flex min-w-0 flex-col gap-1">
         <span className="text-sm font-semibold">{event.title}</span>
         <span className="flex flex-wrap gap-1">
-          {compact && <span className="font-mono text-[11px] text-dim">{EVENT_CATEGORY_LABELS[event.category]}</span>}
-          {markets(event.instruments).map((market) => (
-            <span key={market} className="border border-line px-1.5 text-[10px] text-dim" title={event.instruments.join(', ')}>
+          {compact && <span className="font-mono text-[11px] text-dim">{EVENT_CATEGORY_LABELS[language][event.category]}</span>}
+          {markets(event.instruments, language).map((market) => (
+            <span key={market} className="rounded-md bg-chip px-1.5 py-0.5 text-[10px] font-semibold text-dim" title={event.instruments.join(', ')}>
               {market}
             </span>
           ))}
         </span>
       </span>
-      {!compact && <span className="hidden text-xs text-dim md:inline">{EVENT_CATEGORY_LABELS[event.category]}</span>}
+      {!compact && <span className="hidden text-xs text-dim md:inline">{EVENT_CATEGORY_LABELS[language][event.category]}</span>}
       <span className="hidden text-right font-mono text-xs md:inline">
-        <span className="text-dim">Prog. </span>
+        <span className="text-dim">{t.forecast} </span>
         {event.forecast ?? '—'}
       </span>
       <span className="hidden text-right font-mono text-xs md:inline">
-        <span className="text-dim">Pop. </span>
+        <span className="text-dim">{t.previous} </span>
         {event.previous ?? '—'}
       </span>
     </li>
@@ -148,6 +151,9 @@ function EventRow({ event, timezone, compact = false }: { event: CalendarEvent; 
 }
 
 export function CalendarPage() {
+  const all = useT();
+  const t = all.calendar;
+  const language = useLanguage();
   const { data: me } = useMe();
   const { data: instruments } = useInstruments();
   const refresh = useRefreshCalendar();
@@ -190,8 +196,8 @@ export function CalendarPage() {
     view === 'day'
       ? longDate(date)
       : view === 'week'
-        ? `${range.from.slice(8)}.${range.from.slice(5, 7)} – ${range.to.slice(8)}.${range.to.slice(5, 7)}.${range.to.slice(0, 4)}`
-        : `${MONTHS[Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}`;
+        ? `${formatDate(range.from).slice(0, 5)} – ${formatDate(range.to)}`
+        : `${all.months[Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}`;
 
   const events = data?.events ?? [];
   const byDay = new Map<string, CalendarEvent[]>();
@@ -203,87 +209,93 @@ export function CalendarPage() {
   const noCurrencies = filters.currencies.length === 0;
 
   const emptyText = noCurrencies
-    ? 'Wybierz co najmniej jedną walutę.'
+    ? t.chooseCurrency
     : outsideCoverage
-      ? `Brak danych dla tego okresu. Forex Factory udostępnia tylko bieżący tydzień, a aplikacja zapisuje kolejne tygodnie${
-          coverage?.from ? ` od ${coverage.from.split('-').reverse().join('.')}` : ''
-        }.`
-      : 'Brak wydarzeń spełniających filtry.';
+      ? t.outside(coverage?.from ? formatDate(coverage.from) : null)
+      : t.noEvents;
 
   return (
     <main className="flex grow flex-col gap-5 p-4 md:px-8 md:py-6">
       <div className="flex flex-wrap items-center gap-4">
-        <h1 className="m-0 text-lg font-semibold tracking-[0.14em] uppercase">Kalendarz ekonomiczny</h1>
+        <h1 className="m-0 text-2xl font-bold tracking-tight">{t.title}</h1>
         <div className="grow" />
         <Segmented
-          label="Widok"
+          label={t.view}
           value={view}
           onChange={setView}
           options={[
-            { value: 'day', label: 'Dzień' },
-            { value: 'week', label: 'Tydzień' },
-            { value: 'month', label: 'Miesiąc' },
+            { value: 'day', label: t.day },
+            { value: 'week', label: t.week },
+            { value: 'month', label: t.month },
           ]}
         />
       </div>
 
-      <Panel className="flex flex-col gap-4 p-5" aria-label="Filtry kalendarza">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="eyebrow mr-2 w-20">Waluta</span>
-          {ALL_CURRENCIES.map((c) => (
-            <Chip key={c} active={filters.currencies.includes(c)} onClick={() => toggle('currencies', c)}>
-              {c}
-            </Chip>
-          ))}
+      <Panel className="flex flex-col gap-4 p-5" aria-label={t.filters}>
+        <div className="flex items-start gap-2">
+          <span className="eyebrow w-20 shrink-0 pt-2">{t.currency}</span>
+          <div className="flex min-w-0 grow flex-wrap items-center gap-2">
+            {ALL_CURRENCIES.map((c) => (
+              <Chip key={c} active={filters.currencies.includes(c)} onClick={() => toggle('currencies', c)}>
+                {c}
+              </Chip>
+            ))}
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="eyebrow mr-2 w-20">Wpływ</span>
-          {EVENT_IMPACTS.map((impact) => (
-            <Chip key={impact} active={filters.impacts.includes(impact)} onClick={() => toggle('impacts', impact)}>
-              <ImpactFlag impact={impact} size={14} />
-              {EVENT_IMPACT_LABELS[impact]}
-            </Chip>
-          ))}
+        <div className="flex items-start gap-2">
+          <span className="eyebrow w-20 shrink-0 pt-2">{t.impact}</span>
+          <div className="flex min-w-0 grow flex-wrap items-center gap-2">
+            {EVENT_IMPACTS.map((impact) => (
+              <Chip key={impact} active={filters.impacts.includes(impact)} onClick={() => toggle('impacts', impact)}>
+                <ImpactFlag impact={impact} size={14} />
+                {EVENT_IMPACT_LABELS[language][impact]}
+              </Chip>
+            ))}
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="eyebrow mr-2 w-20">Rodzaj</span>
-          <Chip active={filters.categories.length === 0} onClick={() => setFilters((f) => ({ ...f, categories: [] }))}>
-            Wszystkie
-          </Chip>
-          {EVENT_CATEGORIES.map((category) => (
-            <Chip key={category} active={filters.categories.includes(category)} onClick={() => toggle('categories', category)}>
-              {EVENT_CATEGORY_LABELS[category]}
+        <div className="flex items-start gap-2">
+          <span className="eyebrow w-20 shrink-0 pt-2">{t.category}</span>
+          <div className="flex min-w-0 grow flex-wrap items-center gap-2">
+            <Chip active={filters.categories.length === 0} onClick={() => setFilters((f) => ({ ...f, categories: [] }))}>
+              {all.common.all}
             </Chip>
-          ))}
+            {EVENT_CATEGORIES.map((category) => (
+              <Chip key={category} active={filters.categories.includes(category)} onClick={() => toggle('categories', category)}>
+                {EVENT_CATEGORY_LABELS[language][category]}
+              </Chip>
+            ))}
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="eyebrow mr-2 w-20">Instrument</span>
-          <div className="w-64">
-            <Select aria-label="Instrument" value={instrumentId} onChange={(e) => setInstrumentId(e.target.value)}>
-              <option value="">Wszystkie</option>
-              {instruments?.map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.symbol} · {i.currencies.join(', ')}
-                </option>
-              ))}
-            </Select>
+        <div className="flex items-start gap-2">
+          <span className="eyebrow w-20 shrink-0 pt-2">{t.instrument}</span>
+          <div className="flex min-w-0 grow flex-wrap items-center gap-2">
+            <div className="w-64">
+              <Select
+                aria-label={t.instrument}
+                value={instrumentId}
+                onChange={setInstrumentId}
+                options={[
+                  { value: '', label: all.common.all },
+                  ...(instruments ?? []).map((i) => ({ value: i.id, label: `${i.symbol} · ${i.currencies.join(', ')}` })),
+                ]}
+              />
+            </div>
           </div>
         </div>
       </Panel>
 
       <Panel
-        brackets
-        title={<span className="capitalize">{title}</span>}
+        title={<span className="inline-block first-letter:uppercase">{title}</span>}
         actions={
           <div className="flex items-center gap-2">
             {isFetching && <span className="font-mono text-xs text-dim">…</span>}
-            <Button size="sm" variant="ghost" onClick={() => move(-1)} aria-label="Poprzedni okres">
+            <Button size="sm" variant="ghost" onClick={() => move(-1)} aria-label={t.prevPeriod}>
               ‹
             </Button>
             <Button size="sm" onClick={() => setDate(today)}>
-              Dziś
+              {t.today}
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => move(1)} aria-label="Następny okres">
+            <Button size="sm" variant="ghost" onClick={() => move(1)} aria-label={t.nextPeriod}>
               ›
             </Button>
           </div>
@@ -292,7 +304,7 @@ export function CalendarPage() {
         {view === 'month' ? (
           <div className="overflow-x-auto">
             <div className="grid min-w-[700px] grid-cols-7">
-              {WEEKDAYS.map((d) => (
+              {all.weekdays.map((d) => (
                 <span key={d} className="eyebrow border-b border-line px-3 py-2">
                   {d}
                 </span>
@@ -312,12 +324,12 @@ export function CalendarPage() {
                       setDate(day);
                       setView('day');
                     }}
-                    aria-label={`${longDate(day)}: ${dayEvents.length} wydarzeń`}
+                    aria-label={t.eventsOnDay(longDate(day), dayEvents.length)}
                     className={`flex min-h-24 flex-col gap-2 border-r border-b border-line p-2.5 text-left transition hover:bg-raised [&:nth-child(7n)]:border-r-0 ${
                       inMonth ? '' : 'opacity-40'
                     } ${day === today ? 'bg-raised' : ''}`}
                   >
-                    <span className={`font-mono text-sm ${day === today ? 'font-bold text-accent' : ''}`}>{Number(day.slice(8))}</span>
+                    <span className={`font-mono text-sm ${day === today ? 'font-bold text-accent-ink' : ''}`}>{Number(day.slice(8))}</span>
                     <span className="flex flex-wrap gap-x-2 gap-y-1">
                       {counts.map(([impact, n]) => (
                         <span key={impact} className="flex items-center gap-0.5 font-mono text-[11px] text-dim">
@@ -346,11 +358,11 @@ export function CalendarPage() {
               return (
                 <section key={day} aria-label={longDate(day)} className="border-b border-line last:border-b-0">
                   <h3
-                    className={`m-0 flex items-center justify-between bg-chip px-5 py-2 text-xs font-semibold tracking-[0.12em] uppercase ${
-                      day === today ? 'text-accent' : ''
+                    className={`m-0 flex items-center justify-between bg-raised px-5 py-2 text-[13px] font-bold ${
+                      day === today ? 'text-accent-ink' : ''
                     }`}
                   >
-                    <span className="capitalize">{longDate(day)}</span>
+                    <span className="inline-block first-letter:uppercase">{longDate(day)}</span>
                     <span className="font-mono text-dim">{dayEvents.length}</span>
                   </h3>
                   {dayEvents.length > 0 && (
@@ -369,14 +381,12 @@ export function CalendarPage() {
 
       <div className="flex flex-wrap items-center gap-3 text-xs text-dim">
         <span>
-          Źródło: Forex Factory. Godziny w strefie {timezone}.
-          {coverage?.from &&
-            coverage.to &&
-            ` Dane dostępne od ${coverage.from.split('-').reverse().join('.')} do ${coverage.to.split('-').reverse().join('.')}.`}
-          {coverage?.fetchedAt && ` Ostatnie pobranie: ${new Date(coverage.fetchedAt).toLocaleString('pl-PL', { timeZone: timezone })}.`}
+          {t.source(timezone)}
+          {coverage?.from && coverage.to && t.coverage(formatDate(coverage.from), formatDate(coverage.to))}
+          {coverage?.fetchedAt && t.fetched(new Date(coverage.fetchedAt).toLocaleString(currentLocale(), { timeZone: timezone }))}
         </span>
         <Button size="sm" variant="ghost" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
-          {refresh.isPending ? 'Pobieram…' : 'Odśwież'}
+          {refresh.isPending ? t.fetching : t.refresh}
         </Button>
         {refresh.data && 'message' in refresh.data && <span>{refresh.data.message}</span>}
       </div>

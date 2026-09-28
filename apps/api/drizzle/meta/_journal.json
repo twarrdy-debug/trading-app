@@ -22,6 +22,34 @@
       "when": 1790439602684,
       "tag": "0002_event_category",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790514957844,
+      "tag": "0003_language_external_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790525094783,
+      "tag": "0004_loss_streak_alert",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790584712986,
+      "tag": "0005_account_profile",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790585863265,
+      "tag": "0006_profit_target_loss_mode",
+      "breakpoints": true
     }
   ]
 }

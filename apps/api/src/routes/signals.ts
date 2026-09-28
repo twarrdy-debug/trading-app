@@ -12,7 +12,8 @@ import { and, desc, eq, type SQL } from 'drizzle-orm';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { instruments, signals, signalTakeProfits, users } from '../db/schema.ts';
-import { badRequest, forbidden, notFound } from '../errors.ts';
+import { badRequest, forbidden, HttpError } from '../errors.ts';
+import { t } from '../i18n.ts';
 import { requireRole } from '../plugins/current-user.ts';
 
 const tags = ['sygnały'];
@@ -27,7 +28,7 @@ export const signalRoutes: FastifyPluginAsyncZod = async (app) => {
         instrument: { columns: { id: true, symbol: true, measureUnit: true } },
       },
     });
-    if (!signal) throw notFound('Nie znaleziono sygnału');
+    if (!signal) throw new HttpError(404, 'signalNotFound');
     return signal;
   };
 
@@ -54,7 +55,7 @@ export const signalRoutes: FastifyPluginAsyncZod = async (app) => {
 
   /** Turns a pasted message ("XAUUSD - SELL / IN: … / SL: … / TP1: …") into form values. */
   app.post('/signals/parse', { schema: { tags, body: parseSignalSchema } }, async (req) => {
-    const result = parseSignal(req.body.text);
+    const result = parseSignal(req.body.text, req.user.language);
     if (!result.ok) return result;
     // Match "NQ1!", "NAS100" etc. to the stored symbol.
     const symbol = normalizeSymbol(result.signal.symbol);
@@ -66,7 +67,7 @@ export const signalRoutes: FastifyPluginAsyncZod = async (app) => {
       ...result,
       signal: { ...result.signal, symbol },
       instrument: instrument ?? null,
-      warnings: instrument ? result.warnings : [...result.warnings, `Instrument ${symbol} nie jest dodany w aplikacji`],
+      warnings: instrument ? result.warnings : [...result.warnings, t(req.user.language, 'instrumentMissing', { symbol })],
     };
   });
 
@@ -77,14 +78,14 @@ export const signalRoutes: FastifyPluginAsyncZod = async (app) => {
     const educatorId = req.user.role === 'admin' ? (requestedEducator ?? req.user.id) : req.user.id;
     if (educatorId !== req.user.id) {
       const [educator] = await app.db.select({ role: users.role }).from(users).where(eq(users.id, educatorId));
-      if (educator?.role !== 'educator') throw badRequest('Nieznany edukator');
+      if (educator?.role !== 'educator') throw badRequest('unknownEducator');
     }
     const [instrument] = await app.db.select({ id: instruments.id }).from(instruments).where(eq(instruments.id, values.instrumentId));
-    if (!instrument) throw badRequest('Nieznany instrument');
+    if (!instrument) throw badRequest('unknownInstrument');
 
     // A signal goes out to many traders, so prices on the wrong side are rejected, not just flagged.
-    const problems = validatePriceSides(values.direction, values.entryPrice, values.stopLoss, takeProfits);
-    if (problems.length > 0) throw badRequest('Sprawdź ceny sygnału', problems);
+    const problems = validatePriceSides(values.direction, values.entryPrice, values.stopLoss, takeProfits, req.user.language);
+    if (problems.length > 0) throw badRequest('checkSignalPrices', {}, problems);
 
     const id = await app.db.transaction(async (tx) => {
       const [row] = await tx
@@ -122,7 +123,7 @@ export const signalRoutes: FastifyPluginAsyncZod = async (app) => {
         .set({ hitAt: req.body.hit ? new Date() : null })
         .where(and(eq(signalTakeProfits.signalId, signal.id), eq(signalTakeProfits.level, req.params.level)))
         .returning();
-      if (!updated) throw notFound(`Sygnał nie ma TP${req.params.level}`);
+      if (!updated) throw new HttpError(404, 'signalNoTp', { level: req.params.level });
       return getSignal(signal.id);
     },
   );

@@ -6,6 +6,7 @@ import { CalculatorPage } from './features/calculator/CalculatorPage.tsx';
 import { CalendarPage } from './features/calendar/CalendarPage.tsx';
 import { JournalPage } from './features/journal/JournalPage.tsx';
 import { StatsPage } from './features/stats/StatsPage.tsx';
+import { I18nProvider } from './i18n/index.tsx';
 import { AppShell, ComingSoon } from './layout/AppShell.tsx';
 import './styles.css';
 
@@ -18,13 +19,13 @@ const routeTree = rootRoute.addChildren([
   createRoute({
     getParentRoute: () => rootRoute,
     path: '/analiza',
-    component: () => <ComingSoon title="Analiza dzienna" stage="Etap 4" />,
+    component: () => <ComingSoon module="analysis" />,
   }),
   createRoute({ getParentRoute: () => rootRoute, path: '/kalendarz', component: CalendarPage }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: '/sygnaly',
-    component: () => <ComingSoon title="Sygnały edukatorów" stage="Kolejny etap" />,
+    component: () => <ComingSoon module="signals" />,
   }),
 ]);
 
@@ -43,7 +44,9 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <I18nProvider>
+        <RouterProvider router={router} />
+      </I18nProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

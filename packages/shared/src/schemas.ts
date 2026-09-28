@@ -1,11 +1,14 @@
 // Request schemas shared by the API (validation) and clients (forms).
 import { z } from 'zod';
 import {
+  ACCOUNT_TYPES,
   ASSET_CLASSES,
+  LOSS_ALERT_MODES,
   BIASES,
   DIRECTIONS,
   EVENT_CATEGORIES,
   EVENT_IMPACTS,
+  LANGUAGES,
   LEVEL_TYPES,
   MARKETS,
   MEASURE_UNITS,
@@ -14,13 +17,20 @@ import {
   TIMEFRAMES,
   TRADE_SOURCES,
 } from './enums.ts';
+import { BROKER_TIMEZONES } from './dates.ts';
+
+/**
+ * Custom validation messages are message keys; the API translates them into the user's
+ * language (apps/api/src/i18n.ts).
+ */
+export const VALIDATION_KEYS = ['validation.currencyCode', 'validation.colorFormat', 'validation.timezone', 'validation.educatorOrSignal'] as const;
 
 const price = z.number().positive();
 const isoDateTime = z.iso.datetime({ offset: true });
 const isoDate = z.iso.date();
 const currency = z
   .string()
-  .regex(/^[A-Za-z]{3}$/, 'Kod waluty musi mieć 3 litery, np. USD')
+  .regex(/^[A-Za-z]{3}$/, 'validation.currencyCode')
   .transform((c) => c.toUpperCase());
 
 export const idParams = z.object({ id: z.uuid() });
@@ -41,9 +51,27 @@ export const updateSettingsSchema = z
     displayName: z.string().trim().min(1).max(80),
     accountCurrency: currency,
     theme: z.enum(THEMES),
-    accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Kolor w formacie #RRGGBB').nullable(),
-    timezone: z.string().refine(isValidTimeZone, 'Nieznana strefa czasowa'),
+    accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'validation.colorFormat').nullable(),
+    timezone: z.string().refine(isValidTimeZone, 'validation.timezone'),
+    language: z.enum(LANGUAGES),
     maxTradesPerDay: z.number().int().min(1).max(100).nullable(),
+    /** Losing trades in a row today that trigger the overtrading warning. */
+    lossStreakAlert: z.number().int().min(1).max(20),
+    /** Count losses in a row (default) or all losing trades of the day. */
+    lossAlertMode: z.enum(LOSS_ALERT_MODES),
+    /**
+     * Optional account profile. With a type set, stats are also shown against the account:
+     * balance, return and drawdown; prop accounts also track the maximum drawdown limit.
+     */
+    accountType: z.enum(ACCOUNT_TYPES).nullable(),
+    /** Starting balance in the account currency. Required for either type. */
+    accountSize: z.number().positive().max(1_000_000_000).nullable(),
+    /** Prop firm maximum drawdown, % of the starting balance. Required for prop accounts. */
+    maxDrawdownPct: z.number().min(0.1).max(100).nullable(),
+    /** Prop firm profit target, % of the starting balance. Optional. */
+    profitTargetPct: z.number().min(0.1).max(1000).nullable(),
+    /** Only trades from this day count towards the account (e.g. a new challenge). */
+    accountStartDate: isoDate.nullable(),
   })
   .partial();
 
@@ -95,7 +123,7 @@ const tradeFields = z.object({
 
 export const createTradeSchema = tradeFields.superRefine((t, ctx) => {
   if (t.source === 'educator' && !t.educatorId && !t.signalId) {
-    ctx.addIssue({ code: 'custom', path: ['educatorId'], message: 'Wybierz edukatora lub sygnał' });
+    ctx.addIssue({ code: 'custom', path: ['educatorId'], message: 'validation.educatorOrSignal' });
   }
 });
 
@@ -121,6 +149,34 @@ export const tradeStatsQuerySchema = z.object({
   dateFrom: isoDate.optional(),
   dateTo: isoDate.optional(),
 });
+
+// --- Import from trading platforms ----------------------------------------
+
+/**
+ * Text fields sent next to the report file (multipart). `symbolMap` maps broker symbols the app
+ * could not match (e.g. "GER40.cash") to instruments; `commit=false` only previews.
+ */
+export const mt5ImportFieldsSchema = z.object({
+  timezone: z.enum(BROKER_TIMEZONES).default('broker-ny7'),
+  symbolMap: z
+    .string()
+    .default('{}')
+    .transform((text, ctx) => {
+      try {
+        return JSON.parse(text) as unknown;
+      } catch {
+        ctx.addIssue({ code: 'custom', message: 'symbolMap: JSON' });
+        return z.NEVER;
+      }
+    })
+    .pipe(z.record(z.string(), z.uuid())),
+  commit: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+});
+
+export type Mt5ImportFields = z.infer<typeof mt5ImportFieldsSchema>;
 
 // --- Signals -----------------------------------------------------------------
 

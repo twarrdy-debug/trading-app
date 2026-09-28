@@ -15,19 +15,12 @@ import {
   useUploadScreenshot,
 } from '../../api/hooks.ts';
 import { Button } from '../../components/ui/Button.tsx';
-import { Field, Input, Segmented, Select, Textarea } from '../../components/ui/Field.tsx';
-import { Brackets } from '../../components/ui/Panel.tsx';
-import {
-  formatMoney,
-  formatNumber,
-  formatPrice,
-  parseDecimal,
-  toDateTimeLocal,
-  UNIT_LABEL,
-  UNIT_NAME,
-} from '../../lib/format.ts';
+import { Field, Input, Segmented, Textarea, toggleClass } from '../../components/ui/Field.tsx';
+import { Select } from '../../components/ui/Select.tsx';
+import { useT } from '../../i18n/index.tsx';
+import { formatDate, formatMoney, formatNumber, formatPrice, parseDecimal, toDateTimeLocal, toInputNumber } from '../../lib/format.ts';
 
-const priceText = (value: number | null | undefined) => (value == null ? '' : String(value).replace('.', ','));
+const priceText = toInputNumber;
 
 /** Common position sizes offered as one-click presets. */
 const CFD_SIZES = [0.01, 0.1, 0.5, 1];
@@ -50,6 +43,8 @@ interface Props {
 }
 
 export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSaved, onDeleted, onCancel }: Props) {
+  const all = useT();
+  const t = all.form;
   const account = user.settings.accountCurrency;
   const [direction, setDirection] = useState<Direction>(trade?.direction ?? 'long');
   const [instrumentId, setInstrumentId] = useState(
@@ -135,9 +130,9 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
         setTakeProfit(priceText(signal.takeProfits[0]));
         setSource('educator');
         const extraTps = signal.takeProfits.slice(1).map((tp, i) => `TP${i + 2} ${formatPrice(tp)}`);
-        if (extraTps.length > 0) setNotes((n) => [n, `Sygnał: ${extraTps.join(', ')}`].filter(Boolean).join('\n'));
+        if (extraTps.length > 0) setNotes((n) => [n, t.signalNote(extraTps.join(', '))].filter(Boolean).join('\n'));
         setSignalNotes([
-          `Wczytano ${signal.symbol} ${signal.direction.toUpperCase()}${extraTps.length ? `; kolejne TP dopisane do notatek` : ''}.`,
+          t.signalLoaded(signal.symbol, signal.direction.toUpperCase(), extraTps.length > 0),
           ...result.warnings,
         ]);
         setSignalOpen(false);
@@ -151,15 +146,15 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
     const entryPrice = parseDecimal(entry);
     const positionSize = parseDecimal(size);
     if (!instrument || entryPrice == null || positionSize == null) {
-      setErrors(['Uzupełnij instrument, cenę wejścia i wielkość pozycji.']);
+      setErrors([t.errRequired]);
       return;
     }
     if (instrument.market === 'futures' && !Number.isInteger(positionSize)) {
-      setErrors(['Futures handluje się pełnymi kontraktami (1, 2, 3…).']);
+      setErrors([t.errFutures]);
       return;
     }
     if (source === 'educator' && !educatorId) {
-      setErrors(['Wybierz edukatora, od którego pochodzi sygnał.']);
+      setErrors([t.errEducator]);
       return;
     }
 
@@ -195,33 +190,32 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
   };
 
   const remove = () => {
-    if (!trade || !window.confirm(`Usunąć transakcję ${trade.dayLabel}?`)) return;
+    if (!trade || !window.confirm(t.confirmDelete(trade.dayLabel))) return;
     deleteTrade.mutate(trade.id, { onSuccess: onDeleted });
   };
 
   const busy = saveTrade.isPending || upload.isPending || saveSpread.isPending;
-  const unit = instrument ? UNIT_LABEL[instrument.measureUnit] : '';
+  const unit = instrument ? all.units.short[instrument.measureUnit] : '';
   const isFutures = instrument?.market === 'futures';
-  const sizeLabel = isFutures ? 'Kontrakty' : 'Loty';
+  const sizeLabel = isFutures ? t.contracts : t.lots;
   const currentSize = parseDecimal(size);
   const step = sizeStep(sizeBase ?? currentSize ?? 0, isFutures);
   const cfd = instruments.filter((i) => i.market === 'cfd');
   const futures = instruments.filter((i) => i.market === 'futures');
 
   return (
-    <form onSubmit={submit} className="relative flex flex-col gap-4 border border-line bg-panel p-5" aria-label={trade ? 'Edycja transakcji' : 'Nowa transakcja'}>
-      <Brackets bottom={false} />
+    <form onSubmit={submit} className="card relative flex flex-col gap-4 p-5" aria-label={trade ? t.editAria : t.newTrade}>
       <div className="flex items-center gap-3">
-        <h2 className="m-0 text-[13px] font-semibold tracking-[0.16em] uppercase">{trade ? `Edycja ${trade.dayLabel}` : 'Nowa transakcja'}</h2>
+        <h2 className="m-0 text-[15px] font-bold">{trade ? t.edit(trade.dayLabel) : t.newTrade}</h2>
         <div className="grow" />
         {trade && (
           <Button size="sm" variant="ghost" onClick={onCancel}>
-            Zamknij
+            {all.common.close}
           </Button>
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-2.5" role="group" aria-label="Kierunek">
+      <div className="grid grid-cols-2 gap-2.5" role="group" aria-label={t.direction}>
         <Button variant="buy" size="xl" selected={direction === 'long'} onClick={() => setDirection('long')}>
           Buy
         </Button>
@@ -233,24 +227,24 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
       {!trade && (
         <div className="flex flex-col gap-2">
           <Button size="sm" onClick={() => setSignalOpen((v) => !v)} aria-expanded={signalOpen}>
-            {signalOpen ? 'Ukryj sygnał' : 'Wklej sygnał'}
+            {signalOpen ? t.hideSignal : t.pasteSignal}
           </Button>
           {signalOpen && (
             <div className="flex flex-col gap-2">
               <Textarea
-                aria-label="Treść sygnału"
+                aria-label={t.signalText}
                 placeholder={'XAUUSD - SELL\nIN: 4406.50\nSL: 4414\nTP1: 4390\nTP2: 4384'}
                 value={signalText}
                 onChange={(e) => setSignalText(e.target.value)}
                 className="min-h-28"
               />
               <Button size="sm" variant="primary" onClick={loadSignal} disabled={!signalText.trim() || parseSignal.isPending}>
-                Wczytaj do formularza
+                {t.loadSignal}
               </Button>
             </div>
           )}
           {signalNotes.length > 0 && (
-            <ul className="m-0 list-none border border-line p-3 text-[13px] text-dim">
+            <ul className="m-0 list-none rounded-(--radius-control) bg-raised p-3 text-[13px] text-dim">
               {signalNotes.map((line) => (
                 <li key={line}>{line}</li>
               ))}
@@ -259,48 +253,40 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
         </div>
       )}
 
-      <Field label="Instrument" hint={instrument ? `${instrument.market === 'cfd' ? 'CFD' : 'Futures'} · ${UNIT_NAME[instrument.measureUnit].toLowerCase()}` : undefined}>
-        <Select value={instrumentId} onChange={(e) => setInstrumentId(e.target.value)} required>
-          <optgroup label="CFD">
-            {cfd.map((i) => (
-              <option key={i.id} value={i.id}>
-                {i.symbol} · {i.name}
-              </option>
-            ))}
-          </optgroup>
-          <optgroup label="Futures">
-            {futures.map((i) => (
-              <option key={i.id} value={i.id}>
-                {i.symbol} · {i.name}
-              </option>
-            ))}
-          </optgroup>
-        </Select>
+      <Field label={t.instrument} hint={instrument ? `${instrument.market === 'cfd' ? 'CFD' : 'Futures'} · ${all.units.name[instrument.measureUnit].toLowerCase()}` : undefined}>
+        <Select
+          value={instrumentId}
+          onChange={setInstrumentId}
+          options={[
+            ...cfd.map((i) => ({ value: i.id, label: `${i.symbol} · ${i.name}`, group: 'CFD' })),
+            ...futures.map((i) => ({ value: i.id, label: `${i.symbol} · ${i.name}`, group: 'Futures' })),
+          ]}
+        />
       </Field>
 
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Otwarcie" className="col-span-2">
+        <Field label={t.opened} className="col-span-2">
           <Input type="datetime-local" value={openedAt} onChange={(e) => setOpenedAt(e.target.value)} required />
         </Field>
-        <Field label="Zamknięcie" className="col-span-2">
+        <Field label={t.closed} className="col-span-2">
           <Input type="datetime-local" value={closedAt} onChange={(e) => setClosedAt(e.target.value)} />
         </Field>
-        <Field label="Cena wejścia">
+        <Field label={t.entry}>
           <Input inputMode="decimal" value={entry} onChange={(e) => setEntry(e.target.value)} required />
         </Field>
-        <Field label="Cena wyjścia">
-          <Input inputMode="decimal" value={exit} onChange={(e) => setExit(e.target.value)} placeholder="otwarta" />
+        <Field label={t.exit}>
+          <Input inputMode="decimal" value={exit} onChange={(e) => setExit(e.target.value)} placeholder={all.common.open} />
         </Field>
-        <Field label="Stop loss">
+        <Field label={t.stopLoss}>
           <Input inputMode="decimal" value={stopLoss} onChange={(e) => setStopLoss(e.target.value)} />
         </Field>
-        <Field label="Take profit">
+        <Field label={t.takeProfit}>
           <Input inputMode="decimal" value={takeProfit} onChange={(e) => setTakeProfit(e.target.value)} />
         </Field>
       </div>
 
       <div className="flex flex-col gap-2">
-        <Field label={sizeLabel} hint={isFutures ? 'pełne kontrakty' : 'dowolna wielkość'}>
+        <Field label={sizeLabel} hint={isFutures ? t.wholeContracts : t.anySize}>
           <Input
             inputMode={isFutures ? 'numeric' : 'decimal'}
             value={size}
@@ -308,7 +294,7 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
             required
           />
         </Field>
-        <div role="group" aria-label={`Szybki wybór: ${sizeLabel.toLowerCase()}`} className="flex gap-1.5">
+        <div role="group" aria-label={t.quickSize(sizeLabel.toLowerCase())} className="flex gap-1.5">
           {(isFutures ? FUTURES_SIZES : CFD_SIZES).map((preset) => {
             const active = parseDecimal(size) === preset;
             return (
@@ -317,9 +303,7 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
                 type="button"
                 aria-pressed={active}
                 onClick={() => setSize(priceText(preset))}
-                className={`h-9 grow border font-mono text-[13px] transition ${
-                  active ? 'border-accent bg-accent/15 text-ink' : 'border-line text-dim hover:text-ink'
-                }`}
+                className={`h-9 grow font-mono text-[13px] ${toggleClass(active)}`}
               >
                 {priceText(preset)}
               </button>
@@ -331,7 +315,7 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
             type="button"
             disabled={!currentSize}
             onClick={() => currentSize && setSize(priceText(roundSize(currentSize * 2)))}
-            className="h-9 flex-1 border border-line font-mono text-[13px] text-dim transition hover:text-ink disabled:opacity-40 disabled:hover:text-dim"
+            className={`h-9 flex-1 font-mono text-[13px] ${toggleClass(false)} disabled:opacity-40`}
           >
             ×2
           </button>
@@ -339,7 +323,7 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
             type="button"
             disabled={!currentSize}
             onClick={() => currentSize && setSizeText(priceText(roundSize(currentSize + step)))}
-            className="h-9 flex-1 border border-line font-mono text-[13px] text-dim transition hover:text-ink disabled:opacity-40 disabled:hover:text-dim"
+            className={`h-9 flex-1 font-mono text-[13px] ${toggleClass(false)} disabled:opacity-40`}
           >
             +{priceText(step)}
           </button>
@@ -347,24 +331,26 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
       </div>
 
       {instrument && !sameCurrency && (
-        <Field label={`Kurs ${instrument.quoteCurrency}/${account}`} hint="puste = automatyczny (EBC)">
+        <Field label={t.fxRate(`${instrument.quoteCurrency}/${account}`)} hint={t.fxHint}>
           <Input inputMode="decimal" value={fxRate} onChange={(e) => setFxRate(e.target.value)} placeholder="auto" />
         </Field>
       )}
 
       {isCfd && spread.data && (
-        <div className={`flex flex-col gap-2.5 p-3.5 ${askSpread ? 'border border-dashed border-accent' : 'border border-line'}`}>
+        <div className={`flex flex-col gap-2.5 p-3.5 rounded-(--radius-control) ${askSpread ? 'border border-dashed border-accent bg-accent/5' : 'bg-raised'}`}>
           <span className="text-[13px] font-semibold">
-            {askSpread ? `Spread ${instrument?.symbol} na ${tradeDate === toLocalDate(new Date(), user.settings.timezone) ? 'dziś' : tradeDate}?` : `Spread ${instrument?.symbol} tego dnia`}
+            {askSpread
+              ? t.spreadAsk(instrument?.symbol ?? '', tradeDate === toLocalDate(new Date(), user.settings.timezone) || !tradeDate ? t.today : formatDate(tradeDate))
+              : t.spreadDay(instrument?.symbol ?? '')}
           </span>
           {askSpread ? (
             <div className="flex items-end gap-2">
-              <Field label={UNIT_NAME[instrument!.measureUnit]} className="grow">
-                <Input inputMode="decimal" value={spreadText} onChange={(e) => setSpreadText(e.target.value)} placeholder="np. 2,5" />
+              <Field label={all.units.name[instrument!.measureUnit]} className="grow">
+                <Input inputMode="decimal" value={spreadText} onChange={(e) => setSpreadText(e.target.value)} placeholder={t.spreadPlaceholder} />
               </Field>
               {spread.data.suggestion && (
-                <span className="flex h-11 items-center bg-chip px-2.5 font-mono text-xs text-dim">
-                  ostatnio {formatNumber(spread.data.suggestion.spread)} ({spread.data.suggestion.date.slice(5).split('-').reverse().join('.')})
+                <span className="flex h-11 items-center rounded-(--radius-control) bg-chip px-2.5 font-mono text-xs whitespace-nowrap text-dim">
+                  {t.lastSpread(formatNumber(spread.data.suggestion.spread), formatDate(spread.data.suggestion.date).slice(0, 5))}
                 </span>
               )}
             </div>
@@ -373,34 +359,32 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
               {formatNumber(spread.data.spread)} {unit}
             </span>
           )}
-          {askSpread && <span className="text-xs text-dim">Zapiszę go razem z transakcją. Kolejne transakcje tego dnia użyją go automatycznie.</span>}
+          {askSpread && <span className="text-xs text-dim">{t.spreadSaveInfo}</span>}
         </div>
       )}
 
       <div className="flex flex-col gap-2">
-        <span className="eyebrow">Źródło</span>
+        <span className="eyebrow">{t.source}</span>
         <Segmented
-          label="Źródło transakcji"
+          label={t.sourceAria}
           value={source}
           onChange={setSource}
           options={[
-            { value: 'own', label: 'Własna analiza' },
-            { value: 'educator', label: 'Edukator' },
+            { value: 'own', label: t.own },
+            { value: 'educator', label: t.educator },
           ]}
         />
         {source === 'educator' && (
           <div className="flex flex-col gap-2">
-            <Select aria-label="Edukator" value={educatorId} onChange={(e) => setEducatorId(e.target.value)}>
-              <option value="">Wybierz edukatora…</option>
-              {educators.data?.map((ed) => (
-                <option key={ed.id} value={ed.id}>
-                  {ed.displayName}
-                </option>
-              ))}
-            </Select>
+            <Select
+              aria-label={t.educator}
+              value={educatorId}
+              onChange={setEducatorId}
+              options={[{ value: '', label: t.chooseEducator }, ...(educators.data ?? []).map((ed) => ({ value: ed.id, label: ed.displayName }))]}
+            />
             {user.role === 'admin' && (
               <div className="flex gap-2">
-                <Input aria-label="Nowy edukator" placeholder="Dodaj edukatora" value={newEducator} onChange={(e) => setNewEducator(e.target.value)} />
+                <Input aria-label={t.newEducator} placeholder={t.addEducator} value={newEducator} onChange={(e) => setNewEducator(e.target.value)} />
                 <Button
                   size="md"
                   disabled={!newEducator.trim() || createEducator.isPending}
@@ -413,7 +397,7 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
                     })
                   }
                 >
-                  Dodaj
+                  {t.add}
                 </Button>
               </div>
             )}
@@ -422,16 +406,14 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
       </div>
 
       <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
-        <legend className="eyebrow mb-2">Emocje przy wejściu</legend>
+        <legend className="eyebrow mb-2">{t.emotions}</legend>
         <div className="flex flex-wrap gap-1.5">
           {emotions.data?.map((em) => {
             const checked = emotionKeys.includes(em.key);
             return (
               <label
                 key={em.key}
-                className={`flex h-9 cursor-pointer items-center gap-2 border px-2.5 text-[13px] transition has-focus-visible:border-ink ${
-                  checked ? 'border-accent bg-accent/15 text-ink' : 'border-line text-dim hover:text-ink'
-                }`}
+                className={`flex h-9 cursor-pointer items-center rounded-full! px-3.5 text-[13px] has-focus-visible:outline-2 has-focus-visible:outline-accent-ink ${toggleClass(checked)}`}
               >
                 <input
                   type="checkbox"
@@ -439,7 +421,6 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
                   checked={checked}
                   onChange={() => setEmotionKeys((keys) => (checked ? keys.filter((k) => k !== em.key) : [...keys, em.key]))}
                 />
-                <span aria-hidden className={`size-2.5 rotate-45 ${checked ? 'bg-accent' : 'border border-dim'}`} />
                 {em.label}
               </label>
             );
@@ -447,24 +428,24 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
         </div>
       </fieldset>
 
-      <Field label="Notatki">
+      <Field label={t.notes}>
         <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={10_000} className="font-sans" />
       </Field>
 
       <div className="flex flex-col gap-2">
-        <span className="eyebrow">Zrzuty ekranu wykresu</span>
+        <span className="eyebrow">{t.screenshots}</span>
         {trade && trade.screenshots.length > 0 && (
           <ul className="m-0 grid list-none grid-cols-3 gap-2 p-0">
             {trade.screenshots.map((shot) => (
               <li key={shot.id} className="relative">
-                <a href={shot.url} target="_blank" rel="noreferrer" className="block border border-line">
-                  <img src={shot.url} alt="Zrzut ekranu wykresu" className="block aspect-video w-full object-cover" />
+                <a href={shot.url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-(--radius-control) border border-line">
+                  <img src={shot.url} alt={t.screenshotAlt} className="block aspect-video w-full object-cover" />
                 </a>
                 <button
                   type="button"
-                  aria-label="Usuń zrzut ekranu"
+                  aria-label={t.removeScreenshot}
                   onClick={() => removeShot.mutate({ tradeId: trade.id, screenshotId: shot.id })}
-                  className="absolute top-1 right-1 flex size-7 items-center justify-center bg-bg/90 text-sell"
+                  className="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-lg bg-panel/90 text-sell shadow-sm"
                 >
                   ✕
                 </button>
@@ -476,19 +457,19 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
           type="file"
           accept="image/png,image/jpeg,image/webp"
           multiple
-          aria-label="Dodaj zrzuty ekranu"
+          aria-label={t.addScreenshots}
           onChange={(e) => setFiles([...(e.target.files ?? [])])}
-          className="text-sm text-dim file:mr-3 file:h-9 file:cursor-pointer file:border file:border-line file:bg-transparent file:px-3 file:font-sans file:text-xs file:font-bold file:tracking-[0.14em] file:text-ink file:uppercase"
+          className="text-sm text-dim file:mr-3 file:h-9 file:cursor-pointer file:rounded-(--radius-chip) file:border file:border-line file:bg-panel file:px-3 file:font-sans file:text-[13px] file:font-semibold file:text-ink"
         />
       </div>
 
       {preview && (
-        <dl className="m-0 grid grid-cols-2 gap-x-4 gap-y-1.5 bg-chip p-3.5 font-mono text-[13px]">
-          <dt className="text-dim">Wynik</dt>
+        <dl className="m-0 grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-(--radius-control) bg-raised p-3.5 font-mono text-[13px]">
+          <dt className="text-dim">{t.result}</dt>
           <dd className={`m-0 text-right ${(preview.resultUnits ?? 0) >= 0 ? 'text-buy' : 'text-sell'}`}>
-            {preview.resultUnits == null ? 'otwarta' : `${formatNumber(preview.resultUnits, true)} ${unit}`}
+            {preview.resultUnits == null ? all.common.open : `${formatNumber(preview.resultUnits, true)} ${unit}`}
           </dd>
-          <dt className="text-dim">W walucie</dt>
+          <dt className="text-dim">{t.inCurrency}</dt>
           <dd className="m-0 text-right">
             {preview.pnlAccount != null
               ? `${formatMoney(preview.pnlAccount)} ${account}`
@@ -496,9 +477,9 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
                 ? `${formatMoney(preview.pnlQuote)} ${instrument?.quoteCurrency}`
                 : '—'}
           </dd>
-          <dt className="text-dim">Ryzyko</dt>
+          <dt className="text-dim">{t.risk}</dt>
           <dd className="m-0 text-right">{preview.riskUnits == null ? '—' : `${formatNumber(preview.riskUnits)} ${unit}`}</dd>
-          <dt className="text-dim">R · plan R:R</dt>
+          <dt className="text-dim">{t.rPlan}</dt>
           <dd className="m-0 text-right">
             {formatNumber(preview.rMultiple, true)} R · {formatNumber(preview.plannedRR)}
           </dd>
@@ -506,7 +487,7 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
       )}
 
       {errors.length > 0 && (
-        <ul role="alert" className="m-0 list-none border border-sell p-3 text-[13px] text-sell">
+        <ul role="alert" className="m-0 list-none rounded-(--radius-control) bg-sell-soft p-3 text-[13px] text-sell">
           {errors.map((line) => (
             <li key={line}>{line}</li>
           ))}
@@ -514,11 +495,11 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
       )}
 
       <Button type="submit" variant="primary" size="lg" disabled={busy}>
-        {busy ? 'Zapisywanie…' : trade ? 'Zapisz zmiany' : 'Dodaj transakcję'}
+        {busy ? t.saving : trade ? t.saveChanges : t.addTrade}
       </Button>
       {trade && (
         <Button variant="danger" onClick={remove} disabled={deleteTrade.isPending}>
-          Usuń transakcję
+          {t.deleteTrade}
         </Button>
       )}
     </form>

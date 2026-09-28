@@ -3,6 +3,7 @@ import type { instruments } from './db/schema.ts';
 import type { toPublicUser } from './routes/me.ts';
 import type { basisOverview } from './services/basis.ts';
 import type { listEvents, RefreshResult } from './services/calendar.ts';
+import type { importMt5 } from './services/mt5-import.ts';
 import type { createTrade, listTrades, tradeStats, tradingMonitor, TradeView } from './services/trades.ts';
 
 /** What a value looks like after JSON serialization (Dates become strings). */
@@ -18,7 +19,7 @@ export type PublicUser = Jsonify<ReturnType<typeof toPublicUser>>;
 export type Instrument = Jsonify<typeof instruments.$inferSelect & { currencies: string[] }>;
 export type Trade = Jsonify<TradeView>;
 export type TradeList = Jsonify<Awaited<ReturnType<typeof listTrades>>>;
-export type TradeMutation = Jsonify<Awaited<ReturnType<typeof createTrade>>>;
+export type TradeMutation = Jsonify<Omit<Awaited<ReturnType<typeof createTrade>>, 'fxWarning'>>;
 export type TradeStats = Jsonify<Awaited<ReturnType<typeof tradeStats>>>;
 export type BasisOverview = Jsonify<Awaited<ReturnType<typeof basisOverview>>>;
 export type BasisPair = BasisOverview[number];
@@ -26,6 +27,8 @@ export type CalendarResponse = Jsonify<Awaited<ReturnType<typeof listEvents>>>;
 export type CalendarEvent = CalendarResponse['events'][number];
 export type CalendarRefresh = RefreshResult;
 export type TradingMonitor = Jsonify<Awaited<ReturnType<typeof tradingMonitor>>>;
+export type Mt5Import = Jsonify<Awaited<ReturnType<typeof importMt5>>>;
+export type Mt5ImportRow = Mt5Import['positions'][number];
 
 export interface Emotion {
   key: string;

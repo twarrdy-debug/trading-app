@@ -1,58 +1,69 @@
 @import 'tailwindcss';
-@import '@fontsource/chakra-petch/400.css';
-@import '@fontsource/chakra-petch/500.css';
-@import '@fontsource/chakra-petch/600.css';
-@import '@fontsource/chakra-petch/700.css';
-@import '@fontsource/ibm-plex-mono/400.css';
-@import '@fontsource/ibm-plex-mono/500.css';
-@import '@fontsource/ibm-plex-mono/600.css';
+@import '@fontsource/manrope/400.css';
+@import '@fontsource/manrope/500.css';
+@import '@fontsource/manrope/600.css';
+@import '@fontsource/manrope/700.css';
+@import '@fontsource/dm-mono/400.css';
+@import '@fontsource/dm-mono/500.css';
 
 /*
- * Design tokens – direction "A · Awionika".
+ * Design tokens – direction "Chmura" (cloud): white cards with a soft shadow on a cool grey
+ * ground, generous radii, sentence-case labels, Manrope for UI and DM Mono for numbers.
  * Every visual decision lives here: swapping the look means editing this file
  * (and the few shape rules in components/ui), not the screens.
  * --accent / --on-accent are set at runtime from the user's settings (lib/theme.ts).
  */
 :root {
   --accent: #ffb020;
-  --on-accent: #0a0c10;
+  --on-accent: #18202b;
 
   /* Shape */
-  --chamfer: 12px;
-  --chamfer-sm: 8px;
-  --bracket: 14px;
-}
-
-:root[data-theme='dark'] {
-  color-scheme: dark;
-  --bg: #07090c;
-  --panel: #0d1117;
-  --raised: #121821;
-  --line: #1e2833;
-  --grid: #18212b;
-  --chip: #151c24;
-  --ink: #e6edf3;
-  --dim: #8b98a5;
-  --buy: #2fd17a;
-  --sell: #ff4d5e;
-  --on-side: #06080a;
-  --warn-bg: #1a1410;
+  --radius: 18px;
+  --radius-control: 12px;
+  --radius-chip: 10px;
 }
 
 :root[data-theme='light'] {
   color-scheme: light;
-  --bg: #e6e9ec;
-  --panel: #f7f8f9;
-  --raised: #ffffff;
-  --line: #c9d0d6;
-  --grid: #dce1e5;
-  --chip: #d9dee3;
-  --ink: #0d1318;
-  --dim: #56616b;
-  --buy: #0b7f43;
-  --sell: #c4283a;
+  --bg: #eef1f5;
+  --panel: #ffffff;
+  --raised: #f7f9fb;
+  --line: #e1e6ec;
+  --grid: #eef1f5;
+  --chip: #f0f3f7;
+  --ink: #18202b;
+  --dim: #5f6b7a;
+  --buy: #147a48;
+  --sell: #c0303c;
+  --buy-soft: #e3f5eb;
+  --sell-soft: #fce8ea;
   --on-side: #ffffff;
-  --warn-bg: #f6eedd;
+  --warn-bg: #fff4de;
+  /* The accent darkened enough to read as a line or text on white. */
+  --accent-ink: color-mix(in oklab, var(--accent) 72%, #000);
+  --shadow: 0 1px 2px rgb(16 24 40 / 0.04), 0 8px 24px rgb(16 24 40 / 0.06);
+  --shadow-pop: 0 4px 12px rgb(16 24 40 / 0.08), 0 20px 48px rgb(16 24 40 / 0.14);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0e1116;
+  --panel: #171b22;
+  --raised: #1e232c;
+  --line: #262c36;
+  --grid: #222832;
+  --chip: #1f242d;
+  --ink: #e8ecf1;
+  --dim: #9aa4b2;
+  --buy: #3dd68c;
+  --sell: #ff6b77;
+  --buy-soft: rgb(61 214 140 / 0.14);
+  --sell-soft: rgb(255 107 119 / 0.14);
+  --on-side: #0e1116;
+  --warn-bg: #2a2210;
+  --accent-ink: var(--accent);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.22);
+  --shadow-pop: 0 4px 12px rgb(0 0 0 / 0.4), 0 20px 48px rgb(0 0 0 / 0.5);
 }
 
 @theme inline {
@@ -66,43 +77,28 @@
   --color-dim: var(--dim);
   --color-buy: var(--buy);
   --color-sell: var(--sell);
+  --color-buy-soft: var(--buy-soft);
+  --color-sell-soft: var(--sell-soft);
   --color-on-side: var(--on-side);
   --color-warn-bg: var(--warn-bg);
   --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
   --color-on-accent: var(--on-accent);
-  --font-sans: 'Chakra Petch', ui-sans-serif, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --font-sans: 'Manrope', ui-sans-serif, sans-serif;
+  --font-mono: 'DM Mono', ui-monospace, monospace;
 }
 
-/* Cut corners (top-left and bottom-right), the signature shape of buttons. */
-@utility chamfer {
-  clip-path: polygon(
-    var(--chamfer) 0,
-    100% 0,
-    100% calc(100% - var(--chamfer)),
-    calc(100% - var(--chamfer)) 100%,
-    0 100%,
-    0 var(--chamfer)
-  );
+/* White card with a soft shadow: panels, tiles, dialogs, the header bar. */
+@utility card {
+  background: var(--panel);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
 }
 
-@utility chamfer-sm {
-  clip-path: polygon(
-    var(--chamfer-sm) 0,
-    100% 0,
-    100% calc(100% - var(--chamfer-sm)),
-    calc(100% - var(--chamfer-sm)) 100%,
-    0 100%,
-    0 var(--chamfer-sm)
-  );
-}
-
-/* Small caps-style label used above values and fields. */
+/* Small label above values and fields. */
 @utility eyebrow {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--dim);
 }
 
@@ -130,12 +126,9 @@
     opacity: 0.5;
   }
 
-  /* Clip-path hides outlines, so focus is drawn inside the element. */
   :focus-visible {
-    outline: none;
-    box-shadow:
-      inset 0 0 0 2px var(--bg),
-      inset 0 0 0 4px var(--ink);
+    outline: 2px solid var(--accent-ink);
+    outline-offset: 2px;
   }
 
   input,

@@ -5,3 +5,4 @@ export * from './calendar.ts';
 export * from './dates.ts';
 export * from './instruments.ts';
 export * from './schemas.ts';
+export * from './mt5-report.ts';

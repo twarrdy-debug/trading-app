@@ -26,7 +26,7 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
     body: json === undefined ? rest.body : JSON.stringify(json),
   });
   if (res.status === 204) return undefined as T;
-  const body = await res.json().catch(() => ({ error: `Błąd ${res.status}` }));
+  const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
   if (!res.ok) throw new ApiError(res.status, body as ApiErrorBody);
   return body as T;
 }

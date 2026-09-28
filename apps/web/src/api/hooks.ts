@@ -6,6 +6,7 @@ import type {
   Educator,
   Emotion,
   Instrument,
+  Mt5Import,
   PublicUser,
   Trade,
   TradeList,
@@ -13,7 +14,7 @@ import type {
   TradeStats,
   TradingMonitor,
 } from '@trading/api/types';
-import type { CreateTradeInput, ParsedSignal, TradeFilters, UpdateSettingsInput } from '@trading/shared';
+import type { BrokerTimezone, CreateTradeInput, ParsedSignal, TradeFilters, UpdateSettingsInput } from '@trading/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, qs } from './client.ts';
 
@@ -31,8 +32,10 @@ export function useUpdateSettings() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (patch: UpdateSettingsInput) => api<PublicUser>('/me', { method: 'PATCH', json: patch }),
-    onSuccess: (user) => {
+    onSuccess: (user, patch) => {
       client.setQueryData(['me'], user);
+      // Emotion labels, stats labels and messages come from the API in the user's language.
+      if (patch.language) void client.invalidateQueries({ predicate: (q) => q.queryKey[0] !== 'me' });
       // Currency, time zone and limits change how trades and stats are computed.
       void client.invalidateQueries({ queryKey: ['trades'] });
       void client.invalidateQueries({ queryKey: ['stats'] });
@@ -188,5 +191,24 @@ export function useRefreshCalendar() {
   return useMutation({
     mutationFn: () => api<CalendarRefresh>('/calendar/refresh', { method: 'POST' }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['calendar'] }),
+  });
+}
+
+/** Preview (commit = false) or import of an MT5 history report. */
+export function useMt5Import() {
+  const invalidate = useInvalidateTrades();
+  return useMutation({
+    mutationFn: ({ file, timezone, symbolMap, commit }: { file: File; timezone: BrokerTimezone; symbolMap: Record<string, string>; commit: boolean }) => {
+      const body = new FormData();
+      // Text fields go first: the API reads them before the file.
+      body.append('timezone', timezone);
+      body.append('symbolMap', JSON.stringify(symbolMap));
+      body.append('commit', String(commit));
+      body.append('file', file);
+      return api<Mt5Import>('/trades/import/mt5', { method: 'POST', body });
+    },
+    onSuccess: (_result, { commit }) => {
+      if (commit) invalidate();
+    },
   });
 }

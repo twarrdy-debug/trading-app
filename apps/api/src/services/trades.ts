@@ -1,15 +1,14 @@
 import {
   computeTradeMetrics,
-  DEFAULT_EMOTIONS,
+  emotionLabel,
   formatDayLabel,
   toLocalDate,
   validatePriceSides,
-  LOSS_STREAK_ALERT,
   type CreateTradeInput,
   type FxRateSource,
   type TradeFilters,
 } from '@trading/shared';
-import { and, desc, eq, getTableColumns, gte, inArray, isNotNull, isNull, lte, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, getTableColumns, gte, inArray, isNotNull, isNull, lte, sql, type SQL } from 'drizzle-orm';
 import type { DB } from '../db/client.ts';
 import {
   dailySpreads,
@@ -22,6 +21,7 @@ import {
   users,
 } from '../db/schema.ts';
 import { badRequest, notFound } from '../errors.ts';
+import { t as tr } from '../i18n.ts';
 import type { CurrentUser } from '../plugins/current-user.ts';
 import { getFxRate, supportsAutoRate, type FxProvider } from './fx.ts';
 
@@ -37,14 +37,14 @@ type TradeDraft = Omit<CreateTradeInput, 'emotionKeys'>;
 
 async function loadInstrument(db: DB, id: string): Promise<Instrument> {
   const [instrument] = await db.select().from(instruments).where(eq(instruments.id, id));
-  if (!instrument) throw badRequest('Nieznany instrument');
+  if (!instrument) throw badRequest('unknownInstrument');
   return instrument;
 }
 
 /** Futures trade in whole contracts; CFD lots may be fractional. */
 function assertPositionSize(instrument: Instrument, size: number) {
   if (instrument.market === 'futures' && !Number.isInteger(size)) {
-    throw badRequest(`${instrument.symbol}: futures handluje się pełnymi kontraktami (1, 2, 3…)`);
+    throw badRequest('futuresWholeContracts', { symbol: instrument.symbol });
   }
 }
 
@@ -53,14 +53,14 @@ async function resolveSource(db: DB, draft: TradeDraft): Promise<Pick<TradeDraft
   let { source, educatorId = null, signalId = null } = draft;
   if (signalId) {
     const [signal] = await db.select().from(signals).where(eq(signals.id, signalId));
-    if (!signal) throw badRequest('Nieznany sygnał');
+    if (!signal) throw badRequest('unknownSignal');
     educatorId ??= signal.educatorId;
     source = 'educator';
   }
   if (source === 'own') return { source, educatorId: null, signalId: null };
-  if (!educatorId) throw badRequest('Wybierz edukatora lub sygnał');
+  if (!educatorId) throw badRequest('chooseEducator');
   const [educator] = await db.select({ role: users.role }).from(users).where(eq(users.id, educatorId));
-  if (!educator || (educator.role !== 'educator' && educator.role !== 'admin')) throw badRequest('Nieznany edukator');
+  if (!educator || (educator.role !== 'educator' && educator.role !== 'admin')) throw badRequest('unknownEducator');
   return { source, educatorId, signalId };
 }
 
@@ -68,7 +68,7 @@ async function assertEmotionKeys(db: DB, keys: string[]) {
   if (keys.length === 0) return;
   const found = await db.select({ key: emotions.key }).from(emotions).where(inArray(emotions.key, keys));
   const missing = keys.filter((k) => !found.some((f) => f.key === k));
-  if (missing.length > 0) throw badRequest(`Nieznane emocje: ${missing.join(', ')}`);
+  if (missing.length > 0) throw badRequest('unknownEmotions', { keys: missing.join(', ') });
 }
 
 /**
@@ -85,9 +85,7 @@ async function resolveFx(ctx: TradeContext, user: CurrentUser, instrument: Instr
   return {
     fxRate: null,
     fxRateSource: null,
-    warning: supportsAutoRate(instrument.quoteCurrency, user.accountCurrency)
-      ? `Nie udało się pobrać kursu ${pair}. Wpisz go ręcznie, aby policzyć wynik w walucie konta`
-      : `Brak automatycznego kursu ${pair}. Wpisz go ręcznie, aby policzyć wynik w walucie konta`,
+    warning: tr(user.language, supportsAutoRate(instrument.quoteCurrency, user.accountCurrency) ? 'fxFailed' : 'fxManual', { pair }),
   };
 }
 
@@ -135,12 +133,13 @@ function toRow(draft: TradeDraft) {
   };
 }
 
-const collectWarnings = (d: TradeDraft, fxWarning: string | null) => [
-  ...validatePriceSides(d.direction, d.entryPrice, d.stopLoss, d.takeProfit == null ? [] : [d.takeProfit]),
+const collectWarnings = (user: CurrentUser, d: TradeDraft, fxWarning: string | null) => [
+  ...validatePriceSides(d.direction, d.entryPrice, d.stopLoss, d.takeProfit == null ? [] : [d.takeProfit], user.language),
   ...(fxWarning ? [fxWarning] : []),
 ];
 
-export async function createTrade(ctx: TradeContext, user: CurrentUser, input: CreateTradeInput) {
+/** `externalId` marks a trade imported from a platform (see services/mt5-import.ts). */
+export async function createTrade(ctx: TradeContext, user: CurrentUser, input: CreateTradeInput, { externalId }: { externalId?: string } = {}) {
   const { db } = ctx;
   const { emotionKeys, ...draft } = input;
   const instrument = await loadInstrument(db, draft.instrumentId);
@@ -155,20 +154,20 @@ export async function createTrade(ctx: TradeContext, user: CurrentUser, input: C
   const id = await db.transaction(async (tx) => {
     const [row] = await tx
       .insert(trades)
-      .values({ ...toRow(draft), ...columns, ...source, userId: user.id })
+      .values({ ...toRow(draft), ...columns, ...source, userId: user.id, externalId: externalId ?? null })
       .returning({ id: trades.id });
     if (emotionKeys.length > 0) {
       await tx.insert(tradeEmotions).values(emotionKeys.map((emotionKey) => ({ tradeId: row!.id, emotionKey })));
     }
     return row!.id;
   });
-  return { trade: await getTrade(db, user, id), warnings: collectWarnings(draft, warning) };
+  return { trade: await getTrade(db, user, id), warnings: collectWarnings(user, draft, warning), fxWarning: warning };
 }
 
 export async function updateTrade(ctx: TradeContext, user: CurrentUser, id: string, patch: Partial<CreateTradeInput>) {
   const { db } = ctx;
   const [existing] = await db.select().from(trades).where(and(eq(trades.id, id), eq(trades.userId, user.id)));
-  if (!existing) throw notFound('Nie znaleziono transakcji');
+  if (!existing) throw notFound('tradeNotFound');
 
   const { emotionKeys, ...fields } = patch;
   const draft: TradeDraft = {
@@ -214,7 +213,7 @@ export async function updateTrade(ctx: TradeContext, user: CurrentUser, id: stri
       }
     }
   });
-  return { trade: await getTrade(db, user, id), warnings: collectWarnings(draft, warning) };
+  return { trade: await getTrade(db, user, id), warnings: collectWarnings(user, draft, warning) };
 }
 
 /**
@@ -278,7 +277,7 @@ export type TradeView = Awaited<ReturnType<typeof decorate>>[number];
 
 export async function getTrade(db: DB, user: CurrentUser, id: string): Promise<TradeView> {
   const rows = await selectNumbered(db, user.id).where(eq(trades.id, id));
-  if (rows.length === 0) throw notFound('Nie znaleziono transakcji');
+  if (rows.length === 0) throw notFound('tradeNotFound');
   return (await decorate(db, user, rows))[0]!;
 }
 
@@ -319,14 +318,14 @@ export async function deleteTrade(db: DB, user: CurrentUser, id: string) {
     .delete(trades)
     .where(and(eq(trades.id, id), eq(trades.userId, user.id)))
     .returning({ id: trades.id });
-  if (!deleted) throw notFound('Nie znaleziono transakcji');
+  if (!deleted) throw notFound('tradeNotFound');
 }
 
 // --- Trading monitor ---------------------------------------------------------
 
 /**
  * Today's discipline check: trades taken against the daily limit, and losing trades in a row
- * (counted from the most recent closed trade of the day). `alert` fires at LOSS_STREAK_ALERT.
+ * (counted from the most recent closed trade of the day). `alert` fires at the user's `lossStreakAlert`.
  */
 export async function tradingMonitor(db: DB, user: CurrentUser) {
   const today = toLocalDate(new Date(), user.timezone);
@@ -335,21 +334,116 @@ export async function tradingMonitor(db: DB, user: CurrentUser) {
     .filter((t) => t.exitPrice != null)
     .sort((a, b) => (a.closedAt ?? a.openedAt).getTime() - (b.closedAt ?? b.openedAt).getTime());
 
-  let lossStreak = 0;
-  for (let i = closed.length - 1; i >= 0 && (closed[i]!.resultUnits ?? 0) < 0; i--) lossStreak++;
-  const streakTrades = closed.slice(closed.length - lossStreak);
+  const isLoss = (t: (typeof closed)[number]) => (t.resultUnits ?? 0) < 0;
+  let streak = 0;
+  for (let i = closed.length - 1; i >= 0 && isLoss(closed[i]!); i--) streak++;
+  // In a row: the losses since the last non-losing trade. Day: every losing trade today.
+  const counted = user.lossAlertMode === 'day' ? closed.filter(isLoss) : closed.slice(closed.length - streak);
 
   return {
     date: today,
     tradesToday: rows.length,
     maxTradesPerDay: user.maxTradesPerDay,
     overLimit: user.maxTradesPerDay != null && rows.length > user.maxTradesPerDay,
-    lossStreak,
-    lossStreakAlert: LOSS_STREAK_ALERT,
-    alert: lossStreak >= LOSS_STREAK_ALERT,
-    /** Identifies the streak, so a dismissed alert comes back after the next loss. */
-    streakKey: streakTrades.map((t) => t.id).join(','),
-    streakLabels: streakTrades.map((t) => formatDayLabel(t.dayIndex, t.tradeDate, t.direction)),
+    lossMode: user.lossAlertMode,
+    /** Losses counted for the warning (in a row or all of the day, per `lossMode`). */
+    lossCount: counted.length,
+    lossLimit: user.lossStreakAlert,
+    alert: counted.length >= user.lossStreakAlert,
+    /** Identifies the counted losses, so a dismissed alert comes back after the next loss. */
+    alertKey: `${user.lossAlertMode}:${counted.map((t) => t.id).join(',')}`,
+    lossLabels: counted.map((t) => formatDayLabel(t.dayIndex, t.tradeDate, t.direction)),
+  };
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+// --- Account ---------------------------------------------------------------
+
+/**
+ * The account as of now: starting size plus every closed trade since `accountStartDate`
+ * (all filters ignored). Drawdown is measured from the highest balance reached. For prop
+ * accounts the maximum drawdown is static: the balance may not fall below
+ * size × (1 − maxDrawdownPct), as most CFD prop firms define it.
+ */
+export async function accountOverview(db: DB, user: CurrentUser) {
+  if (!user.accountType || user.accountSize == null) return null;
+  const size = user.accountSize;
+  const rows = await db
+    .select({ pnl: trades.pnlAccount })
+    .from(trades)
+    .where(
+      and(
+        eq(trades.userId, user.id),
+        isNotNull(trades.exitPrice),
+        isNotNull(trades.pnlAccount),
+        eq(trades.accountCurrency, user.accountCurrency),
+        user.accountStartDate ? gte(trades.tradeDate, user.accountStartDate) : undefined,
+      ),
+    )
+    .orderBy(asc(sql`coalesce(${trades.closedAt}, ${trades.openedAt})`));
+
+  let balance = size;
+  let peak = size;
+  let maxDrawdown = 0;
+  let maxDrawdownPct = 0;
+  for (const { pnl } of rows) {
+    balance += pnl!;
+    peak = Math.max(peak, balance);
+    if (peak - balance > maxDrawdown) {
+      maxDrawdown = peak - balance;
+      maxDrawdownPct = (maxDrawdown / peak) * 100;
+    }
+  }
+
+  const prop =
+    user.accountType === 'prop' && user.maxDrawdownPct != null
+      ? (() => {
+          const limit = (size * user.maxDrawdownPct) / 100;
+          const used = Math.max(0, size - balance);
+          const pnl = balance - size;
+          const target =
+            user.profitTargetPct != null
+              ? (() => {
+                  const amount = (size * user.profitTargetPct) / 100;
+                  return {
+                    pct: user.profitTargetPct,
+                    amount: round2(amount),
+                    /** Balance at which the target is reached. */
+                    balance: round2(size + amount),
+                    progressPct: round2(Math.min(100, Math.max(0, (pnl / amount) * 100))),
+                    remaining: round2(Math.max(0, amount - pnl)),
+                    reached: pnl >= amount,
+                  };
+                })()
+              : null;
+          return {
+            target,
+            maxDrawdownPct: user.maxDrawdownPct,
+            limit: round2(limit),
+            /** Lowest allowed balance. */
+            floor: round2(size - limit),
+            used: round2(used),
+            remaining: round2(Math.max(0, balance - (size - limit))),
+            usedPct: round2(Math.min(100, (used / limit) * 100)),
+            breached: balance <= size - limit,
+          };
+        })()
+      : null;
+
+  return {
+    type: user.accountType,
+    size,
+    startDate: user.accountStartDate,
+    trades: rows.length,
+    balance: round2(balance),
+    pnl: round2(balance - size),
+    returnPct: round2(((balance - size) / size) * 100),
+    currentDrawdown: round2(peak - balance),
+    currentDrawdownPct: round2(((peak - balance) / peak) * 100),
+    maxDrawdown: round2(maxDrawdown),
+    maxDrawdownPct: round2(maxDrawdownPct),
+    prop,
   };
 }
 
@@ -365,7 +459,6 @@ interface Bucket {
 }
 
 const emptyBucket = (): Bucket => ({ trades: 0, wins: 0, losses: 0, pnl: 0, rSum: 0, rCount: 0 });
-const round2 = (n: number) => Math.round(n * 100) / 100;
 
 const summarize = (b: Bucket) => ({
   trades: b.trades,
@@ -397,9 +490,12 @@ export async function tradeStats(db: DB, user: CurrentUser, filters: Pick<TradeF
   let plannedSum = 0;
   let plannedCount = 0;
   let missingFx = 0;
-  let spreadCost = 0;
   let streak = 0;
   let maxLossStreak = 0;
+  // Peak-to-trough fall of the cumulative result within the period, trade by trade.
+  let running = 0;
+  let runningPeak = 0;
+  let periodDrawdown = 0;
 
   const addTo = (b: Bucket, win: boolean, loss: boolean, pnl: number, r: number | null) => {
     b.trades++;
@@ -425,7 +521,6 @@ export async function tradeStats(db: DB, user: CurrentUser, filters: Pick<TradeF
     const pnl = inCurrency ? t.pnlAccount! : 0;
 
     addTo(all, win, loss, pnl, t.rMultiple);
-    if (inCurrency && t.spreadCost != null) spreadCost += t.spreadCost;
     if (pnl > 0) grossWin += pnl;
     if (pnl < 0) grossLoss -= pnl;
     if (t.plannedRR != null) {
@@ -434,11 +529,18 @@ export async function tradeStats(db: DB, user: CurrentUser, filters: Pick<TradeF
     }
     streak = loss ? streak + 1 : 0;
     maxLossStreak = Math.max(maxLossStreak, streak);
+    running += pnl;
+    runningPeak = Math.max(runningPeak, running);
+    periodDrawdown = Math.max(periodDrawdown, runningPeak - running);
 
     byDay.set(t.tradeDate, (byDay.get(t.tradeDate) ?? 0) + pnl);
     add(byInstrument, t.instrumentSymbol, win, loss, pnl, t.rMultiple);
     const educator = educatorRows.find((e) => e.id === t.educatorId)?.name;
-    add(bySource, t.source === 'own' ? 'Własna analiza' : `Edukator: ${educator ?? 'nieznany'}`, win, loss, pnl, t.rMultiple);
+    const sourceLabel =
+      t.source === 'own'
+        ? tr(user.language, 'statsOwnAnalysis')
+        : tr(user.language, 'statsEducator', { name: educator ?? tr(user.language, 'statsUnknownEducator') });
+    add(bySource, sourceLabel, win, loss, pnl, t.rMultiple);
     add(byDayIndex, t.dayIndex >= 4 ? '4+' : String(t.dayIndex), win, loss, pnl, t.rMultiple);
     for (const e of emotionRows.filter((e) => e.tradeId === t.id)) add(byEmotion, e.emotionKey, win, loss, pnl, t.rMultiple);
   }
@@ -448,11 +550,13 @@ export async function tradeStats(db: DB, user: CurrentUser, filters: Pick<TradeF
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, pnl]) => ({ date, pnl: round2(pnl), cumulative: round2((cumulative += pnl)) }));
 
-  const emotionLabel = (key: string) => DEFAULT_EMOTIONS.find((e) => e.key === key)?.label ?? key;
   const entries = (map: Map<string, Bucket>) => [...map.entries()].map(([key, b]) => ({ key, ...summarize(b) }));
+  const account = await accountOverview(db, user);
 
   return {
     currency: user.accountCurrency,
+    /** Balance, return and drawdown against the account; null without an account profile. */
+    account,
     summary: {
       ...summarize(all),
       avgPlannedRR: plannedCount ? round2(plannedSum / plannedCount) : null,
@@ -460,15 +564,19 @@ export async function tradeStats(db: DB, user: CurrentUser, filters: Pick<TradeF
       avgLoss: all.losses ? round2(-grossLoss / all.losses) : null,
       profitFactor: grossLoss ? round2(grossWin / grossLoss) : null,
       maxLossStreak,
-      /** Informational: already included in fill prices, not deducted from pnl. */
-      spreadCost: round2(spreadCost),
+      /** Largest fall from a peak of the cumulative result in the period (money, positive). */
+      maxDrawdown: round2(periodDrawdown),
+      /** The same against the account size, when there is an account profile. */
+      maxDrawdownPct: account ? round2((periodDrawdown / account.size) * 100) : null,
+      /** Period result as % of the account size. */
+      returnPct: account ? round2((all.pnl / account.size) * 100) : null,
       /** Closed trades left out of money totals (no FX rate, or another account currency). */
       tradesWithoutPnl: missingFx,
     },
     equityCurve,
     byInstrument: entries(byInstrument),
     bySource: entries(bySource),
-    byEmotion: entries(byEmotion).map((e) => ({ ...e, label: emotionLabel(e.key) })),
+    byEmotion: entries(byEmotion).map((e) => ({ ...e, label: emotionLabel(user.language, e.key) })),
     /** Results of the 1st, 2nd, 3rd and later trades of a day, to spot overtrading. */
     byDayIndex: entries(byDayIndex).sort((a, b) => a.key.localeCompare(b.key)),
   };

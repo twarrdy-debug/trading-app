@@ -4,6 +4,7 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { dailySpreads, instruments } from '../db/schema.ts';
 import { badRequest } from '../errors.ts';
+import { t } from '../i18n.ts';
 import { getFxRate } from '../services/fx.ts';
 
 const tags = ['spready i kursy'];
@@ -11,7 +12,7 @@ const tags = ['spready i kursy'];
 export const spreadRoutes: FastifyPluginAsyncZod = async (app) => {
   const loadInstrument = async (id: string) => {
     const [row] = await app.db.select({ id: instruments.id, market: instruments.market }).from(instruments).where(eq(instruments.id, id));
-    if (!row) throw badRequest('Nieznany instrument');
+    if (!row) throw badRequest('unknownInstrument');
     return row;
   };
 
@@ -63,7 +64,7 @@ export const spreadRoutes: FastifyPluginAsyncZod = async (app) => {
     async (req, reply) => {
       const date = req.query.date ?? new Date().toISOString().slice(0, 10);
       const rate = await getFxRate(app.db, app.fx, req.query.base, req.query.quote, date);
-      if (!rate) return reply.status(503).send({ error: 'Kurs chwilowo niedostępny' });
+      if (!rate) return reply.status(503).send({ error: t(req.user.language, 'rateUnavailable') });
       return { base: req.query.base, quote: req.query.quote, date, ...rate };
     },
   );

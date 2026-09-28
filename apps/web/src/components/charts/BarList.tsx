@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useT } from '../../i18n/index.tsx';
 
 export interface BarRow {
   key: string;
@@ -16,7 +17,8 @@ export interface BarRow {
  * Values are also printed as text, so the list doubles as the table view.
  */
 export function BarList({ rows, polarity = false, max }: { rows: BarRow[]; polarity?: boolean; max?: number }) {
-  if (rows.length === 0) return <p className="m-0 px-5 py-6 text-sm text-dim">Brak danych w tym okresie.</p>;
+  const t = useT().chart;
+  if (rows.length === 0) return <p className="m-0 px-5 py-6 text-sm text-dim">{t.noData}</p>;
 
   const extent = max ?? Math.max(1e-9, ...rows.map((r) => Math.abs(r.value ?? 0)));
   return (
@@ -31,10 +33,10 @@ export function BarList({ rows, polarity = false, max }: { rows: BarRow[]; polar
               <span className="truncate text-sm font-semibold">{row.label}</span>
               {row.detail && <span className="font-mono text-[11px] text-dim">{row.detail}</span>}
             </div>
-            <div className={`relative h-3 ${polarity ? '' : 'bg-grid'}`}>
+            <div className={`relative h-2.5 ${polarity ? '' : 'rounded-full bg-grid'}`}>
               {polarity && <span aria-hidden className="absolute inset-y-[-4px] left-1/2 w-px bg-line" />}
               <span
-                className={`absolute inset-y-0 ${color} ${polarity && value < 0 ? 'rounded-l' : 'rounded-r'}`}
+                className={`absolute inset-y-0 ${color} ${polarity ? (value < 0 ? 'rounded-l-full' : 'rounded-r-full') : 'rounded-full'}`}
                 style={
                   polarity
                     ? value >= 0

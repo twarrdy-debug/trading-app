@@ -1,5 +1,5 @@
 import { DEFAULT_EMOTIONS, ROLE_KEYS, ROLE_NAMES, type CreateInstrumentInput } from '@trading/shared';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { DB } from './client.ts';
 import { emotions, instrumentCurrencies, instruments, roles, users } from './schema.ts';
 
@@ -35,7 +35,7 @@ const future = (symbol: string, name: string, assetClass: 'index' | 'metal', uni
 });
 
 export const DEFAULT_INSTRUMENTS: CreateInstrumentInput[] = [
-  cfd('XAUUSD', 'Złoto / USD', { assetClass: 'metal', measureUnit: 'pip', unitSize: 0.1, unitValue: 10 }),
+  cfd('XAUUSD', 'Gold / USD', { assetClass: 'metal', measureUnit: 'pip', unitSize: 0.1, unitValue: 10 }),
   cfd('US100', 'Nasdaq 100 CFD', {}),
   cfd('US30', 'Dow Jones 30 CFD', {}),
   cfd('US500', 'S&P 500 CFD', {}),
@@ -45,9 +45,15 @@ export const DEFAULT_INSTRUMENTS: CreateInstrumentInput[] = [
   future('MES1', 'S&P 500 Micro', 'index', 0.25, 1.25),
   future('YM1', 'Dow Jones E-mini', 'index', 1, 5),
   future('MYM1', 'Dow Jones Micro', 'index', 1, 0.5),
-  future('GC1', 'Złoto (COMEX)', 'metal', 0.1, 10),
-  future('MGC1', 'Złoto Micro (COMEX)', 'metal', 0.1, 1),
+  future('GC1', 'Gold (COMEX)', 'metal', 0.1, 10),
+  future('MGC1', 'Gold Micro (COMEX)', 'metal', 0.1, 1),
 ];
+
+const RENAMED_INSTRUMENTS = [
+  ['Złoto / USD', 'Gold / USD'],
+  ['Złoto (COMEX)', 'Gold (COMEX)'],
+  ['Złoto Micro (COMEX)', 'Gold Micro (COMEX)'],
+] as const;
 
 /** Idempotent: safe to run on every start. */
 export async function seed(db: DB, adminEmail: string) {
@@ -73,6 +79,11 @@ export async function seed(db: DB, adminEmail: string) {
     if (row && currencies.length > 0) {
       await db.insert(instrumentCurrencies).values(currencies.map((currency) => ({ instrumentId: row.id, currency })));
     }
+  }
+
+  // Instrument names are shown in every language, so the seeded ones are in English.
+  for (const [from, to] of RENAMED_INSTRUMENTS) {
+    await db.update(instruments).set({ name: to }).where(eq(instruments.name, from));
   }
 
   await db

@@ -1,16 +1,20 @@
 import type { PublicUser } from '@trading/api/types';
-import { AUTO_FX_CURRENCIES, type Theme } from '@trading/shared';
+import { AUTO_FX_CURRENCIES, LANGUAGES, type AccountType, type Language, type Theme } from '@trading/shared';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ApiError } from '../../api/client.ts';
 import { useUpdateSettings } from '../../api/hooks.ts';
 import { Button } from '../../components/ui/Button.tsx';
-import { Field, Input, Segmented, Select } from '../../components/ui/Field.tsx';
-import { Brackets } from '../../components/ui/Panel.tsx';
+import { Field, Input, Segmented, toggleClass } from '../../components/ui/Field.tsx';
+import { Select } from '../../components/ui/Select.tsx';
+import { useT } from '../../i18n/index.tsx';
+import { parseDecimal, toInputNumber } from '../../lib/format.ts';
 import { ACCENT_OPTIONS, DEFAULT_ACCENT } from '../../lib/theme.ts';
 
 const TIMEZONES = ['Europe/Warsaw', 'Europe/London', 'America/New_York', 'America/Chicago', 'Asia/Tokyo', 'UTC'];
 
 export function SettingsDialog({ user, onClose }: { user: PublicUser; onClose: () => void }) {
+  const all = useT();
+  const t = all.settings;
   const ref = useRef<HTMLDialogElement>(null);
   const update = useUpdateSettings();
   const s = user.settings;
@@ -18,8 +22,16 @@ export function SettingsDialog({ user, onClose }: { user: PublicUser; onClose: (
   const [currency, setCurrency] = useState(s.accountCurrency);
   const [timezone, setTimezone] = useState(s.timezone);
   const [limit, setLimit] = useState(s.maxTradesPerDay?.toString() ?? '');
+  const [lossAlert, setLossAlert] = useState(String(s.lossStreakAlert));
+  const [lossDaily, setLossDaily] = useState(s.lossAlertMode === 'day');
   const [theme, setTheme] = useState<Theme>(s.theme);
+  const [language, setLanguage] = useState<Language>(s.language);
   const [accent, setAccent] = useState(s.accentColor ?? DEFAULT_ACCENT);
+  const [accountType, setAccountType] = useState<AccountType | 'none'>(s.account.type ?? 'none');
+  const [accountSize, setAccountSize] = useState(toInputNumber(s.account.size));
+  const [maxDrawdown, setMaxDrawdown] = useState(toInputNumber(s.account.maxDrawdownPct));
+  const [profitTarget, setProfitTarget] = useState(toInputNumber(s.account.profitTargetPct));
+  const [accountStart, setAccountStart] = useState(s.account.startDate ?? '');
 
   useEffect(() => ref.current?.showModal(), []);
 
@@ -33,8 +45,21 @@ export function SettingsDialog({ user, onClose }: { user: PublicUser; onClose: (
         accountCurrency: currency,
         timezone,
         maxTradesPerDay: limit === '' ? null : Number(limit),
+        lossStreakAlert: Number(lossAlert),
+        lossAlertMode: lossDaily ? 'day' : 'streak',
         theme,
+        language,
         accentColor: accent,
+        // Switching the profile off keeps the numbers, so it can be switched back on.
+        ...(accountType === 'none'
+          ? { accountType: null }
+          : {
+              accountType,
+              accountSize: parseDecimal(accountSize) ?? null,
+              maxDrawdownPct: accountType === 'prop' ? (parseDecimal(maxDrawdown) ?? null) : undefined,
+              profitTargetPct: accountType === 'prop' ? (parseDecimal(profitTarget) ?? null) : undefined,
+              accountStartDate: accountStart || null,
+            }),
       },
       { onSuccess: onClose },
     );
@@ -45,94 +70,148 @@ export function SettingsDialog({ user, onClose }: { user: PublicUser; onClose: (
       ref={ref}
       onClose={onClose}
       aria-labelledby="settings-title"
-      className="m-auto w-[min(560px,calc(100vw-32px))] overflow-visible border border-line bg-panel p-0 text-ink backdrop:bg-black/60"
+      className="m-auto max-h-[calc(100dvh-32px)] w-[min(560px,calc(100vw-32px))] overflow-y-auto rounded-(--radius) border-0 bg-panel p-0 text-ink shadow-(--shadow-pop) backdrop:bg-black/40 backdrop:backdrop-blur-sm"
     >
-      <Brackets />
       <form onSubmit={submit} className="flex flex-col gap-5 p-6">
-        <h2 id="settings-title" className="m-0 text-[13px] font-semibold tracking-[0.16em] uppercase">
-          Ustawienia
+        <h2 id="settings-title" className="m-0 text-lg font-bold">
+          {t.title}
         </h2>
 
-        <Field label="Nazwa wyświetlana">
+        <Field label={t.displayName}>
           <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} required maxLength={80} />
         </Field>
 
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="Waluta konta" hint={autoRate ? 'kurs automatyczny' : 'kurs ręczny'}>
-            <Input
-              value={currency}
-              onChange={(e) => setCurrency(e.target.value.toUpperCase())}
-              list="currencies"
-              maxLength={3}
-              pattern="[A-Za-z]{3}"
-              required
-            />
-            <datalist id="currencies">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label={t.currency} hint={autoRate ? t.autoRate : t.manualRate}>
+            <Input value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} maxLength={3} pattern="[A-Za-z]{3}" required />
+            <span role="group" aria-label={t.currency} className="flex gap-1">
               {AUTO_FX_CURRENCIES.map((c) => (
-                <option key={c} value={c} />
+                <button
+                  key={c}
+                  type="button"
+                  aria-pressed={currency === c}
+                  onClick={() => setCurrency(c)}
+                  className={`h-7 grow font-mono text-xs ${toggleClass(currency === c)}`}
+                >
+                  {c}
+                </button>
               ))}
-            </datalist>
+            </span>
           </Field>
-          <Field label="Limit transakcji dziennie" hint="puste = brak">
-            <Input type="number" min={1} max={100} value={limit} onChange={(e) => setLimit(e.target.value)} />
+          <Field label={t.timezone} help={t.timezoneHint}>
+            <Select value={timezone} onChange={setTimezone} options={[...new Set([timezone, ...TIMEZONES])].map((tz) => ({ value: tz, label: tz }))} />
           </Field>
         </div>
 
-        <Field label="Strefa czasowa" hint="wyznacza dzień transakcji">
-          <Select value={timezone} onChange={(e) => setTimezone(e.target.value)}>
-            {[...new Set([timezone, ...TIMEZONES])].map((tz) => (
-              <option key={tz} value={tz}>
-                {tz}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label={t.dailyLimit} help={t.emptyNone}>
+            <Input type="number" min={1} max={100} value={limit} onChange={(e) => setLimit(e.target.value)} />
+          </Field>
+          <Field label={t.lossStreakAlert} help={t.lossStreakHint}>
+            <Input type="number" min={1} max={20} step={1} value={lossAlert} onChange={(e) => setLossAlert(e.target.value)} required />
+          </Field>
+        </div>
+
+        <label className="-mt-1 flex cursor-pointer items-start gap-2.5 text-[13px]">
+          <input
+            type="checkbox"
+            checked={lossDaily}
+            onChange={(e) => setLossDaily(e.target.checked)}
+            className="mt-0.5 size-4 shrink-0 cursor-pointer accent-(--accent-ink)"
+          />
+          {t.lossAlertDay}
+        </label>
+
+        <fieldset className="m-0 flex flex-col gap-3 rounded-(--radius-control) border-0 bg-raised p-4">
+          <legend className="float-left mb-1 w-full p-0 text-sm font-bold">{t.account}</legend>
+          <span className="text-xs text-dim">{t.accountOptional}</span>
+          <Segmented
+            label={t.account}
+            value={accountType}
+            onChange={setAccountType}
+            options={[
+              { value: 'none', label: t.accountNone },
+              { value: 'live', label: t.accountLive },
+              { value: 'prop', label: t.accountProp },
+            ]}
+          />
+          {accountType !== 'none' && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label={t.accountSize} hint={currency}>
+                <Input inputMode="decimal" value={accountSize} onChange={(e) => setAccountSize(e.target.value)} placeholder="10000" required />
+              </Field>
+              {accountType === 'prop' && (
+                <Field label={t.maxDrawdown} hint="%" help={t.maxDrawdownHelp}>
+                  <Input inputMode="decimal" value={maxDrawdown} onChange={(e) => setMaxDrawdown(e.target.value)} placeholder="10" required />
+                </Field>
+              )}
+              {accountType === 'prop' && (
+                <Field label={t.profitTarget} hint="%" help={t.profitTargetHelp}>
+                  <Input inputMode="decimal" value={profitTarget} onChange={(e) => setProfitTarget(e.target.value)} placeholder="8" />
+                </Field>
+              )}
+              <Field label={t.startDate} help={t.startDateHelp}>
+                <Input type="date" value={accountStart} onChange={(e) => setAccountStart(e.target.value)} />
+              </Field>
+            </div>
+          )}
+        </fieldset>
 
         <div className="flex flex-col gap-2">
-          <span className="eyebrow">Motyw</span>
+          <span className="eyebrow">{t.language}</span>
           <Segmented
-            label="Motyw"
+            label={t.language}
+            value={language}
+            onChange={setLanguage}
+            options={LANGUAGES.map((value) => ({ value, label: all.languageNames[value] }))}
+          />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <span className="eyebrow">{t.theme}</span>
+          <Segmented
+            label={t.theme}
             value={theme}
             onChange={setTheme}
             options={[
-              { value: 'dark', label: 'Ciemny' },
-              { value: 'light', label: 'Jasny' },
-              { value: 'system', label: 'Systemowy' },
+              { value: 'dark', label: all.nav.dark },
+              { value: 'light', label: all.nav.light },
+              { value: 'system', label: all.nav.system },
             ]}
           />
         </div>
 
         <div className="flex flex-col gap-2">
-          <span className="eyebrow">Kolor wiodący</span>
+          <span className="eyebrow">{t.accent}</span>
           <div className="flex items-center gap-3">
             {ACCENT_OPTIONS.map((color) => (
               <button
                 key={color}
                 type="button"
-                aria-label={`Kolor ${color}`}
+                aria-label={t.color(color)}
                 aria-pressed={color.toLowerCase() === accent.toLowerCase()}
                 onClick={() => setAccent(color)}
-                className="size-6 rotate-45 border border-line p-0"
+                className="size-6 rounded-full border border-black/10 p-0"
                 style={{
                   background: color,
                   boxShadow: color.toLowerCase() === accent.toLowerCase() ? `0 0 0 2px var(--panel), 0 0 0 4px ${color}` : 'none',
                 }}
               />
             ))}
-            <label className="ml-2 flex items-center gap-2 font-mono text-xs text-dim">
-              własny
+            <label className="ml-2 flex items-center gap-2 text-xs text-dim">
+              {t.custom}
               <input
                 type="color"
                 value={accent}
                 onChange={(e) => setAccent(e.target.value.toUpperCase())}
-                className="h-8 w-10 cursor-pointer border border-line bg-transparent p-0.5"
+                className="h-8 w-10 cursor-pointer rounded-lg border border-line bg-transparent p-0.5"
               />
             </label>
           </div>
         </div>
 
         {update.error && (
-          <ul className="m-0 list-none border border-sell p-3 text-sm text-sell">
+          <ul className="m-0 list-none rounded-(--radius-control) bg-sell-soft p-3 text-sm text-sell">
             {(update.error instanceof ApiError ? update.error.lines : [update.error.message]).map((line) => (
               <li key={line}>{line}</li>
             ))}
@@ -140,9 +219,9 @@ export function SettingsDialog({ user, onClose }: { user: PublicUser; onClose: (
         )}
 
         <div className="flex justify-end gap-3">
-          <Button onClick={onClose}>Anuluj</Button>
+          <Button onClick={onClose}>{all.common.cancel}</Button>
           <Button type="submit" variant="primary" disabled={update.isPending}>
-            Zapisz
+            {all.common.save}
           </Button>
         </div>
       </form>

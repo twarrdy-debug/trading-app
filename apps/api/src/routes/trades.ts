@@ -6,6 +6,7 @@ import { pipeline } from 'node:stream/promises';
 import {
   createTradeSchema,
   idParams,
+  mt5ImportFieldsSchema,
   tradeFiltersSchema,
   tradeStatsQuerySchema,
   updateTradeSchema,
@@ -15,6 +16,7 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { trades, tradeScreenshots } from '../db/schema.ts';
 import { badRequest, HttpError, notFound } from '../errors.ts';
+import { importMt5 } from '../services/mt5-import.ts';
 import { createTrade, deleteTrade, getTrade, listTrades, tradeStats, tradingMonitor, updateTrade } from '../services/trades.ts';
 
 const IMAGE_EXTENSIONS: Record<string, string> = {
@@ -40,11 +42,34 @@ export const tradeRoutes: FastifyPluginAsyncZod = async (app) => {
 
   app.get('/trades/monitor', { schema: { tags } }, (req) => tradingMonitor(app.db, req.user));
 
+  /**
+   * Import from an MetaTrader 5 history report (multipart: `file` plus the text fields of
+   * mt5ImportFieldsSchema). Without `commit=true` it only returns the preview.
+   */
+  app.post('/trades/import/mt5', { schema: { tags, consumes: ['multipart/form-data'] } }, async (req) => {
+    const fields: Record<string, string> = {};
+    let bytes: Buffer | null = null;
+    try {
+      for await (const part of req.parts()) {
+        if (part.type === 'file') bytes = await part.toBuffer();
+        else fields[part.fieldname] = String(part.value);
+      }
+    } catch (err) {
+      if ((err as { code?: string }).code === 'FST_REQ_FILE_TOO_LARGE') throw new HttpError(413, 'fileTooLarge');
+      throw err;
+    }
+    if (!bytes) throw badRequest('noFile');
+    const parsed = mt5ImportFieldsSchema.safeParse(fields);
+    if (!parsed.success) throw badRequest('invalidData', {}, parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`));
+    return importMt5(ctx, req.user, new Uint8Array(bytes), parsed.data);
+  });
+
   app.get('/trades/:id', { schema: { tags, params: idParams } }, (req) => getTrade(app.db, req.user, req.params.id));
 
-  app.post('/trades', { schema: { tags, body: createTradeSchema } }, async (req, reply) =>
-    reply.status(201).send(await createTrade(ctx, req.user, req.body)),
-  );
+  app.post('/trades', { schema: { tags, body: createTradeSchema } }, async (req, reply) => {
+    const { fxWarning: _fxWarning, ...result } = await createTrade(ctx, req.user, req.body);
+    return reply.status(201).send(result);
+  });
 
   app.patch('/trades/:id', { schema: { tags, params: idParams, body: updateTradeSchema } }, (req) =>
     updateTrade(ctx, req.user, req.params.id, req.body),
@@ -63,16 +88,16 @@ export const tradeRoutes: FastifyPluginAsyncZod = async (app) => {
     async (req, reply) => {
       await getTrade(app.db, req.user, req.params.id);
       const file = await req.file();
-      if (!file) throw badRequest('Brak pliku');
+      if (!file) throw badRequest('noFile');
       const ext = IMAGE_EXTENSIONS[file.mimetype];
-      if (!ext) throw badRequest('Dozwolone formaty: PNG, JPG, WEBP');
+      if (!ext) throw badRequest('imageFormats');
 
       const storageKey = `${randomUUID()}.${ext}`;
       const target = path.join(app.uploadDir, storageKey);
       await pipeline(file.file, createWriteStream(target));
       if (file.file.truncated) {
         await removeFiles([storageKey]);
-        throw new HttpError(413, 'Plik jest za duży (maks. 10 MB)');
+        throw new HttpError(413, 'fileTooLarge');
       }
 
       const [row] = await app.db
@@ -95,7 +120,7 @@ export const tradeRoutes: FastifyPluginAsyncZod = async (app) => {
         .delete(tradeScreenshots)
         .where(and(eq(tradeScreenshots.id, req.params.screenshotId), inArray(tradeScreenshots.tradeId, owned)))
         .returning({ storageKey: tradeScreenshots.storageKey });
-      if (!deleted) throw notFound('Nie znaleziono zrzutu ekranu');
+      if (!deleted) throw notFound('screenshotNotFound');
       await removeFiles([deleted.storageKey]);
       return reply.status(204).send();
     },
