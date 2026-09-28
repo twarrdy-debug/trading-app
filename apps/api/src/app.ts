@@ -13,13 +13,16 @@ import {
   validatorCompiler,
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
+import { createAuth } from './auth.ts';
 import type { DB } from './db/client.ts';
 import './fastify-context.ts';
 import type { Env } from './env.ts';
 import { HttpError } from './errors.ts';
 import { isMessageKey, t } from './i18n.ts';
 import { currentUserPlugin } from './plugins/current-user.ts';
+import { accountRoutes } from './routes/accounts.ts';
 import { analysisRoutes } from './routes/analysis.ts';
+import { authRoutes } from './routes/auth.ts';
 import { basisRoutes } from './routes/basis.ts';
 import { calendarRoutes } from './routes/calendar.ts';
 import { meRoutes } from './routes/me.ts';
@@ -30,6 +33,7 @@ import { tradeRoutes } from './routes/trades.ts';
 import { liveQuoteProvider, type QuoteProvider } from './services/basis.ts';
 import { forexFactorySource, type CalendarSource } from './services/calendar.ts';
 import { frankfurterProvider, type FxProvider } from './services/fx.ts';
+import { logMailer, type Mailer } from './services/mailer.ts';
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
@@ -39,6 +43,7 @@ export async function buildApp({
   fx = frankfurterProvider,
   quotes = liveQuoteProvider,
   calendar = forexFactorySource,
+  mailer,
   logger = true,
 }: {
   db: DB;
@@ -46,6 +51,8 @@ export async function buildApp({
   fx?: FxProvider;
   quotes?: QuoteProvider;
   calendar?: CalendarSource;
+  /** Defaults to writing e-mails to the log (no provider configured yet). */
+  mailer?: Mailer;
   logger?: boolean;
 }) {
   const app = Fastify({ logger }).withTypeProvider<ZodTypeProvider>();
@@ -60,6 +67,7 @@ export async function buildApp({
   app.decorate('quotes', quotes);
   app.decorate('calendar', calendar);
   app.decorate('uploadDir', uploadDir);
+  app.decorate('auth', createAuth({ db, env, mailer: mailer ?? logMailer((msg) => app.log.info(msg)) }));
 
   app.setErrorHandler((error, req, reply) => {
     // The user is missing when the error happens before it is resolved (e.g. unknown user).
@@ -83,7 +91,7 @@ export async function buildApp({
       .send({ error: status >= 500 ? t(language, 'serverError') : (error as Error).message });
   });
 
-  await app.register(cors, { origin: env.CORS_ORIGIN.split(','), methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] });
+  await app.register(cors, { origin: env.CORS_ORIGIN.split(','), methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], credentials: true });
   await app.register(multipart, { limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 } });
   await app.register(fastifyStatic, { root: uploadDir, prefix: '/files/', index: false });
 
@@ -91,12 +99,15 @@ export async function buildApp({
     openapi: { info: { title: 'Trading App API', version: '0.1.0' } },
     transform: jsonSchemaTransform,
   });
-  await app.register(swaggerUi, { routePrefix: '/docs' });
+  // The API documentation is for development only.
+  if (env.NODE_ENV !== 'production') await app.register(swaggerUi, { routePrefix: '/docs' });
 
   await app.register(currentUserPlugin);
 
   app.get('/health', { schema: { hide: true } }, async () => ({ ok: true }));
+  await app.register(authRoutes);
   await app.register(meRoutes);
+  await app.register(accountRoutes);
   await app.register(referenceRoutes);
   await app.register(tradeRoutes);
   await app.register(spreadRoutes);

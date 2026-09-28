@@ -1,13 +1,13 @@
-import type { Instrument, Trade } from '@trading/api/types';
+import type { AccountSummary, Instrument, Trade } from '@trading/api/types';
 import { DIRECTIONS } from '@trading/shared';
 import type { TradeQuery } from '../../api/hooks.ts';
 import { Button } from '../../components/ui/Button.tsx';
 import { Field, Input } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
-import { formatMoney, formatPrice, formatUnits } from '../../lib/format.ts';
+import { formatMoney, formatNumber, formatPrice, formatUnits } from '../../lib/format.ts';
 
-const COLUMNS = 'grid grid-cols-[190px_104px_100px_minmax(180px,1fr)_110px_120px] gap-3 px-5';
+const COLUMNS = 'grid grid-cols-[156px_104px_80px_minmax(128px,1fr)_60px_90px_90px_100px] gap-3 px-5';
 
 export function TradeFilters({
   value,
@@ -91,10 +91,13 @@ function DirectionMark({ direction }: { direction: Trade['direction'] }) {
 
 export function TradeTable({
   trades,
+  accounts = [],
   selectedId,
   onSelect,
 }: {
   trades: Trade[];
+  /** When given (the "all accounts" view), each row shows its account name. */
+  accounts?: AccountSummary[];
   selectedId: string | null;
   onSelect: (trade: Trade) => void;
 }) {
@@ -106,12 +109,14 @@ export function TradeTable({
 
   return (
     <div className="overflow-x-auto">
-      <div className="min-w-[860px]">
+      <div className="min-w-[940px]">
         <div className={`${COLUMNS} eyebrow bg-raised py-2.5 text-[11px]`} aria-hidden>
           <span>{labels.dayNumber}</span>
           <span>{labels.instrument}</span>
           <span>{labels.direction}</span>
           <span>{labels.entryExit}</span>
+          <span>{labels.risk}</span>
+          <span title={labels.slTitle}>{labels.slMoney}</span>
           <span>{labels.result}</span>
           <span className="text-right">{labels.accountCurrency}</span>
         </div>
@@ -144,10 +149,22 @@ export function TradeTable({
                       </span>
                     )}
                   </span>
-                  <span className="font-sans font-bold">{t.instrument.symbol}</span>
+                  <span className="flex min-w-0 flex-col font-sans">
+                    <span className="font-bold">{t.instrument.symbol}</span>
+                    {accounts.length > 0 && (
+                      <span className="truncate text-[11px] text-dim">{accounts.find((a) => a.id === t.accountId)?.name ?? all.accounts.none}</span>
+                    )}
+                  </span>
                   <DirectionMark direction={t.direction} />
                   <span className="truncate text-dim">
                     {formatPrice(t.entryPrice)} → {t.exitPrice == null ? all.common.open : formatPrice(t.exitPrice)}
+                  </span>
+                  <span className="text-dim">{t.riskPct != null ? `${formatNumber(t.riskPct)}%` : '—'}</span>
+                  <span
+                    className="truncate text-dim"
+                    title={t.riskAccount != null ? labels.riskTitle(`${formatMoney(t.riskAccount, false)} ${t.accountCurrency}`) : undefined}
+                  >
+                    {t.riskAccount != null ? formatMoney(-t.riskAccount) : '—'}
                   </span>
                   <span className={tone}>{formatUnits(t.resultUnits, all.units.short[t.instrument.measureUnit])}</span>
                   <span className={`text-right ${tone}`}>

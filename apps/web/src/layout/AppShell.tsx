@@ -1,5 +1,7 @@
-import { Link, Outlet } from '@tanstack/react-router';
+import { Link, Outlet, useNavigate, useRouter } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
+import { authApi, useResetSession } from '../api/auth.ts';
+import { ApiError } from '../api/client.ts';
 import { useBasis, useMe, useTradingMonitor, useUpdateSettings } from '../api/hooks.ts';
 import { Segmented } from '../components/ui/Field.tsx';
 import { lossAlertMessage } from '../features/journal/MonitorPanel.tsx';
@@ -15,7 +17,7 @@ const NAV = [
   { to: '/kalkulator', label: 'calculator' },
   { to: '/analiza', label: 'analysis' },
   { to: '/kalendarz', label: 'calendar' },
-  { to: '/sygnaly', label: 'signals' },
+  // Signals are hidden from the menu for now; the page stays at /sygnaly.
 ] as const satisfies readonly { to: string; label: keyof Messages['nav'] }[];
 
 const DISMISSED_KEY = 'monitor-dismissed-streak';
@@ -31,16 +33,20 @@ function LossStreakBanner() {
       return null;
     }
   });
-  if (!m?.alert || dismissed === m.alertKey) return null;
+  // Every account that reached the losses threshold; the banner names them.
+  const alerted = m?.groups.filter((g) => g.alert) ?? [];
+  const key = alerted.map((g) => g.alertKey).join('|');
+  if (!m || alerted.length === 0 || dismissed === key) return null;
 
   const dismiss = () => {
-    setDismissed(m.alertKey);
+    setDismissed(key);
     try {
-      localStorage.setItem(DISMISSED_KEY, m.alertKey);
+      localStorage.setItem(DISMISSED_KEY, key);
     } catch {
       // Without storage the banner simply shows again after a reload.
     }
   };
+  const named = alerted.some((g) => g.name != null);
 
   return (
     <div role="alert" className="mx-4 mt-4 flex flex-wrap items-center gap-3 rounded-(--radius) bg-sell px-5 py-3 text-on-side shadow-(--shadow) md:mx-8">
@@ -49,7 +55,9 @@ function LossStreakBanner() {
         <path d="M12 10v5M12 18v.01" />
       </svg>
       <p className="m-0 grow text-sm font-semibold">
-        {lossAlertMessage(t, m.lossMode, m.lossCount)}
+        {alerted
+          .map((g) => `${named ? `${g.name ?? t.accounts.none}: ` : ''}${lossAlertMessage(t, m.lossMode, g.lossCount)}`)
+          .join(' ')}
       </p>
       <button
         type="button"
@@ -81,7 +89,25 @@ function Clock({ timezone }: { timezone: string }) {
 
 export function AppShell() {
   const t = useT();
-  const { data: me } = useMe();
+  const { data: me, error } = useMe();
+  const router = useRouter();
+  const navigate = useNavigate();
+  const resetSession = useResetSession();
+  const signedOut = error instanceof ApiError && error.status === 401;
+
+  // Without a session: to the sign-in page, coming back here afterwards.
+  useEffect(() => {
+    if (!signedOut) return;
+    const { pathname, search } = router.state.location;
+    const next = `${pathname}${search && Object.keys(search).length ? `?${new URLSearchParams(search as Record<string, string>)}` : ''}`;
+    router.history.replace(`/logowanie${next !== '/' ? `?next=${encodeURIComponent(next)}` : ''}`);
+  }, [signedOut, router]);
+
+  const signOut = async () => {
+    await authApi.signOut().catch(() => undefined);
+    await resetSession();
+    await navigate({ to: '/logowanie' });
+  };
   const update = useUpdateSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const basis = useBasis();
@@ -94,6 +120,8 @@ export function AppShell() {
   useEffect(() => {
     if (me) applyTheme(theme, accent);
   }, [me, theme, accent]);
+
+  if (signedOut) return null;
 
   return (
     <div className="flex min-h-full flex-col">
@@ -152,6 +180,19 @@ export function AppShell() {
                   />
                 ))}
               </div>
+              {me.authenticated && (
+                <button
+                  type="button"
+                  onClick={() => void signOut()}
+                  aria-label={t.auth.signOut}
+                  title={t.auth.signOut}
+                  className="flex size-10 items-center justify-center rounded-[11px] text-dim transition hover:bg-chip hover:text-ink"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4" />
+                  </svg>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setSettingsOpen(true)}

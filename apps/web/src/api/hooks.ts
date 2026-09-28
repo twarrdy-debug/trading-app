@@ -1,4 +1,5 @@
 import type {
+  AccountSummary,
   BasisOverview,
   CalendarRefresh,
   CalendarResponse,
@@ -12,9 +13,18 @@ import type {
   TradeList,
   TradeMutation,
   TradeStats,
+  TradingAccount,
   TradingMonitor,
 } from '@trading/api/types';
-import type { BrokerTimezone, CreateTradeInput, ParsedSignal, TradeFilters, UpdateSettingsInput } from '@trading/shared';
+import type {
+  BrokerTimezone,
+  CreateAccountInput,
+  CreateTradeInput,
+  ParsedSignal,
+  TradeFilters,
+  UpdateAccountInput,
+  UpdateSettingsInput,
+} from '@trading/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, qs } from './client.ts';
 
@@ -52,7 +62,7 @@ export const useTrades = (filters: TradeQuery) =>
     placeholderData: (previous) => previous,
   });
 
-export const useTradeStats = (range: { dateFrom?: string; dateTo?: string; instrumentId?: string }) =>
+export const useTradeStats = (range: { dateFrom?: string; dateTo?: string; instrumentId?: string; account?: string }) =>
   useQuery({ queryKey: ['stats', range], queryFn: () => api<TradeStats>(`/trades/stats${qs(range)}`) });
 
 function useInvalidateTrades() {
@@ -60,6 +70,7 @@ function useInvalidateTrades() {
   return () => {
     void client.invalidateQueries({ queryKey: ['trades'] });
     void client.invalidateQueries({ queryKey: ['stats'] });
+    void client.invalidateQueries({ queryKey: ['accounts'] });
   };
 }
 
@@ -198,10 +209,23 @@ export function useRefreshCalendar() {
 export function useMt5Import() {
   const invalidate = useInvalidateTrades();
   return useMutation({
-    mutationFn: ({ file, timezone, symbolMap, commit }: { file: File; timezone: BrokerTimezone; symbolMap: Record<string, string>; commit: boolean }) => {
+    mutationFn: ({
+      file,
+      timezone,
+      symbolMap,
+      commit,
+      accountId,
+    }: {
+      file: File;
+      timezone: BrokerTimezone;
+      symbolMap: Record<string, string>;
+      commit: boolean;
+      accountId?: string;
+    }) => {
       const body = new FormData();
       // Text fields go first: the API reads them before the file.
       body.append('timezone', timezone);
+      if (accountId) body.append('accountId', accountId);
       body.append('symbolMap', JSON.stringify(symbolMap));
       body.append('commit', String(commit));
       body.append('file', file);
@@ -210,5 +234,37 @@ export function useMt5Import() {
     onSuccess: (_result, { commit }) => {
       if (commit) invalidate();
     },
+  });
+}
+
+// --- Trading accounts ---------------------------------------------------------
+
+export const useAccounts = () => useQuery({ queryKey: ['accounts'], queryFn: () => api<AccountSummary[]>('/accounts') });
+
+function useInvalidateAccounts() {
+  const client = useQueryClient();
+  return () => {
+    void client.invalidateQueries({ queryKey: ['accounts'] });
+    void client.invalidateQueries({ queryKey: ['trades'] });
+    void client.invalidateQueries({ queryKey: ['stats'] });
+  };
+}
+
+export function useSaveAccount() {
+  const invalidate = useInvalidateAccounts();
+  return useMutation({
+    mutationFn: ({ id, input }: { id?: string; input: CreateAccountInput | UpdateAccountInput }) =>
+      id
+        ? api<TradingAccount>(`/accounts/${id}`, { method: 'PATCH', json: input })
+        : api<TradingAccount>('/accounts', { method: 'POST', json: input }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useDeleteAccount() {
+  const invalidate = useInvalidateAccounts();
+  return useMutation({
+    mutationFn: (id: string) => api<void>(`/accounts/${id}`, { method: 'DELETE' }),
+    onSuccess: invalidate,
   });
 }

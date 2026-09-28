@@ -1,4 +1,4 @@
-import type { Instrument, Mt5Import, Mt5ImportRow } from '@trading/api/types';
+import type { AccountSummary, Instrument, Mt5Import, Mt5ImportRow } from '@trading/api/types';
 import { BROKER_TIMEZONES, type BrokerTimezone } from '@trading/shared';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.ts';
@@ -36,15 +36,21 @@ const STATUS_TONE: Record<Mt5ImportRow['status'], string> = {
   duplicate: 'bg-chip text-dim',
   unknownSymbol: 'bg-warn-bg text-ink',
   invalidSize: 'bg-sell-soft text-sell',
+  wrongMarket: 'bg-sell-soft text-sell',
 };
 
 export function Mt5ImportDialog({
   instruments,
+  accounts,
+  defaultAccountId,
   timezone: userTimezone,
   onClose,
   onImported,
 }: {
   instruments: Instrument[];
+  accounts: AccountSummary[];
+  /** Account the imported trades go to ('' = none). */
+  defaultAccountId: string;
   timezone: string;
   onClose: () => void;
   onImported: (count: number) => void;
@@ -63,16 +69,17 @@ export function Mt5ImportDialog({
   /** Remounts the file input, so choosing another file starts empty. */
   const [fileInputKey, setFileInputKey] = useState(0);
   const [errors, setErrors] = useState<string[]>([]);
+  const [accountId, setAccountId] = useState(defaultAccountId);
 
   useEffect(() => ref.current?.showModal(), []);
 
-  const request = (commit: boolean, map = symbolMap, zone = timezone) => {
+  const request = (commit: boolean, map = symbolMap, zone = timezone, account = accountId) => {
     if (!file) return;
     setErrors([]);
     // Only assignments for symbols in this report are sent.
     const relevant = Object.fromEntries(Object.entries(map).filter(([, id]) => instruments.some((i) => i.id === id)));
     run.mutate(
-      { file, timezone: zone, symbolMap: relevant, commit },
+      { file, timezone: zone, symbolMap: relevant, commit, accountId: account || undefined },
       {
         onSuccess: (result) => {
           if (commit) {
@@ -150,6 +157,18 @@ export function Mt5ImportDialog({
             />
             <span className="text-xs text-dim">{t.serverTimeHint}</span>
           </Field>
+          {accounts.length > 0 && (
+            <Field label={t.targetAccount}>
+              <Select
+                value={accountId}
+                onChange={(id) => {
+                  setAccountId(id);
+                  if (preview) request(false, symbolMap, timezone, id);
+                }}
+                options={[{ value: '', label: all.accounts.none }, ...accounts.map((a) => ({ value: a.id, label: a.name }))]}
+              />
+            </Field>
+          )}
         </div>
 
         {!preview && (
@@ -176,6 +195,7 @@ export function Mt5ImportDialog({
               {s.duplicate > 0 && <span className="rounded-md bg-chip px-2 py-1 font-semibold text-dim">{t.duplicate(s.duplicate)}</span>}
               {s.unknownSymbol > 0 && <span className="rounded-md bg-warn-bg px-2 py-1 font-semibold">{t.unknown(s.unknownSymbol)}</span>}
               {s.invalidSize > 0 && <span className="rounded-md bg-sell-soft px-2 py-1 font-semibold text-sell">{t.invalid(s.invalidSize)}</span>}
+              {s.wrongMarket > 0 && <span className="rounded-md bg-sell-soft px-2 py-1 font-semibold text-sell">{t.wrongMarket(s.wrongMarket)}</span>}
             </div>
 
             {preview.warnings.length > 0 && (

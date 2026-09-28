@@ -454,23 +454,26 @@ describe('trading monitor', () => {
     }).then((r) => r.json().trade.id as string);
 
   it('alerts after three losing trades in a row today', async () => {
+    // Without accounts, everything is one group of trades without an account.
+    const monitor = async () => (await app.inject({ url: '/trades/monitor' })).json();
     const created = [await trade(40, 3995), await trade(30, 3990)];
-    expect((await app.inject({ url: '/trades/monitor' })).json()).toMatchObject({ lossCount: 2, alert: false });
+    expect((await monitor()).groups).toMatchObject([{ accountId: null, lossCount: 2, alert: false }]);
 
     created.push(await trade(20, 3998));
-    const monitor = (await app.inject({ url: '/trades/monitor' })).json();
-    expect(monitor).toMatchObject({ lossMode: 'streak', lossCount: 3, lossLimit: 3, alert: true, tradesToday: 3, overLimit: true });
-    expect(monitor.lossLabels).toHaveLength(3);
+    const alerted = await monitor();
+    expect(alerted).toMatchObject({ lossMode: 'streak', lossLimit: 3, alert: true });
+    expect(alerted.groups[0]).toMatchObject({ lossCount: 3, alert: true, tradesToday: 3, overLimit: true });
+    expect(alerted.groups[0].lossLabels).toHaveLength(3);
 
     // A win resets the streak.
     created.push(await trade(10, 4010));
-    expect((await app.inject({ url: '/trades/monitor' })).json()).toMatchObject({ lossCount: 0, alert: false });
+    expect(await monitor()).toMatchObject({ alert: false, groups: [{ lossCount: 0 }] });
 
     // Counting every loss of the day, the win no longer resets the count.
     await app.inject({ method: 'PATCH', url: '/me', payload: { lossAlertMode: 'day' } });
-    const daily = (await app.inject({ url: '/trades/monitor' })).json();
-    expect(daily).toMatchObject({ lossMode: 'day', lossCount: 3, alert: true });
-    expect(daily.alertKey).toMatch(/^day:/);
+    const daily = await monitor();
+    expect(daily).toMatchObject({ lossMode: 'day', alert: true, groups: [{ lossCount: 3, alert: true }] });
+    expect(daily.groups[0].alertKey).toMatch(/^day:none:/);
     await app.inject({ method: 'PATCH', url: '/me', payload: { lossAlertMode: 'streak' } });
     for (const id of created) await app.inject({ method: 'DELETE', url: `/trades/${id}` });
   });
@@ -479,7 +482,7 @@ describe('trading monitor', () => {
     const me = (await app.inject({ method: 'PATCH', url: '/me', payload: { lossStreakAlert: 2 } })).json();
     expect(me.settings.lossStreakAlert).toBe(2);
     const created = [await trade(40, 3995), await trade(30, 3990)];
-    expect((await app.inject({ url: '/trades/monitor' })).json()).toMatchObject({ lossCount: 2, lossLimit: 2, alert: true });
+    expect((await app.inject({ url: '/trades/monitor' })).json()).toMatchObject({ lossLimit: 2, alert: true, groups: [{ lossCount: 2 }] });
     for (const id of created) await app.inject({ method: 'DELETE', url: `/trades/${id}` });
 
     const tooHigh = await app.inject({ method: 'PATCH', url: '/me', payload: { lossStreakAlert: 50 } });
@@ -714,7 +717,8 @@ describe('MT5 import', () => {
     expect((await app.inject({ url: '/trades', headers: trader })).json().total).toBe(3);
   });
 
-  it('reads the Open XML (.xlsx) report', async () => {
+  /** A one-position Open XML report (account 99887766, XAUUSD sell). */
+  const xlsxReport = () => {
     const shared = ['Account:', '99887766 (USD, Broker, real)', 'XAUUSD', 'sell'];
     const cell = (ref: string, value: string | number) =>
       typeof value === 'number' ? `<c r="${ref}"><v>${value}</v></c>` : `<c r="${ref}" t="s"><v>${shared.indexOf(value)}</v></c>`;
@@ -724,11 +728,28 @@ describe('MT5 import', () => {
       <row r="2">${inline('A2', '2026.09.24 09:00:00')}<c r="B2"><v>777</v></c>${cell('C2', 'XAUUSD')}${cell('D2', 'sell')}${cell('E2', 0.2)}${cell('F2', 4400)}<c r="G2"/><c r="H2"/>${inline('I2', '2026.09.24 10:00:00')}${cell('J2', 4390)}${cell('K2', 0)}${cell('L2', 0)}${cell('M2', 200)}</row>
     </sheetData></worksheet>`;
     const sst = `<?xml version="1.0"?><sst>${shared.map((s) => `<si><t>${s}</t></si>`).join('')}</sst>`;
-    const xlsx = Buffer.from(zipSync({ 'xl/worksheets/sheet1.xml': strToU8(sheet), 'xl/sharedStrings.xml': strToU8(sst) }));
+    return Buffer.from(zipSync({ 'xl/worksheets/sheet1.xml': strToU8(sheet), 'xl/sharedStrings.xml': strToU8(sst) }));
+  };
 
+  it('reads the Open XML (.xlsx) report', async () => {
+    const xlsx = xlsxReport();
     const preview = (await importFile({ timezone: 'UTC' }, xlsx, 'ReportHistory.xlsx')).json();
     expect(preview).toMatchObject({ account: '99887766', summary: { total: 1, ready: 1 } });
     expect(preview.positions[0]).toMatchObject({ direction: 'short', volume: 0.2, openedAt: '2026-09-24T09:00:00.000Z', resultUnits: 100 });
+  });
+
+  it('assigns imported trades to an account and flags other markets', async () => {
+    const futures = (
+      await app.inject({
+        method: 'POST',
+        url: '/accounts',
+        payload: { name: 'Apex', type: 'prop', market: 'futures', size: 50_000, maxDrawdownPct: 5 },
+        headers: trader,
+      })
+    ).json();
+    const preview = (await importFile({ accountId: futures.id, timezone: 'UTC' }, xlsxReport(), 'ReportHistory.xlsx')).json();
+    expect(preview.positions[0]).toMatchObject({ instrumentSymbol: 'XAUUSD', status: 'wrongMarket' });
+    expect(preview.summary).toMatchObject({ ready: 0, wrongMarket: 1 });
   });
 
   it('rejects files that are not MT5 reports', async () => {
@@ -744,69 +765,274 @@ describe('MT5 import', () => {
   });
 });
 
-describe('account profile', () => {
+describe('trading accounts', () => {
   let trader: Record<string, string>;
-  const patch = (payload: object) => app.inject({ method: 'PATCH', url: '/me', payload, headers: trader });
-  const stats = async () => (await app.inject({ url: '/trades/stats', headers: trader })).json();
-  // XAUUSD: 1 lot, 1 pip (0.1) = 10 USD, so 0.1 lot moves 1 USD per 0.1.
-  const trade = (day: string, exitPrice: number) =>
-    post(
-      '/trades',
-      { instrumentId: ids.XAUUSD, direction: 'long', openedAt: `${day}T08:00:00Z`, closedAt: `${day}T09:00:00Z`, entryPrice: 4000, exitPrice, positionSize: 1 },
-      trader,
-    );
-
-  beforeAll(async () => {
-    const user = (await post('/educators', { displayName: 'Prop trader' })).json();
-    trader = { 'x-user-id': user.id };
-    await trade('2026-09-01', 4005); // +500
-    await trade('2026-09-02', 3997); // −300
-    await trade('2026-09-03', 3996); // −400
-  });
-
-  it('is optional: no account figures without a profile', async () => {
-    const s = await stats();
-    expect(s.account).toBeNull();
-    expect(s.summary).toMatchObject({ pnl: -200, maxDrawdown: 700, returnPct: null, maxDrawdownPct: null });
-  });
-
-  it('requires the size, and the drawdown for prop accounts', async () => {
-    expect((await patch({ accountType: 'live' })).json().error).toBe('Podaj wielkość konta');
-    expect((await patch({ accountType: 'prop', accountSize: 10_000 })).statusCode).toBe(400);
-  });
-
-  it('measures a prop account against its static maximum drawdown', async () => {
-    const me = (await patch({ accountType: 'prop', accountSize: 10_000, maxDrawdownPct: 10 })).json();
-    expect(me.settings.account).toEqual({ type: 'prop', size: 10_000, maxDrawdownPct: 10, profitTargetPct: null, startDate: null });
-
-    const s = await stats();
-    expect(s.summary).toMatchObject({ returnPct: -2, maxDrawdown: 700, maxDrawdownPct: 7 });
-    expect(s.account).toMatchObject({
-      balance: 9800,
-      pnl: -200,
-      returnPct: -2,
-      currentDrawdown: 700,
-      maxDrawdown: 700,
-      trades: 3,
-      prop: { limit: 1000, floor: 9000, used: 200, remaining: 800, usedPct: 20, breached: false, target: null },
+  let prop: { id: string };
+  let live: { id: string };
+  const as = (method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, payload?: object) =>
+    app.inject({ method, url, payload, headers: trader });
+  const stats = async (query = '') => (await as('GET', `/trades/stats${query}`)).json();
+  // XAUUSD: 1 lot, 1 pip (0.1) = 10 USD.
+  const gold = (day: string, exitPrice: number | null, extra: object = {}) =>
+    as('POST', '/trades', {
+      instrumentId: ids.XAUUSD,
+      direction: 'long',
+      openedAt: `${day}T08:00:00Z`,
+      closedAt: exitPrice == null ? null : `${day}T09:00:00Z`,
+      entryPrice: 4000,
+      exitPrice,
+      positionSize: 1,
+      ...extra,
     });
 
-    await patch({ profitTargetPct: 8 });
-    expect((await stats()).account.prop.target).toEqual({ pct: 8, amount: 800, balance: 10_800, progressPct: 0, remaining: 1000, reached: false });
+  beforeAll(async () => {
+    const user = (await post('/educators', { displayName: 'Account trader' })).json();
+    trader = { 'x-user-id': user.id };
   });
 
-  it('counts only trades since the account start and switches off again', async () => {
-    const s = (await patch({ accountStartDate: '2026-09-02' }), await stats());
-    expect(s.account).toMatchObject({ balance: 9300, trades: 2, prop: { used: 700, remaining: 300, usedPct: 70 } });
-    // From the first day again, with a big win on top: +500 −300 −400 +1200.
-    await patch({ accountStartDate: '2026-09-01', profitTargetPct: 4 });
-    await trade('2026-09-04', 4012); // +1200 → balance 11000, pnl +1000
-    expect((await stats()).account.prop.target).toMatchObject({ amount: 400, progressPct: 100, remaining: 0, reached: true });
+  it('validates prop accounts: market and maximum drawdown are required', async () => {
+    const noMarket = await as('POST', '/accounts', { name: 'FTMO', type: 'prop', size: 10_000, maxDrawdownPct: 10 });
+    expect(noMarket.statusCode).toBe(400);
+    expect(noMarket.json().issues[0].message).toBe('Wybierz, czy konto prop jest na CFD, czy na futures');
+    expect((await as('POST', '/accounts', { name: 'FTMO', type: 'prop', market: 'cfd', size: 10_000 })).statusCode).toBe(400);
+  });
 
-    await patch({ accountType: 'live', accountStartDate: null });
-    expect((await stats()).account).toMatchObject({ type: 'live', balance: 11_000, prop: null });
+  it('keeps several accounts, each with its own balance', async () => {
+    prop = (await as('POST', '/accounts', { name: 'FTMO 10k', type: 'prop', market: 'cfd', size: 10_000, maxDrawdownPct: 10, profitTargetPct: 8 })).json();
+    live = (await as('POST', '/accounts', { name: 'Live', type: 'live', size: 5_000, leverage: 100 })).json();
 
-    await patch({ accountType: null });
+    await gold('2026-09-01', 4005, { accountId: prop.id }); // +500
+    await gold('2026-09-02', 3997, { accountId: prop.id }); // −300
+    await gold('2026-09-03', 3996, { accountId: prop.id }); // −400
+    await gold('2026-09-03', 4002, { accountId: live.id }); // +200
+    await gold('2026-09-04', 4001); // +100, no account
+
+    const accounts = (await as('GET', '/accounts')).json();
+    expect(accounts.map((a: { name: string; balance: number }) => [a.name, a.balance])).toEqual([
+      ['FTMO 10k', 9800],
+      ['Live', 5200],
+    ]);
+    expect(accounts[0]).toMatchObject({
+      currentDrawdown: 700,
+      prop: { floor: 9000, used: 200, remaining: 800, usedPct: 20, breached: false, target: { balance: 10_800, remaining: 1000, reached: false } },
+    });
+    expect(accounts[1]).toMatchObject({ type: 'live', leverage: 100, prop: null });
+  });
+
+  it('shows the journal and stats per account, without an account, or all together', async () => {
+    expect((await stats()).summary.pnl).toBe(100);
     expect((await stats()).account).toBeNull();
+
+    const one = await stats(`?account=${prop.id}`);
+    expect(one.summary).toMatchObject({ trades: 3, pnl: -200, returnPct: -2, maxDrawdown: 700, maxDrawdownPct: 7 });
+    expect(one.account).toMatchObject({ id: prop.id, balance: 9800 });
+    expect(one.balanceCurve).toEqual({
+      start: 10_000,
+      points: [
+        { date: '2026-09-01', balance: 10_500 },
+        { date: '2026-09-02', balance: 10_200 },
+        { date: '2026-09-03', balance: 9800 },
+      ],
+    });
+
+    expect((await stats('?account=none')).summary).toMatchObject({ trades: 1, pnl: 100 });
+    expect((await as('GET', `/trades?account=${live.id}`)).json().total).toBe(1);
+    expect((await as('GET', '/trades?account=none')).json().total).toBe(1);
+  });
+
+  it('prices the risk against the balance of the trade account', async () => {
+    const open = (await gold('2026-09-05', null, { accountId: prop.id, stopLoss: 3995, positionSize: 0.5 })).json().trade;
+    // 50 pips × 10 × 0.5 = 250 against a 9 800 balance.
+    expect(open).toMatchObject({ riskAccount: 250, riskPct: 2.55 });
+    const loose = (await gold('2026-09-05', null, { stopLoss: 3995, positionSize: 0.5 })).json().trade;
+    expect(loose).toMatchObject({ riskAccount: 250, riskPct: null });
+  });
+
+  it('refuses trades from another market on a prop account', async () => {
+    const res = await as('POST', '/trades', {
+      instrumentId: ids.NQ1,
+      direction: 'long',
+      openedAt: '2026-09-05T08:00:00Z',
+      entryPrice: 19_800,
+      positionSize: 1,
+      accountId: prop.id,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('Konto FTMO 10k jest na CFD, a NQ1 to inny rynek');
+  });
+
+  it('runs the trading monitor per account', async () => {
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+    const loss = (minutes: number, accountId?: string) =>
+      as('POST', '/trades', {
+        instrumentId: ids.XAUUSD,
+        direction: 'long',
+        openedAt: ago(minutes),
+        closedAt: ago(minutes - 1),
+        entryPrice: 4000,
+        exitPrice: 3999,
+        positionSize: 0.1,
+        accountId,
+      });
+    await loss(30, prop.id);
+    await loss(20, prop.id);
+    await loss(10);
+    await as('PATCH', '/me', { lossStreakAlert: 2 });
+    const monitor = (await as('GET', '/trades/monitor')).json();
+    expect(monitor.groups.map((g: { name: string | null; tradesToday: number; lossCount: number; alert: boolean }) => [g.name, g.tradesToday, g.lossCount, g.alert])).toEqual([
+      ['FTMO 10k', 2, 2, true],
+      ['Live', 0, 0, false],
+      [null, 1, 1, false],
+    ]);
+    expect(monitor.alert).toBe(true);
+    await as('PATCH', '/me', { lossStreakAlert: 3 });
+  });
+
+  it('trails an end-of-day drawdown from the best closing balance, up to the start', async () => {
+    // EOD balances of the prop account: 10 500, 10 200, 9 800 (days 1–3); limit 10% = 1 000.
+    await as('PATCH', `/accounts/${prop.id}`, { drawdownType: 'eod' });
+    const trailing = (await as('GET', '/accounts')).json()[0].prop;
+    // The best close (10 500) minus 1 000 would be 9 500; balance is 9 800 minus today's losses.
+    expect(trailing).toMatchObject({ drawdownType: 'eod', highWater: 10_500, floor: 9500 });
+
+    await as('PATCH', `/accounts/${prop.id}`, { maxDrawdownPct: 2 });
+    // 10 500 − 200 = 10 300 would be above the start, so the floor stops at 10 000: breached.
+    expect((await as('GET', '/accounts')).json()[0].prop).toMatchObject({ floor: 10_000, breached: true });
+
+    await as('PATCH', `/accounts/${prop.id}`, { drawdownType: 'static', maxDrawdownPct: 10 });
+    expect((await as('GET', '/accounts')).json()[0].prop).toMatchObject({ drawdownType: 'static', floor: 9000 });
+  });
+
+  it('keeps the trades when an account is deleted', async () => {
+    expect((await as('DELETE', `/accounts/${live.id}`)).statusCode).toBe(204);
+    expect((await as('GET', '/accounts')).json()).toHaveLength(1);
+    expect((await as('GET', '/trades?account=none')).json().total).toBe(4);
+    expect((await as('GET', `/trades/stats?account=${live.id}`)).statusCode).toBe(404);
+  });
+
+  it('does not let another user see or use the accounts', async () => {
+    expect((await app.inject({ method: 'PATCH', url: `/accounts/${prop.id}`, payload: { name: 'Mine' } })).statusCode).toBe(404);
+    const foreign = await post('/trades', {
+      instrumentId: ids.XAUUSD,
+      direction: 'long',
+      openedAt: '2026-09-05T08:00:00Z',
+      entryPrice: 4000,
+      positionSize: 0.1,
+      accountId: prop.id,
+    });
+    expect(foreign.statusCode).toBe(404);
+  });
+});
+
+describe('leverage', () => {
+  it('accepts only the offered leverage on an account', async () => {
+    const account = (await post('/accounts', { name: 'CFD', type: 'live', size: 1000 })).json();
+    expect((await app.inject({ method: 'PATCH', url: `/accounts/${account.id}`, payload: { leverage: 100 } })).json().leverage).toBe(100);
+    const bad = await app.inject({ method: 'PATCH', url: `/accounts/${account.id}`, payload: { leverage: 25 } });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().issues[0].message).toMatch(/10, 20, 30/);
+    await app.inject({ method: 'DELETE', url: `/accounts/${account.id}` });
+  });
+});
+
+describe('authentication', () => {
+  let authApp: App;
+  let authDb: Database;
+  const sent: { to: string; subject: string; text: string }[] = [];
+  const origin = 'http://localhost:5173';
+
+  /** Keeps the session cookie between requests, like a browser. */
+  function browser() {
+    let cookie = '';
+    return async (method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, payload?: object) => {
+      const res = await authApp.inject({ method, url, payload, headers: { origin, ...(cookie ? { cookie } : {}) } });
+      const set = res.headers['set-cookie'];
+      const list = Array.isArray(set) ? set : set ? [set] : [];
+      for (const c of list) {
+        const [pair] = c.split(';');
+        const [name, value] = pair!.split('=');
+        const others = cookie.split('; ').filter((p) => p && !p.startsWith(`${name}=`));
+        cookie = value ? [...others, pair].join('; ') : others.join('; ');
+      }
+      return res;
+    };
+  }
+
+  beforeAll(async () => {
+    const env = loadEnv({ NODE_ENV: 'test', DATABASE_URL: 'memory://', UPLOAD_DIR: uploadDir, AUTH_DEV_BYPASS: 'false', REGISTRATION: 'invite' });
+    authDb = createDatabase(env.DATABASE_URL);
+    await authDb.migrate();
+    await seed(authDb.db, env.DEV_USER_EMAIL);
+    authApp = await buildApp({ db: authDb.db, env, fx, quotes, calendar, logger: false, mailer: { send: async (m) => void sent.push(m) } });
+  });
+
+  afterAll(async () => {
+    await authApp.close();
+    await authDb.close();
+  });
+
+  it('refuses requests without a session and ignores x-user-id', async () => {
+    const res = await authApp.inject({ url: '/me', headers: { 'x-user-id': '00000000-0000-4000-8000-000000000000' } });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error).toBe('Zaloguj się, aby kontynuować');
+    expect((await authApp.inject({ url: '/auth-config' })).json()).toEqual({ registration: 'invite', devBypass: false });
+  });
+
+  it('lets the seeded admin sign in after a login is set, and invite a user', async () => {
+    const { setLogin } = await import('../src/services/credentials.ts');
+    await setLogin(authDb.db, { user: 'admin@trading.local', email: 'owner@example.com', password: 'owner-password-1' });
+
+    const admin = browser();
+    const bad = await admin('POST', '/auth/sign-in/email', { email: 'owner@example.com', password: 'wrong-password' });
+    expect(bad.statusCode).toBe(401);
+    expect((await admin('POST', '/auth/sign-in/email', { email: 'owner@example.com', password: 'owner-password-1' })).statusCode).toBe(200);
+    const me = (await admin('GET', '/me')).json();
+    expect(me).toMatchObject({ email: 'owner@example.com', role: 'admin', authenticated: true });
+
+    const invite = (await admin('POST', '/invites', { role: 'vip' })).json();
+    expect(invite.code).toMatch(/^[A-Z2-9]{10}$/);
+
+    const newcomer = browser();
+    const without = await newcomer('POST', '/auth/sign-up/email', { name: 'Jan', email: 'jan@example.com', password: 'jan-password-1' });
+    expect(without.statusCode).toBe(400);
+    expect(without.json().code).toBe('INVALID_INVITE');
+
+    const signUp = await newcomer('POST', '/auth/sign-up/email', {
+      name: 'Jan',
+      email: 'jan@example.com',
+      password: 'jan-password-1',
+      inviteCode: invite.code.toLowerCase(),
+      language: 'en',
+      timezone: 'Europe/London',
+    });
+    expect(signUp.statusCode).toBe(200);
+    expect((await newcomer('GET', '/me')).json()).toMatchObject({
+      displayName: 'Jan',
+      role: 'vip',
+      settings: { language: 'en', timezone: 'Europe/London' },
+    });
+    // The newcomer sees only their own journal, and cannot manage invites.
+    expect((await newcomer('GET', '/trades')).json().total).toBe(0);
+    expect((await newcomer('GET', '/invites')).statusCode).toBe(403);
+
+    // An invite works once.
+    const again = await browser()('POST', '/auth/sign-up/email', { name: 'Ola', email: 'ola@example.com', password: 'ola-password-1', inviteCode: invite.code });
+    expect(again.json().code).toBe('INVALID_INVITE');
+    expect((await admin('GET', '/invites')).json()[0]).toMatchObject({ code: invite.code, usedBy: expect.any(String) });
+
+    await newcomer('POST', '/auth/sign-out', {});
+    expect((await newcomer('GET', '/me')).statusCode).toBe(401);
+  });
+
+  it('resets a forgotten password with the e-mailed link', async () => {
+    const user = browser();
+    expect((await user('POST', '/auth/request-password-reset', { email: 'jan@example.com', redirectTo: '/nowe-haslo' })).statusCode).toBe(200);
+    const mail = sent.at(-1)!;
+    expect(mail).toMatchObject({ to: 'jan@example.com', subject: 'Password reset' });
+    const token = decodeURIComponent(mail.text.match(/token=([^\s]+)/)![1]!);
+
+    expect((await user('POST', '/auth/reset-password', { token, newPassword: 'jan-new-password' })).statusCode).toBe(200);
+    expect((await user('POST', '/auth/sign-in/email', { email: 'jan@example.com', password: 'jan-password-1' })).statusCode).toBe(401);
+    expect((await user('POST', '/auth/sign-in/email', { email: 'jan@example.com', password: 'jan-new-password' })).statusCode).toBe(200);
   });
 });

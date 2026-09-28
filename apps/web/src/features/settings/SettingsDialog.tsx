@@ -1,5 +1,5 @@
 import type { PublicUser } from '@trading/api/types';
-import { AUTO_FX_CURRENCIES, LANGUAGES, type AccountType, type Language, type Theme } from '@trading/shared';
+import { AUTO_FX_CURRENCIES, LANGUAGES, type Language, type Theme } from '@trading/shared';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ApiError } from '../../api/client.ts';
 import { useUpdateSettings } from '../../api/hooks.ts';
@@ -7,8 +7,9 @@ import { Button } from '../../components/ui/Button.tsx';
 import { Field, Input, Segmented, toggleClass } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
-import { parseDecimal, toInputNumber } from '../../lib/format.ts';
 import { ACCENT_OPTIONS, DEFAULT_ACCENT } from '../../lib/theme.ts';
+import { AccountsManager } from '../account/AccountsManager.tsx';
+import { InvitesManager } from '../auth/InvitesManager.tsx';
 
 const TIMEZONES = ['Europe/Warsaw', 'Europe/London', 'America/New_York', 'America/Chicago', 'Asia/Tokyo', 'UTC'];
 
@@ -27,11 +28,6 @@ export function SettingsDialog({ user, onClose }: { user: PublicUser; onClose: (
   const [theme, setTheme] = useState<Theme>(s.theme);
   const [language, setLanguage] = useState<Language>(s.language);
   const [accent, setAccent] = useState(s.accentColor ?? DEFAULT_ACCENT);
-  const [accountType, setAccountType] = useState<AccountType | 'none'>(s.account.type ?? 'none');
-  const [accountSize, setAccountSize] = useState(toInputNumber(s.account.size));
-  const [maxDrawdown, setMaxDrawdown] = useState(toInputNumber(s.account.maxDrawdownPct));
-  const [profitTarget, setProfitTarget] = useState(toInputNumber(s.account.profitTargetPct));
-  const [accountStart, setAccountStart] = useState(s.account.startDate ?? '');
 
   useEffect(() => ref.current?.showModal(), []);
 
@@ -50,16 +46,6 @@ export function SettingsDialog({ user, onClose }: { user: PublicUser; onClose: (
         theme,
         language,
         accentColor: accent,
-        // Switching the profile off keeps the numbers, so it can be switched back on.
-        ...(accountType === 'none'
-          ? { accountType: null }
-          : {
-              accountType,
-              accountSize: parseDecimal(accountSize) ?? null,
-              maxDrawdownPct: accountType === 'prop' ? (parseDecimal(maxDrawdown) ?? null) : undefined,
-              profitTargetPct: accountType === 'prop' ? (parseDecimal(profitTarget) ?? null) : undefined,
-              accountStartDate: accountStart || null,
-            }),
       },
       { onSuccess: onClose },
     );
@@ -122,40 +108,9 @@ export function SettingsDialog({ user, onClose }: { user: PublicUser; onClose: (
           {t.lossAlertDay}
         </label>
 
-        <fieldset className="m-0 flex flex-col gap-3 rounded-(--radius-control) border-0 bg-raised p-4">
-          <legend className="float-left mb-1 w-full p-0 text-sm font-bold">{t.account}</legend>
-          <span className="text-xs text-dim">{t.accountOptional}</span>
-          <Segmented
-            label={t.account}
-            value={accountType}
-            onChange={setAccountType}
-            options={[
-              { value: 'none', label: t.accountNone },
-              { value: 'live', label: t.accountLive },
-              { value: 'prop', label: t.accountProp },
-            ]}
-          />
-          {accountType !== 'none' && (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label={t.accountSize} hint={currency}>
-                <Input inputMode="decimal" value={accountSize} onChange={(e) => setAccountSize(e.target.value)} placeholder="10000" required />
-              </Field>
-              {accountType === 'prop' && (
-                <Field label={t.maxDrawdown} hint="%" help={t.maxDrawdownHelp}>
-                  <Input inputMode="decimal" value={maxDrawdown} onChange={(e) => setMaxDrawdown(e.target.value)} placeholder="10" required />
-                </Field>
-              )}
-              {accountType === 'prop' && (
-                <Field label={t.profitTarget} hint="%" help={t.profitTargetHelp}>
-                  <Input inputMode="decimal" value={profitTarget} onChange={(e) => setProfitTarget(e.target.value)} placeholder="8" />
-                </Field>
-              )}
-              <Field label={t.startDate} help={t.startDateHelp}>
-                <Input type="date" value={accountStart} onChange={(e) => setAccountStart(e.target.value)} />
-              </Field>
-            </div>
-          )}
-        </fieldset>
+        <AccountsManager currency={currency} />
+
+        {user.role === 'admin' && <InvitesManager timezone={timezone} />}
 
         <div className="flex flex-col gap-2">
           <span className="eyebrow">{t.language}</span>

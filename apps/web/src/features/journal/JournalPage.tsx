@@ -8,7 +8,8 @@ import { Panel } from '../../components/ui/Panel.tsx';
 import { Gauge, Stat } from '../../components/ui/Stat.tsx';
 import { useT } from '../../i18n/index.tsx';
 import { formatMoney, formatNumber, formatPercent } from '../../lib/format.ts';
-import { AccountPanel } from '../account/AccountViews.tsx';
+import { AccountSwitcher, useSelectedAccount } from '../account/AccountSwitcher.tsx';
+import { AccountPanel, accountLevels } from '../account/AccountViews.tsx';
 import { MonitorPanel } from './MonitorPanel.tsx';
 import { Mt5ImportDialog } from './Mt5ImportDialog.tsx';
 import { TradeForm } from './TradeForm.tsx';
@@ -20,7 +21,8 @@ function MonthOverview({ user, today }: { user: PublicUser; today: string }) {
   const all = useT();
   const t = all.journal;
   const monthStart = `${today.slice(0, 8)}01`;
-  const { data: stats } = useTradeStats({ dateFrom: monthStart, dateTo: today });
+  const { filter } = useSelectedAccount();
+  const { data: stats } = useTradeStats({ dateFrom: monthStart, dateTo: today, account: filter || undefined });
   const s = stats?.summary;
   const currency = user.settings.accountCurrency;
   const month = all.months[Number(today.slice(5, 7)) - 1]!;
@@ -40,18 +42,30 @@ function MonthOverview({ user, today }: { user: PublicUser; today: string }) {
       </div>
       <Panel title={t.equityCurve} actions={<span className="font-mono text-xs text-dim">{month}</span>}>
         <div className="px-3 py-4">
-          <EquityChart data={stats?.equityCurve ?? []} currency={currency} height={220} />
+          <EquityChart
+            data={stats?.equityCurve ?? []}
+            currency={currency}
+            height={220}
+            balance={stats?.balanceCurve}
+            levels={stats?.balanceCurve ? accountLevels(all, stats.account) : []}
+          />
         </div>
       </Panel>
     </>
   );
 }
 
-/** Account summary, shown only when an account profile is set in the settings. */
-function JournalAccount({ today, currency }: { today: string; currency: string }) {
-  // Same query as the month overview, so it is served from the cache.
-  const { data } = useTradeStats({ dateFrom: `${today.slice(0, 8)}01`, dateTo: today });
-  return data?.account ? <AccountPanel account={data.account} currency={currency} /> : null;
+/** The selected account's panel, or one per account in the "all accounts" view. */
+function JournalAccounts({ currency }: { currency: string }) {
+  const { accounts, filter, selected } = useSelectedAccount();
+  const shown = selected ? [selected] : filter === '' ? accounts : [];
+  return (
+    <>
+      {shown.map((a) => (
+        <AccountPanel key={a.id} account={a} currency={currency} />
+      ))}
+    </>
+  );
 }
 
 export function JournalPage() {
@@ -65,7 +79,8 @@ export function JournalPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [formKey, setFormKey] = useState(0);
   const [notice, setNotice] = useState<{ title: string; warnings: string[] } | null>(null);
-  const trades = useTrades({ ...filters, limit });
+  const { accounts, filter } = useSelectedAccount();
+  const trades = useTrades({ ...filters, account: filter || undefined, limit });
 
   if (!me || !instruments) {
     return <main className="grow p-8 text-dim">{all.common.loading}</main>;
@@ -87,6 +102,11 @@ export function JournalPage() {
   return (
     <div className="flex grow flex-col gap-6 p-4 md:px-8 md:py-6 xl:flex-row">
       <main className="flex min-w-0 grow flex-col gap-5">
+        <div className="flex flex-wrap items-center gap-4">
+          <h1 className="m-0 text-2xl font-bold tracking-tight">{all.nav.journal}</h1>
+          <div className="grow" />
+          <AccountSwitcher className="w-64" />
+        </div>
         <MonthOverview user={me} today={today} />
 
         <Panel
@@ -108,7 +128,12 @@ export function JournalPage() {
             }}
             instruments={instruments}
           />
-          <TradeTable trades={items} selectedId={selectedId} onSelect={(t) => setSelectedId(t.id)} />
+          <TradeTable
+            trades={items}
+            accounts={filter === '' ? accounts : []}
+            selectedId={selectedId}
+            onSelect={(t) => setSelectedId(t.id)}
+          />
           {trades.data && items.length < trades.data.total && (
             <div className="flex justify-center p-4">
               <Button size="sm" onClick={() => setLimit((l) => l + PAGE)}>
@@ -120,7 +145,7 @@ export function JournalPage() {
       </main>
 
       <aside className="flex w-full shrink-0 flex-col gap-5 xl:w-[380px]">
-        <JournalAccount today={today} currency={me.settings.accountCurrency} />
+        <JournalAccounts currency={me.settings.accountCurrency} />
         <MonitorPanel />
         {notice && (
           <div role="status" className="card flex flex-col gap-1.5 p-4 text-[13px] ring-1 ring-accent">
@@ -138,10 +163,12 @@ export function JournalPage() {
           </div>
         )}
         <TradeForm
-          key={selected ? selected.id : `new-${formKey}`}
+          key={selected ? selected.id : `new-${formKey}-${filter}`}
           user={me}
           instruments={instruments}
           defaultInstrumentId={items[0]?.instrumentId}
+          accounts={accounts}
+          defaultAccountId={filter && filter !== 'none' ? filter : accounts.length === 1 ? accounts[0]!.id : ''}
           trade={selected}
           onSaved={onSaved}
           onDeleted={() => {
@@ -154,6 +181,8 @@ export function JournalPage() {
       {importOpen && (
         <Mt5ImportDialog
           instruments={instruments}
+          accounts={accounts}
+          defaultAccountId={filter && filter !== 'none' ? filter : ''}
           timezone={me.settings.timezone}
           onClose={() => setImportOpen(false)}
           onImported={(n) => setNotice({ title: all.mt5.done(n), warnings: [] })}

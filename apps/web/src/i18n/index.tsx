@@ -1,5 +1,5 @@
 import { LANGUAGES, type Language } from '@trading/shared';
-import { createContext, Fragment, useContext, useEffect, type ReactNode } from 'react';
+import { createContext, Fragment, useContext, useEffect, useState, type ReactNode } from 'react';
 import { useMe } from '../api/hooks.ts';
 import { setFormatLocale } from '../lib/format.ts';
 import { en } from './en.ts';
@@ -20,12 +20,21 @@ function storedLanguage(): Language {
   }
 }
 
-const I18nContext = createContext<{ language: Language; t: Messages }>({ language: 'pl', t: pl });
+const I18nContext = createContext<{ language: Language; t: Messages; setLanguage: (language: Language) => void }>({
+  language: 'pl',
+  t: pl,
+  setLanguage: () => {},
+});
 
 /** Provides the user's language (from settings) to the app. */
 export function I18nProvider({ children }: { children: ReactNode }) {
   const { data: me } = useMe();
-  const language = me?.settings.language ?? storedLanguage();
+  // A language picked on a sign-in page wins until the user's settings change; otherwise the
+  // settings language, or (signed out) the one used last.
+  const [picked, setPicked] = useState<Language | null>(null);
+  const settingsLanguage = me?.settings.language;
+  useEffect(() => setPicked(null), [settingsLanguage]);
+  const language = picked ?? settingsLanguage ?? storedLanguage();
   const t = DICTIONARIES[language];
   // Set synchronously so formatting during this render already uses the language.
   setFormatLocale(t.locale);
@@ -41,7 +50,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   // Keyed by language: switching remounts the screens, so every formatted value is redone.
   return (
-    <I18nContext.Provider value={{ language, t }}>
+    <I18nContext.Provider value={{ language, t, setLanguage: setPicked }}>
       <Fragment key={language}>{children}</Fragment>
     </I18nContext.Provider>
   );
@@ -50,3 +59,5 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 /** UI strings in the current language. */
 export const useT = () => useContext(I18nContext).t;
 export const useLanguage = () => useContext(I18nContext).language;
+/** Changes the language while signed out; signed in, it comes from the settings. */
+export const useSetLanguage = () => useContext(I18nContext).setLanguage;

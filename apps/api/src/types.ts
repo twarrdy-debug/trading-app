@@ -1,8 +1,10 @@
 // Response types for clients (web, mobile). Type-only: import with `import type`.
 import type { instruments } from './db/schema.ts';
 import type { toPublicUser } from './routes/me.ts';
+import type { AccountOverview, TradingAccount as TradingAccountRow } from './services/accounts.ts';
 import type { basisOverview } from './services/basis.ts';
 import type { listEvents, RefreshResult } from './services/calendar.ts';
+import type { invites } from './db/schema.ts';
 import type { importMt5 } from './services/mt5-import.ts';
 import type { createTrade, listTrades, tradeStats, tradingMonitor, TradeView } from './services/trades.ts';
 
@@ -27,6 +29,13 @@ export type CalendarResponse = Jsonify<Awaited<ReturnType<typeof listEvents>>>;
 export type CalendarEvent = CalendarResponse['events'][number];
 export type CalendarRefresh = RefreshResult;
 export type TradingMonitor = Jsonify<Awaited<ReturnType<typeof tradingMonitor>>>;
+export type AccountSummary = Jsonify<AccountOverview>;
+export type TradingAccount = Jsonify<TradingAccountRow>;
+export type Invite = Jsonify<typeof invites.$inferSelect>;
+export interface AuthConfig {
+  registration: 'invite' | 'open' | 'closed';
+  devBypass: boolean;
+}
 export type Mt5Import = Jsonify<Awaited<ReturnType<typeof importMt5>>>;
 export type Mt5ImportRow = Mt5Import['positions'][number];
 

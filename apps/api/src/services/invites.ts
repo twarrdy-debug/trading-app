@@ -1,0 +1,72 @@
+import { LANGUAGES, type CreateInviteInput } from '@trading/shared';
+import { randomInt } from 'node:crypto';
+import { and, desc, eq, isNull } from 'drizzle-orm';
+import type { DB } from '../db/client.ts';
+import { invites, users } from '../db/schema.ts';
+import { notFound } from '../errors.ts';
+import type { CurrentUser } from '../plugins/current-user.ts';
+
+/** No 0/O, 1/I/L: codes are read and typed by people. */
+const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const newCode = () => Array.from({ length: 10 }, () => ALPHABET[randomInt(ALPHABET.length)]).join('');
+
+export async function createInvite(db: DB, admin: CurrentUser, input: CreateInviteInput) {
+  const [row] = await db
+    .insert(invites)
+    .values({
+      code: newCode(),
+      createdBy: admin.id,
+      email: input.email?.toLowerCase() ?? null,
+      role: input.role,
+      expiresAt: new Date(Date.now() + input.expiresInDays * 86_400_000),
+    })
+    .returning();
+  return row!;
+}
+
+export const listInvites = (db: DB) => db.select().from(invites).orderBy(desc(invites.createdAt));
+
+export async function deleteInvite(db: DB, id: string) {
+  const [row] = await db.delete(invites).where(eq(invites.id, id)).returning({ id: invites.id });
+  if (!row) throw notFound();
+}
+
+/** The invite for `code`, when it is unused, not expired and (if bound to an address) for `email`. */
+export async function findUsableInvite(db: DB, code: unknown, email: unknown) {
+  if (typeof code !== 'string' || code.trim() === '') return null;
+  const [invite] = await db
+    .select()
+    .from(invites)
+    .where(and(eq(invites.code, code.trim().toUpperCase()), isNull(invites.usedBy)));
+  if (!invite) return null;
+  if (invite.expiresAt && invite.expiresAt.getTime() < Date.now()) return null;
+  if (invite.email && (typeof email !== 'string' || invite.email !== email.trim().toLowerCase())) return null;
+  return invite;
+}
+
+/**
+ * After a successful sign-up: uses up the invite (giving its role) and stores the language and
+ * time zone the browser sent, when valid.
+ */
+export async function finishSignUp(db: DB, userId: string, body: Record<string, unknown>, inviteMode: boolean) {
+  const patch: Partial<typeof users.$inferInsert> = {};
+  if (typeof body.language === 'string' && (LANGUAGES as readonly string[]).includes(body.language)) {
+    patch.language = body.language as (typeof LANGUAGES)[number];
+  }
+  if (typeof body.timezone === 'string') {
+    try {
+      new Intl.DateTimeFormat('en', { timeZone: body.timezone });
+      patch.timezone = body.timezone;
+    } catch {
+      // Unknown zone: keep the default.
+    }
+  }
+  if (inviteMode) {
+    const invite = await findUsableInvite(db, body.inviteCode, body.email);
+    if (invite) {
+      await db.update(invites).set({ usedBy: userId, usedAt: new Date() }).where(eq(invites.id, invite.id));
+      patch.role = invite.role;
+    }
+  }
+  if (Object.keys(patch).length > 0) await db.update(users).set(patch).where(eq(users.id, userId));
+}

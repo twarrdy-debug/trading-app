@@ -3,6 +3,8 @@ import { z } from 'zod';
 import {
   ACCOUNT_TYPES,
   ASSET_CLASSES,
+  DRAWDOWN_TYPES,
+  LEVERAGE_OPTIONS,
   LOSS_ALERT_MODES,
   BIASES,
   DIRECTIONS,
@@ -23,7 +25,15 @@ import { BROKER_TIMEZONES } from './dates.ts';
  * Custom validation messages are message keys; the API translates them into the user's
  * language (apps/api/src/i18n.ts).
  */
-export const VALIDATION_KEYS = ['validation.currencyCode', 'validation.colorFormat', 'validation.timezone', 'validation.educatorOrSignal'] as const;
+export const VALIDATION_KEYS = [
+  'validation.currencyCode',
+  'validation.colorFormat',
+  'validation.timezone',
+  'validation.educatorOrSignal',
+  'validation.leverage',
+  'validation.propMarket',
+  'validation.propDrawdown',
+] as const;
 
 const price = z.number().positive();
 const isoDateTime = z.iso.datetime({ offset: true });
@@ -59,21 +69,58 @@ export const updateSettingsSchema = z
     lossStreakAlert: z.number().int().min(1).max(20),
     /** Count losses in a row (default) or all losing trades of the day. */
     lossAlertMode: z.enum(LOSS_ALERT_MODES),
-    /**
-     * Optional account profile. With a type set, stats are also shown against the account:
-     * balance, return and drawdown; prop accounts also track the maximum drawdown limit.
-     */
-    accountType: z.enum(ACCOUNT_TYPES).nullable(),
-    /** Starting balance in the account currency. Required for either type. */
-    accountSize: z.number().positive().max(1_000_000_000).nullable(),
-    /** Prop firm maximum drawdown, % of the starting balance. Required for prop accounts. */
-    maxDrawdownPct: z.number().min(0.1).max(100).nullable(),
-    /** Prop firm profit target, % of the starting balance. Optional. */
-    profitTargetPct: z.number().min(0.1).max(1000).nullable(),
-    /** Only trades from this day count towards the account (e.g. a new challenge). */
-    accountStartDate: isoDate.nullable(),
   })
   .partial();
+
+// --- Invitations -------------------------------------------------------------
+
+/** Admin: an invitation for invite-only registration. */
+export const createInviteSchema = z.object({
+  /** Only this address can use it; any address when omitted. */
+  email: z.email().optional(),
+  role: z.enum(['user', 'vip', 'educator']).default('user'),
+  expiresInDays: z.number().int().min(1).max(90).default(14),
+});
+
+export type CreateInviteInput = z.infer<typeof createInviteSchema>;
+
+// --- Trading accounts --------------------------------------------------------
+
+const accountFields = z.object({
+  name: z.string().trim().min(1).max(60),
+  type: z.enum(ACCOUNT_TYPES),
+  /** What the account trades. Required for prop accounts: the trade form then offers only that market. */
+  market: z.enum(MARKETS).nullable().optional(),
+  /** Starting balance in the user's account currency. */
+  size: z.number().positive().max(1_000_000_000),
+  /** Prop firm maximum drawdown, % of the starting balance (static). Required for prop accounts. */
+  maxDrawdownPct: z.number().min(0.1).max(100).nullable().optional(),
+  /** Prop: static floor or end-of-day trailing floor (default static). */
+  drawdownType: z.enum(DRAWDOWN_TYPES).optional(),
+  /** Prop firm profit target, % of the starting balance. */
+  profitTargetPct: z.number().min(0.1).max(1000).nullable().optional(),
+  /** CFD leverage (1:n), used to show the margin of a position. */
+  leverage: z
+    .number()
+    .int()
+    .refine((v) => (LEVERAGE_OPTIONS as readonly number[]).includes(v), 'validation.leverage')
+    .nullable()
+    .optional(),
+});
+
+/** Prop accounts need a market and a maximum drawdown. */
+const propRules = (a: Partial<z.infer<typeof accountFields>>, ctx: z.RefinementCtx) => {
+  if (a.type !== 'prop') return;
+  if (!a.market) ctx.addIssue({ code: 'custom', path: ['market'], message: 'validation.propMarket' });
+  if (a.maxDrawdownPct == null) ctx.addIssue({ code: 'custom', path: ['maxDrawdownPct'], message: 'validation.propDrawdown' });
+};
+
+export const createAccountSchema = accountFields.superRefine(propRules);
+/** Partial; the API checks the prop rules on the account as it will be after the change. */
+export const updateAccountSchema = accountFields.partial();
+
+/** Which trades to show: one account (uuid), trades without an account (`none`), or all when omitted. */
+const accountFilter = z.union([z.uuid(), z.literal('none')]).optional();
 
 // --- Instruments & educators -------------------------------------------------
 
@@ -118,6 +165,8 @@ const tradeFields = z.object({
   source: z.enum(TRADE_SOURCES).default('own'),
   educatorId: z.uuid().nullable().optional(),
   signalId: z.uuid().nullable().optional(),
+  /** Trading account the trade belongs to (null = none). */
+  accountId: z.uuid().nullable().optional(),
   emotionKeys: z.array(z.string()).max(20).default([]),
 });
 
@@ -130,6 +179,7 @@ export const createTradeSchema = tradeFields.superRefine((t, ctx) => {
 export const updateTradeSchema = tradeFields.partial();
 
 export const tradeFiltersSchema = z.object({
+  account: accountFilter,
   instrumentId: z.uuid().optional(),
   direction: z.enum(DIRECTIONS).optional(),
   source: z.enum(TRADE_SOURCES).optional(),
@@ -145,6 +195,7 @@ export const tradeFiltersSchema = z.object({
 });
 
 export const tradeStatsQuerySchema = z.object({
+  account: accountFilter,
   instrumentId: z.uuid().optional(),
   dateFrom: isoDate.optional(),
   dateTo: isoDate.optional(),
@@ -157,6 +208,8 @@ export const tradeStatsQuerySchema = z.object({
  * could not match (e.g. "GER40.cash") to instruments; `commit=false` only previews.
  */
 export const mt5ImportFieldsSchema = z.object({
+  /** Imported trades are assigned to this account. */
+  accountId: z.uuid().optional(),
   timezone: z.enum(BROKER_TIMEZONES).default('broker-ny7'),
   symbolMap: z
     .string()
@@ -275,6 +328,8 @@ export type CalendarQuery = z.infer<typeof calendarQuerySchema>;
 export type UpdateSettingsInput = z.infer<typeof updateSettingsSchema>;
 export type CreateInstrumentInput = z.infer<typeof createInstrumentSchema>;
 export type CreateTradeInput = z.infer<typeof createTradeSchema>;
+export type CreateAccountInput = z.infer<typeof createAccountSchema>;
+export type UpdateAccountInput = z.infer<typeof updateAccountSchema>;
 export type UpdateTradeInput = z.infer<typeof updateTradeSchema>;
 export type TradeFilters = z.infer<typeof tradeFiltersSchema>;
 export type CreateSignalInput = z.infer<typeof createSignalSchema>;

@@ -16,7 +16,8 @@
     "db:migrate": "npm run db:migrate -w @trading/api",
     "db:seed": "npm run db:seed -w @trading/api",
     "test": "vitest run",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "user:login": "npm run user:login -w @trading/api --"
   },
   "engines": {
     "node": ">=22"

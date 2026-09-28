@@ -1,10 +1,30 @@
-import type { TradeStats } from '@trading/api/types';
+import type { AccountSummary } from '@trading/api/types';
+import type { ChartLevel } from '../../components/charts/EquityChart.tsx';
+import type { Messages } from '../../i18n/index.tsx';
 import { Panel } from '../../components/ui/Panel.tsx';
 import { Gauge, Stat } from '../../components/ui/Stat.tsx';
 import { useT } from '../../i18n/index.tsx';
-import { formatDate, formatMoney, formatNumber } from '../../lib/format.ts';
+import { formatMoney, formatNumber } from '../../lib/format.ts';
 
-export type AccountOverview = NonNullable<TradeStats['account']>;
+export type AccountOverview = AccountSummary;
+
+/** Reference lines for the balance chart: the starting balance, and for prop accounts the limit and target. */
+export const accountLevels = (t: Messages, account: AccountOverview | null | undefined): ChartLevel[] =>
+  !account
+    ? []
+    : [
+        { value: account.size, label: t.chart.start, tone: 'dim' },
+        ...(account.prop ? [{ value: account.prop.floor, label: t.chart.floor, tone: 'sell' as const }] : []),
+        ...(account.prop?.target ? [{ value: account.prop.target.balance, label: t.chart.target, tone: 'buy' as const }] : []),
+      ];
+
+/** "Prop · CFD · 10 000" – type, market and size in one line. */
+export const accountKind = (t: Messages, account: Pick<AccountOverview, 'type' | 'market' | 'size'>) =>
+  t.accounts.summary(
+    t.accounts[account.type],
+    account.market ? t.accounts[account.market] : null,
+    formatMoney(account.size, false).replace(/[.,]00$/, ''),
+  );
 
 const pct = (value: number, signed = false) => `${formatNumber(value, signed)}%`;
 /** Drawdown usage from which the prop limit is shown in red. */
@@ -19,9 +39,9 @@ export function AccountTiles({ account, currency }: { account: AccountOverview; 
   const balanceTiles = (
     <>
       <Stat
-        label={account.type === 'prop' ? `${t.balance} · Prop` : `${t.balance} · Live`}
+        label={`${t.balance} · ${account.name}`}
         value={formatMoney(account.balance, false)}
-        foot={`${currency} · ${t.startBalance(formatMoney(account.size, false))}${account.startDate ? ` · ${t.sinceStart(formatDate(account.startDate))}` : ''}`}
+        foot={`${currency} · ${t.startBalance(formatMoney(account.size, false))}`}
       />
       <Stat
         label={t.returnAll}
@@ -40,7 +60,7 @@ export function AccountTiles({ account, currency }: { account: AccountOverview; 
   const propTiles = prop && (
     <>
       <Stat
-        label={t.limitUsed(pct(prop.maxDrawdownPct))}
+        label={t.limitUsed(`${pct(prop.maxDrawdownPct)}${prop.drawdownType === 'eod' ? ` ${t.eod}` : ''}`)}
         value={pct(prop.usedPct)}
         tone={danger ? 'sell' : 'ink'}
         visual={<Gauge percent={prop.usedPct} tone={danger ? 'sell' : 'accent'} />}
@@ -77,13 +97,14 @@ export function AccountTiles({ account, currency }: { account: AccountOverview; 
 
 /** Compact account summary in the journal's side column. */
 export function AccountPanel({ account, currency }: { account: AccountOverview; currency: string }) {
-  const t = useT().account;
+  const all = useT();
+  const t = all.account;
   const prop = account.prop;
   const danger = prop != null && (prop.breached || prop.usedPct >= DANGER_PCT);
   return (
     <Panel
-      title={account.type === 'prop' ? t.propTitle : t.liveTitle}
-      actions={<span className="font-mono text-xs text-dim">{`${formatMoney(account.size, false)} ${currency}`}</span>}
+      title={account.name}
+      actions={<span className="font-mono text-xs text-dim">{accountKind(all, account)}</span>}
     >
       <div className="flex flex-col gap-4 px-5 pt-1 pb-5">
         <div className="flex items-end justify-between gap-3">
@@ -98,7 +119,7 @@ export function AccountPanel({ account, currency }: { account: AccountOverview; 
         {prop ? (
           <div className="flex flex-col gap-2">
             <div className="flex items-baseline justify-between text-[13px]">
-              <span className="font-semibold">{`${t.ddLimit} · ${pct(prop.maxDrawdownPct)}`}</span>
+              <span className="font-semibold">{`${t.ddLimit} · ${pct(prop.maxDrawdownPct)}${prop.drawdownType === 'eod' ? ` ${t.eod}` : ''}`}</span>
               <span className={`font-mono ${danger ? 'text-sell' : ''}`}>{pct(prop.usedPct)}</span>
             </div>
             <div className="h-2 rounded-full bg-grid" role="meter" aria-valuenow={prop.usedPct} aria-valuemin={0} aria-valuemax={100} aria-label={t.ddLimit}>
@@ -131,5 +152,58 @@ export function AccountPanel({ account, currency }: { account: AccountOverview; 
         )}
       </div>
     </Panel>
+  );
+}
+
+/** One card per account, for the "all accounts" view of the statistics. */
+export function AccountCards({ accounts, currency }: { accounts: AccountOverview[]; currency: string }) {
+  const all = useT();
+  const t = all.account;
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      {accounts.map((a) => {
+        const danger = a.prop != null && (a.prop.breached || a.prop.usedPct >= DANGER_PCT);
+        return (
+          <div key={a.id} className="card flex flex-col gap-3 px-5 py-4">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="truncate text-[15px] font-bold">{a.name}</span>
+              <span className="shrink-0 font-mono text-[11px] text-dim">{accountKind(all, a)}</span>
+            </div>
+            <div className="flex items-end justify-between gap-3">
+              <span className="text-2xl font-bold tracking-tight tabular-nums">
+                {formatMoney(a.balance, false)} <span className="text-xs font-medium text-dim">{currency}</span>
+              </span>
+              <span className={`font-mono text-sm ${a.pnl > 0 ? 'text-buy' : a.pnl < 0 ? 'text-sell' : 'text-dim'}`}>{pct(a.returnPct, true)}</span>
+            </div>
+            {a.prop ? (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex justify-between text-xs">
+                  <span className="text-dim">{t.limitUsed(`${pct(a.prop.maxDrawdownPct)}${a.prop.drawdownType === 'eod' ? ` ${t.eod}` : ''}`)}</span>
+                  <span className={`font-mono ${danger ? 'text-sell' : ''}`}>{pct(a.prop.usedPct)}</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-grid">
+                  <div className={`h-1.5 rounded-full ${danger ? 'bg-sell' : 'bg-accent'}`} style={{ width: `${a.prop.usedPct}%` }} />
+                </div>
+                {a.prop.target && (
+                  <>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-dim">{t.target(pct(a.prop.target.pct))}</span>
+                      <span className={`font-mono ${a.prop.target.reached ? 'text-buy' : ''}`}>{pct(a.prop.target.progressPct)}</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-grid">
+                      <div className="h-1.5 rounded-full bg-buy" style={{ width: `${a.prop.target.progressPct}%` }} />
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <span className="text-xs text-dim">
+                {t.currentDrawdown}: {pct(a.currentDrawdownPct)}
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }

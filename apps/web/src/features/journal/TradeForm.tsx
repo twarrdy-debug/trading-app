@@ -1,5 +1,5 @@
-import type { Instrument, PublicUser, Trade, TradeMutation } from '@trading/api/types';
-import { computeTradeMetrics, toLocalDate, type CreateTradeInput, type Direction, type TradeSource } from '@trading/shared';
+import type { AccountSummary, Instrument, PublicUser, Trade, TradeMutation } from '@trading/api/types';
+import { computeTradeMetrics, marginQuote, riskQuote, toLocalDate, type CreateTradeInput, type Direction, type TradeSource } from '@trading/shared';
 import { useEffect, useState, type FormEvent } from 'react';
 import { ApiError } from '../../api/client.ts';
 import {
@@ -17,6 +17,7 @@ import {
 import { Button } from '../../components/ui/Button.tsx';
 import { Field, Input, Segmented, Textarea, toggleClass } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
+import { accountKind } from '../account/AccountViews.tsx';
 import { useT } from '../../i18n/index.tsx';
 import { formatDate, formatMoney, formatNumber, formatPrice, parseDecimal, toDateTimeLocal, toInputNumber } from '../../lib/format.ts';
 
@@ -37,19 +38,33 @@ interface Props {
   trade?: Trade;
   /** Pre-selected instrument for a new trade (the last one traded). */
   defaultInstrumentId?: string;
+  accounts: AccountSummary[];
+  /** Account for a new trade ('' = none). */
+  defaultAccountId: string;
   onSaved: (result: TradeMutation, mode: 'created' | 'updated') => void;
   onDeleted: () => void;
   onCancel: () => void;
 }
 
-export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSaved, onDeleted, onCancel }: Props) {
+export function TradeForm({ user, instruments, trade, defaultInstrumentId, accounts, defaultAccountId, onSaved, onDeleted, onCancel }: Props) {
   const all = useT();
   const t = all.form;
   const account = user.settings.accountCurrency;
   const [direction, setDirection] = useState<Direction>(trade?.direction ?? 'long');
-  const [instrumentId, setInstrumentId] = useState(
-    trade?.instrumentId ?? defaultInstrumentId ?? instruments.find((i) => i.market === 'cfd')?.id ?? instruments[0]?.id ?? '',
-  );
+  const [accountId, setAccountId] = useState(trade ? (trade.accountId ?? '') : defaultAccountId);
+  const tradeAccount = accounts.find((a) => a.id === accountId);
+  // A prop account trades one market; the instrument list follows it.
+  const allowed = tradeAccount?.market ? instruments.filter((i) => i.market === tradeAccount.market) : instruments;
+  const [instrumentId, setInstrumentId] = useState(() => {
+    const preferred = trade?.instrumentId ?? defaultInstrumentId;
+    return allowed.find((i) => i.id === preferred)?.id ?? allowed.find((i) => i.market === 'cfd')?.id ?? allowed[0]?.id ?? '';
+  });
+  const chooseAccount = (id: string) => {
+    setAccountId(id);
+    const market = accounts.find((a) => a.id === id)?.market;
+    const current = instruments.find((i) => i.id === instrumentId);
+    if (market && current?.market !== market) setInstrumentId(instruments.find((i) => i.market === market)?.id ?? '');
+  };
   const [openedAt, setOpenedAt] = useState(toDateTimeLocal(trade ? new Date(trade.openedAt) : new Date()));
   const [closedAt, setClosedAt] = useState(trade?.closedAt ? toDateTimeLocal(new Date(trade.closedAt)) : '');
   const [entry, setEntry] = useState(priceText(trade?.entryPrice));
@@ -99,6 +114,9 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
 
   const askSpread = !trade && isCfd && spread.data?.askUser;
   const sameCurrency = instrument?.quoteCurrency === account;
+  // Risk % and margin use the chosen account's current balance and leverage.
+  const balance = tradeAccount?.balance ?? null;
+  const leverage = tradeAccount?.leverage ?? null;
 
   const preview = (() => {
     const entryPrice = parseDecimal(entry);
@@ -114,6 +132,22 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
       fxRate: sameCurrency ? 1 : parseDecimal(fxRate),
     });
   })();
+
+  // Money at risk and CFD margin in the account currency (need the quote → account rate).
+  const rate = sameCurrency ? 1 : (parseDecimal(fxRate) ?? null);
+  const entryNum = parseDecimal(entry);
+  const sizeNum = parseDecimal(size);
+  const riskMoney =
+    instrument && entryNum != null && sizeNum != null && rate != null
+      ? (() => {
+          const quote = riskQuote(instrument, { entryPrice: entryNum, stopLoss: parseDecimal(stopLoss), positionSize: sizeNum });
+          return quote == null ? null : quote * rate;
+        })()
+      : null;
+  const margin =
+    isCfd && leverage && instrument && entryNum != null && sizeNum != null && rate != null
+      ? marginQuote(instrument, entryNum, sizeNum, leverage) * rate
+      : null;
 
   const loadSignal = () => {
     parseSignal.mutate(signalText, {
@@ -180,6 +214,7 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
         educatorId: source === 'educator' ? educatorId : null,
         signalId: source === 'educator' ? trade?.signalId : null,
         emotionKeys,
+        accountId: accountId || null,
       };
       const result = await saveTrade.mutateAsync({ id: trade?.id, input });
       for (const file of files) await upload.mutateAsync({ tradeId: result.trade.id, file });
@@ -200,8 +235,8 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
   const sizeLabel = isFutures ? t.contracts : t.lots;
   const currentSize = parseDecimal(size);
   const step = sizeStep(sizeBase ?? currentSize ?? 0, isFutures);
-  const cfd = instruments.filter((i) => i.market === 'cfd');
-  const futures = instruments.filter((i) => i.market === 'futures');
+  const cfd = allowed.filter((i) => i.market === 'cfd');
+  const futures = allowed.filter((i) => i.market === 'futures');
 
   return (
     <form onSubmit={submit} className="card relative flex flex-col gap-4 p-5" aria-label={trade ? t.editAria : t.newTrade}>
@@ -251,6 +286,16 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
             </ul>
           )}
         </div>
+      )}
+
+      {accounts.length > 0 && (
+        <Field label={all.accounts.switcher} hint={tradeAccount ? accountKind(all, tradeAccount) : undefined}>
+          <Select
+            value={accountId}
+            onChange={chooseAccount}
+            options={[{ value: '', label: all.accounts.none }, ...accounts.map((a) => ({ value: a.id, label: a.name }))]}
+          />
+        </Field>
       )}
 
       <Field label={t.instrument} hint={instrument ? `${instrument.market === 'cfd' ? 'CFD' : 'Futures'} · ${all.units.name[instrument.measureUnit].toLowerCase()}` : undefined}>
@@ -478,7 +523,21 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, onSav
                 : '—'}
           </dd>
           <dt className="text-dim">{t.risk}</dt>
-          <dd className="m-0 text-right">{preview.riskUnits == null ? '—' : `${formatNumber(preview.riskUnits)} ${unit}`}</dd>
+          <dd className="m-0 text-right">
+            {preview.riskUnits == null ? '—' : `${formatNumber(preview.riskUnits)} ${unit}`}
+            {riskMoney != null && ` · ${formatMoney(riskMoney, false)} ${account}`}
+            {riskMoney != null && balance != null && balance > 0 && (
+              <span className="block text-dim">{t.riskOfBalance(`${formatNumber((riskMoney / balance) * 100)}%`)}</span>
+            )}
+          </dd>
+          {margin != null && leverage != null && (
+            <>
+              <dt className="text-dim">{t.margin(leverage)}</dt>
+              <dd className="m-0 text-right">
+                {formatMoney(margin, false)} {account}
+              </dd>
+            </>
+          )}
           <dt className="text-dim">{t.rPlan}</dt>
           <dd className="m-0 text-right">
             {formatNumber(preview.rMultiple, true)} R · {formatNumber(preview.plannedRR)}

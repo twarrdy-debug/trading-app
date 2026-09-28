@@ -15,9 +15,32 @@ const envSchema = z.object({
   BASIS_INTERVAL_HOURS: z.coerce.number().min(0).default(4),
   /** How often to fetch the Forex Factory calendar; 0 turns it off. */
   CALENDAR_INTERVAL_HOURS: z.coerce.number().min(0).default(2),
-  /** Until accounts exist, every request acts as this user (created by `npm run db:seed`). */
+  /** The seeded admin; outside production, requests without a session act as this user (see AUTH_DEV_BYPASS). */
   DEV_USER_EMAIL: z.string().default('admin@trading.local'),
-});
+  /** Public address of the web app, e.g. https://dziennik.example.com. Used for auth origin checks and links in e-mails. */
+  PUBLIC_URL: z.string().url().default('http://localhost:5173'),
+  /** Signs session cookies and tokens: at least 32 random characters in production. */
+  AUTH_SECRET: z.string().default('dev-secret-change-me-dev-secret-change-me'),
+  /** Who can create an account: `invite` (with a code from an admin), `open`, or `closed`. */
+  REGISTRATION: z.enum(['invite', 'open', 'closed']).default('invite'),
+  /**
+   * Development only: requests without a session act as DEV_USER_EMAIL (and `x-user-id` switches
+   * user), as before login existed. Always off in production.
+   */
+  AUTH_DEV_BYPASS: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  /** Sender of e-mails (password reset). Until a provider is configured, e-mails are written to the log. */
+  MAIL_FROM: z.string().default('Dziennik tradera <no-reply@localhost>'),
+})
+  .superRefine((env, ctx) => {
+    if (env.NODE_ENV !== 'production') return;
+    if (env.AUTH_SECRET.startsWith('dev-secret') || env.AUTH_SECRET.length < 32) {
+      ctx.addIssue({ code: 'custom', path: ['AUTH_SECRET'], message: 'set AUTH_SECRET to at least 32 random characters in production' });
+    }
+  })
+  .transform((env) => ({ ...env, AUTH_DEV_BYPASS: env.NODE_ENV !== 'production' && env.AUTH_DEV_BYPASS }));
 
 export type Env = z.infer<typeof envSchema>;
 

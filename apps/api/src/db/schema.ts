@@ -16,6 +16,7 @@ import {
   TRADE_SOURCES,
   LANGUAGES,
   ACCOUNT_TYPES,
+  DRAWDOWN_TYPES,
   LOSS_ALERT_MODES,
 } from '@trading/shared';
 import { relations } from 'drizzle-orm';
@@ -53,6 +54,7 @@ export const eventCategory = pgEnum('event_category', EVENT_CATEGORIES);
 export const theme = pgEnum('theme', THEMES);
 export const language = pgEnum('language', LANGUAGES);
 export const accountType = pgEnum('account_type', ACCOUNT_TYPES);
+export const drawdownType = pgEnum('drawdown_type', DRAWDOWN_TYPES);
 export const lossAlertMode = pgEnum('loss_alert_mode', LOSS_ALERT_MODES);
 
 // Prices and money are exact decimals, read back as JS numbers.
@@ -89,13 +91,78 @@ export const users = pgTable('users', {
   /** Losses that trigger the overtrading warning, counted as `lossAlertMode` says. */
   lossStreakAlert: smallint('loss_streak_alert').notNull().default(3),
   lossAlertMode: lossAlertMode('loss_alert_mode').notNull().default('streak'),
-  /** Optional account profile (see updateSettingsSchema); stats against the account need a type and a size. */
-  accountType: accountType('account_type'),
-  accountSize: moneyCol('account_size'),
-  maxDrawdownPct: numeric('max_drawdown_pct', { precision: 5, scale: 2, mode: 'number' }),
-  profitTargetPct: numeric('profit_target_pct', { precision: 6, scale: 2, mode: 'number' }),
-  accountStartDate: date('account_start_date'),
+  /** Better Auth: set once the address is confirmed (sign-up by invite counts as confirmed later). */
+  emailVerified: boolean('email_verified').notNull().default(false),
+  image: text('image'),
   ...timestamps,
+});
+
+// --- Authentication (Better Auth, see src/auth.ts) ----------------------------
+
+export const authSessions = pgTable(
+  'auth_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    token: text('token').notNull().unique(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    ipAddress: text('ip_address'),
+    userAgent: text('user_agent'),
+    ...timestamps,
+  },
+  (t) => [index('auth_sessions_user_idx').on(t.userId)],
+);
+
+/** Sign-in methods of a user; `providerId = 'credential'` holds the password hash. */
+export const authAccounts = pgTable(
+  'auth_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    accountId: text('account_id').notNull(),
+    providerId: text('provider_id').notNull(),
+    accessToken: text('access_token'),
+    refreshToken: text('refresh_token'),
+    idToken: text('id_token'),
+    accessTokenExpiresAt: timestamp('access_token_expires_at', { withTimezone: true }),
+    refreshTokenExpiresAt: timestamp('refresh_token_expires_at', { withTimezone: true }),
+    scope: text('scope'),
+    password: text('password'),
+    ...timestamps,
+  },
+  (t) => [index('auth_accounts_user_idx').on(t.userId)],
+);
+
+/** One-time tokens (password reset, e-mail verification). */
+export const authVerifications = pgTable(
+  'auth_verifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    identifier: text('identifier').notNull(),
+    value: text('value').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (t) => [index('auth_verifications_identifier_idx').on(t.identifier)],
+);
+
+/** Invitations for invite-only registration (REGISTRATION=invite). */
+export const invites = pgTable('invites', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  code: text('code').notNull().unique(),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  /** When set, only this address can use the invite. */
+  email: text('email'),
+  /** Role given to the new user. */
+  role: roleKey('role').notNull().default('user'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  usedBy: uuid('used_by').references(() => users.id, { onDelete: 'set null' }),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 // --- Instruments -------------------------------------------------------------
@@ -166,6 +233,37 @@ export const signalTakeProfits = pgTable(
   (t) => [uniqueIndex('signal_tp_level_idx').on(t.signalId, t.level)],
 );
 
+// --- Trading accounts --------------------------------------------------------
+
+/**
+ * A user's trading accounts (live or prop). Balances are the size plus the results of the
+ * trades assigned to the account, in the user's account currency.
+ */
+export const tradingAccounts = pgTable(
+  'trading_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    type: accountType('type').notNull(),
+    /** cfd or futures; required for prop accounts, null = any market. */
+    market: market('market'),
+    size: moneyCol('size').notNull(),
+    /** Prop: static maximum drawdown, % of the size. */
+    maxDrawdownPct: numeric('max_drawdown_pct', { precision: 5, scale: 2, mode: 'number' }),
+    /** Prop: static floor, or trailing the highest end-of-day balance. */
+    drawdownType: drawdownType('drawdown_type').notNull().default('static'),
+    /** Prop: profit target, % of the size. */
+    profitTargetPct: numeric('profit_target_pct', { precision: 6, scale: 2, mode: 'number' }),
+    /** CFD leverage 1:n (LEVERAGE_OPTIONS); only used to show margins. */
+    leverage: smallint('leverage'),
+    ...timestamps,
+  },
+  (t) => [index('trading_accounts_user_idx').on(t.userId)],
+);
+
 // --- Trading journal ---------------------------------------------------------
 
 export const trades = pgTable(
@@ -207,6 +305,8 @@ export const trades = pgTable(
     source: tradeSource('source').notNull().default('own'),
     educatorId: uuid('educator_id').references(() => users.id),
     signalId: uuid('signal_id').references(() => signals.id, { onDelete: 'set null' }),
+    /** Trading account the trade belongs to; null = none. Deleting the account keeps the trade. */
+    accountId: uuid('account_id').references(() => tradingAccounts.id, { onDelete: 'set null' }),
     /** Position id on the trading platform for imported trades ("mt5:<account>:<position>"); prevents duplicates. */
     externalId: text('external_id'),
     ...timestamps,
@@ -214,6 +314,7 @@ export const trades = pgTable(
   (t) => [
     index('trades_user_date_idx').on(t.userId, t.tradeDate, t.openedAt),
     index('trades_user_instrument_idx').on(t.userId, t.instrumentId),
+    index('trades_account_idx').on(t.accountId),
     uniqueIndex('trades_user_external_idx').on(t.userId, t.externalId),
   ],
 );

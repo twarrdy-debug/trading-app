@@ -1,5 +1,6 @@
 // Decorations added to the Fastify instance in buildApp(). Kept in its own module so that
 // clients type-checking against src/types.ts see them without loading the whole app.
+import type { Auth } from './auth.ts';
 import type { DB } from './db/client.ts';
 import type { Env } from './env.ts';
 import type { QuoteProvider } from './services/basis.ts';
@@ -14,5 +15,6 @@ declare module 'fastify' {
     quotes: QuoteProvider;
     calendar: CalendarSource;
     uploadDir: string;
+    auth: Auth;
   }
 }

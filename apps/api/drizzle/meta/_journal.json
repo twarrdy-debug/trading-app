@@ -50,6 +50,34 @@
       "when": 1790585863265,
       "tag": "0006_profit_target_loss_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790587255677,
+      "tag": "0007_leverage",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790588596483,
+      "tag": "0008_trading_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790590086506,
+      "tag": "0009_drawdown_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790595076333,
+      "tag": "0010_auth",
+      "breakpoints": true
     }
   ]
 }

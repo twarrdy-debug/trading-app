@@ -66,6 +66,17 @@ export type Theme = (typeof THEMES)[number];
 export const ACCOUNT_TYPES = ['live', 'prop'] as const;
 export type AccountType = (typeof ACCOUNT_TYPES)[number];
 
+/**
+ * How a prop account's maximum drawdown floor moves: `static` stays at size − limit; `eod` trails
+ * the highest end-of-day balance (minus the limit) and stops once it reaches the starting size.
+ */
+export const DRAWDOWN_TYPES = ['static', 'eod'] as const;
+export type DrawdownType = (typeof DRAWDOWN_TYPES)[number];
+
+/** CFD leverage a user can pick in the settings (1:10 … 1:1000), used to show the margin. */
+export const LEVERAGE_OPTIONS = [10, 20, 30, 40, 50, 100, 500, 1000] as const;
+export type Leverage = (typeof LEVERAGE_OPTIONS)[number];
+
 /** App languages: user-facing strings in the clients and API messages. */
 export const LANGUAGES = ['pl', 'en'] as const;
 export type Language = (typeof LANGUAGES)[number];

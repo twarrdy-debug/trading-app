@@ -6,7 +6,8 @@ import { BarList, type BarRow } from '../../components/charts/BarList.tsx';
 import { EquityChart } from '../../components/charts/EquityChart.tsx';
 import { Segmented } from '../../components/ui/Field.tsx';
 import { Panel } from '../../components/ui/Panel.tsx';
-import { AccountTiles } from '../account/AccountViews.tsx';
+import { AccountSwitcher, useSelectedAccount } from '../account/AccountSwitcher.tsx';
+import { AccountCards, AccountTiles, accountLevels } from '../account/AccountViews.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { Gauge, Stat } from '../../components/ui/Stat.tsx';
 import { useT, type Messages } from '../../i18n/index.tsx';
@@ -52,7 +53,13 @@ export function StatsPage() {
 
   const today = me ? toLocalDate(new Date(), me.settings.timezone) : undefined;
   const dateFrom = today && range !== 'all' ? addDays(today, -(Number(range) - 1)) : undefined;
-  const { data: stats } = useTradeStats({ dateFrom, dateTo: range === 'all' ? undefined : today, instrumentId: instrumentId || undefined });
+  const { filter } = useSelectedAccount();
+  const { data: stats } = useTradeStats({
+    dateFrom,
+    dateTo: range === 'all' ? undefined : today,
+    instrumentId: instrumentId || undefined,
+    account: filter || undefined,
+  });
 
   if (!me || !stats) return <main className="grow p-8 text-dim">{all.common.loading}</main>;
 
@@ -64,6 +71,7 @@ export function StatsPage() {
       <div className="flex flex-wrap items-center gap-4">
         <h1 className="m-0 text-2xl font-bold tracking-tight">{t.title}</h1>
         <div className="grow" />
+        <AccountSwitcher className="w-56" />
         <div className="w-56">
           <Select
             aria-label={all.table.instrument}
@@ -114,11 +122,21 @@ export function StatsPage() {
         />
       </div>
 
-      {stats.account && <AccountTiles account={stats.account} currency={currency} />}
+      {stats.account ? (
+        <AccountTiles account={stats.account} currency={currency} />
+      ) : (
+        filter === '' && stats.accounts.length > 0 && <AccountCards accounts={stats.accounts} currency={currency} />
+      )}
 
       <Panel title={all.journal.equityCurve} actions={<span className="font-mono text-xs text-dim">{currency}</span>}>
         <div className="px-3 py-4">
-          <EquityChart data={stats.equityCurve} currency={currency} height={280} />
+          <EquityChart
+            data={stats.equityCurve}
+            currency={currency}
+            height={280}
+            balance={stats.balanceCurve}
+            levels={stats.balanceCurve ? accountLevels(all, stats.account) : []}
+          />
         </div>
       </Panel>
 

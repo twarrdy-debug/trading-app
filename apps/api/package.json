@@ -12,7 +12,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file-if-exists=.env src/db/migrate.ts",
     "db:seed": "tsx --env-file-if-exists=.env src/db/seed.ts",
-    "typecheck": "tsc --noEmit -p ."
+    "typecheck": "tsc --noEmit -p .",
+    "user:login": "tsx --env-file-if-exists=.env src/db/set-login.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
@@ -22,6 +23,7 @@
     "@fastify/swagger": "^9.9.0",
     "@fastify/swagger-ui": "^6.1.1",
     "@trading/shared": "^0.1.0",
+    "better-auth": "^1.7.6",
     "drizzle-orm": "^0.45.3",
     "fastify": "^5.12.5",
     "fastify-plugin": "^6.0.0",

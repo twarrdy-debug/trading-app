@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeTradeMetrics, detectDirection, formatDayLabel, parseSignal, toLocalDate, type InstrumentSpec } from '../src/index.ts';
+import { computeTradeMetrics, detectDirection, formatDayLabel, marginQuote, notionalQuote, riskQuote, parseSignal, toLocalDate, type InstrumentSpec } from '../src/index.ts';
 
 const XAUUSD: InstrumentSpec = { measureUnit: 'pip', unitSize: 0.1, unitValue: 10 };
 const NQ: InstrumentSpec = { measureUnit: 'tick', unitSize: 0.25, unitValue: 5 };
@@ -119,5 +119,18 @@ describe('detectDirection', () => {
   it('returns null when the levels do not tell', () => {
     expect(detectDirection(4400)).toBeNull();
     expect(detectDirection(4400, 4400, [4400])).toBeNull();
+  });
+});
+
+describe('risk and margin', () => {
+  it('prices the stop distance in money', () => {
+    expect(riskQuote(XAUUSD, { entryPrice: 4406.5, stopLoss: 4414, positionSize: 0.5 })).toBe(375);
+    expect(riskQuote(NQ, { entryPrice: 19842, stopLoss: 19822, positionSize: 2 })).toBe(800);
+    expect(riskQuote(XAUUSD, { entryPrice: 4406.5, stopLoss: null, positionSize: 1 })).toBeNull();
+  });
+  it('computes the notional and the margin at a leverage', () => {
+    expect(notionalQuote(XAUUSD, 4400, 1)).toBe(440_000);
+    expect(marginQuote(XAUUSD, 4400, 0.1, 100)).toBe(440);
+    expect(marginQuote({ measureUnit: 'point', unitSize: 1, unitValue: 1 }, 19842, 1, 20)).toBe(992.1);
   });
 });

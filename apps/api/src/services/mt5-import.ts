@@ -13,6 +13,7 @@ import { instruments, trades } from '../db/schema.ts';
 import { badRequest } from '../errors.ts';
 import { t } from '../i18n.ts';
 import type { CurrentUser } from '../plugins/current-user.ts';
+import { getAccount } from './accounts.ts';
 import { createTrade, type TradeContext } from './trades.ts';
 import { isZip, xlsxRows } from './xlsx.ts';
 
@@ -28,7 +29,7 @@ function readReport(bytes: Uint8Array): Mt5Report {
   throw badRequest('mt5UnsupportedFile');
 }
 
-export type ImportStatus = 'ready' | 'duplicate' | 'unknownSymbol' | 'invalidSize' | 'imported';
+export type ImportStatus = 'ready' | 'duplicate' | 'unknownSymbol' | 'invalidSize' | 'wrongMarket' | 'imported';
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -43,6 +44,7 @@ export async function importMt5(ctx: TradeContext, user: CurrentUser, bytes: Uin
   if (report.positions.length === 0) throw badRequest('mt5NoPositions');
 
   const list = await ctx.db.select().from(instruments).where(eq(instruments.active, true));
+  const account = fields.accountId ? await getAccount(ctx.db, user, fields.accountId) : null;
   const prefix = report.account ? `mt5:${report.account}:` : 'mt5:';
   const externalIds = report.positions.map((p) => prefix + p.position);
   const existing = new Set(
@@ -62,9 +64,11 @@ export async function importMt5(ctx: TradeContext, user: CurrentUser, bytes: Uin
       ? 'duplicate'
       : !instrument
         ? 'unknownSymbol'
-        : instrument.market === 'futures' && !Number.isInteger(p.volume)
-          ? 'invalidSize'
-          : 'ready') as ImportStatus;
+        : account?.market && account.market !== instrument.market
+          ? 'wrongMarket'
+          : instrument.market === 'futures' && !Number.isInteger(p.volume)
+            ? 'invalidSize'
+            : 'ready') as ImportStatus;
     const metrics = instrument
       ? computeTradeMetrics(instrument, { direction: p.direction, entryPrice: p.openPrice, exitPrice: p.closePrice, positionSize: p.volume })
       : null;
@@ -121,6 +125,7 @@ export async function importMt5(ctx: TradeContext, user: CurrentUser, bytes: Uin
           }).trim(),
           source: 'own',
           emotionKeys: [],
+          accountId: account?.id ?? null,
         },
         { externalId: row.externalId },
       );
@@ -143,6 +148,7 @@ export async function importMt5(ctx: TradeContext, user: CurrentUser, bytes: Uin
       duplicate: count('duplicate'),
       unknownSymbol: count('unknownSymbol'),
       invalidSize: count('invalidSize'),
+      wrongMarket: count('wrongMarket'),
     },
     unknownSymbols: [...new Set(rows.filter((r) => r.status === 'unknownSymbol').map((r) => r.symbol))],
     warnings: [...warnings],

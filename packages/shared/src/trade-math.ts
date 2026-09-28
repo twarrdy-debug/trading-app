@@ -75,6 +75,23 @@ export function computeTradeMetrics(spec: InstrumentSpec, trade: TradeInput): Tr
   return { resultUnits, pnlQuote, pnlAccount, riskUnits, rMultiple, plannedRR, spreadCost };
 }
 
+/** Money at risk in the quote currency: stop distance × unit value × position size. Null without a stop. */
+export function riskQuote(spec: InstrumentSpec, trade: Pick<TradeInput, 'entryPrice' | 'stopLoss' | 'positionSize'>): number | null {
+  if (trade.stopLoss == null) return null;
+  return round((Math.abs(trade.entryPrice - trade.stopLoss) / spec.unitSize) * spec.unitValue * trade.positionSize, 2);
+}
+
+/**
+ * Position value in the quote currency: price / unit size × unit value × size.
+ * XAUUSD 4400, 1 lot: 4400 / 0.1 × 10 = 440 000 USD (100 oz).
+ */
+export const notionalQuote = (spec: InstrumentSpec, price: number, positionSize: number) =>
+  round((price / spec.unitSize) * spec.unitValue * positionSize, 2);
+
+/** CFD margin in the quote currency at the given leverage (1:leverage). */
+export const marginQuote = (spec: InstrumentSpec, price: number, positionSize: number, leverage: number) =>
+  round(notionalQuote(spec, price, positionSize) / leverage, 2);
+
 /**
  * BUY (long) or SELL (short) read from a signal's levels: a stop above the entry means a sell,
  * below means a buy. Without a stop, the first take profit decides. Null when neither is given.
