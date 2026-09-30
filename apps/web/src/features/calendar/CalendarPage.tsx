@@ -6,6 +6,7 @@ import {
   EVENT_CATEGORY_LABELS,
   EVENT_IMPACT_LABELS,
   EVENT_IMPACTS,
+  releaseSurprise,
   toLocalDate,
   type EventCategory,
   type EventImpact,
@@ -14,7 +15,7 @@ import {
 import { useEffect, useState } from 'react';
 import { useCalendar, useInstruments, useMe, useRefreshCalendar } from '../../api/hooks.ts';
 import { Button } from '../../components/ui/Button.tsx';
-import { Segmented, toggleClass } from '../../components/ui/Field.tsx';
+import { Chip, Segmented } from '../../components/ui/Field.tsx';
 import { Panel } from '../../components/ui/Panel.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useLanguage, useT } from '../../i18n/index.tsx';
@@ -33,6 +34,9 @@ const IMPACT_COLOR: Record<EventImpact, string> = {
   holiday: '#8B98A5',
 };
 
+
+/** Actual against the forecast, from the currency's point of view (green better, red worse). */
+export const ACTUAL_COLOR = { better: 'text-buy', worse: 'text-sell', inline: '' } as const;
 
 const FILTERS_KEY = 'calendar-filters';
 
@@ -94,23 +98,13 @@ export function ImpactFlag({ impact, size = 16 }: { impact: EventImpact; size?: 
   );
 }
 
-function Chip({ active, onClick, children, label }: { active: boolean; onClick: () => void; children: React.ReactNode; label?: string }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      aria-label={label}
-      onClick={onClick}
-      className={`flex h-8 items-center gap-1.5 px-2.5 text-xs ${toggleClass(active)}`}
-    >
-      {children}
-    </button>
-  );
-}
-
 function EventRow({ event, timezone, compact = false }: { event: CalendarEvent; timezone: string; compact?: boolean }) {
   const t = useT().calendar;
   const language = useLanguage();
+  // The actual comes from FinancialJuice headlines matched to the event (services/news.ts).
+  const surprise = event.actual
+    ? releaseSurprise({ name: event.title, actual: event.actual, forecast: event.forecast, previous: event.previous, revision: null })
+    : null;
   const time =
     event.impact === 'holiday'
       ? t.allDay
@@ -119,8 +113,8 @@ function EventRow({ event, timezone, compact = false }: { event: CalendarEvent; 
     <li
       className={`grid items-center gap-x-3 gap-y-1 border-b border-line px-5 py-3 last:border-b-0 ${
         compact
-          ? 'grid-cols-[64px_44px_20px_minmax(0,1fr)] md:grid-cols-[64px_44px_20px_minmax(0,1fr)_90px_90px]'
-          : 'grid-cols-[64px_44px_20px_minmax(0,1fr)] md:grid-cols-[72px_48px_20px_minmax(0,1fr)_150px_90px_90px]'
+          ? 'grid-cols-[64px_44px_20px_minmax(0,1fr)] md:grid-cols-[64px_44px_20px_minmax(0,1fr)_110px_90px_90px]'
+          : 'grid-cols-[64px_44px_20px_minmax(0,1fr)] md:grid-cols-[72px_48px_20px_minmax(0,1fr)_150px_110px_90px_90px]'
       } ${event.impact === 'high' ? 'bg-warn-bg' : ''}`}
     >
       <span className="font-mono text-sm">{time}</span>
@@ -138,6 +132,10 @@ function EventRow({ event, timezone, compact = false }: { event: CalendarEvent; 
         </span>
       </span>
       {!compact && <span className="hidden text-xs text-dim md:inline">{EVENT_CATEGORY_LABELS[language][event.category]}</span>}
+      <span className={`hidden text-right font-mono text-xs font-semibold md:inline ${ACTUAL_COLOR[surprise ?? 'inline']}`}>
+        <span className="font-normal text-dim">{t.actual} </span>
+        {event.actual ?? '—'}
+      </span>
       <span className="hidden text-right font-mono text-xs md:inline">
         <span className="text-dim">{t.forecast} </span>
         {event.forecast ?? '—'}

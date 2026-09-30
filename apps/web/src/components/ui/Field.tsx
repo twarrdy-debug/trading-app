@@ -12,6 +12,21 @@ export const toggleClass = (active: boolean) =>
     active ? 'border-accent bg-accent/15 text-ink font-semibold' : 'border-line bg-panel text-dim hover:text-ink hover:bg-raised'
   }`;
 
+/** Small filter pill (currencies, categories, impacts). */
+export function Chip({ active, onClick, children, label }: { active: boolean; onClick: () => void; children: ReactNode; label?: string }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      aria-label={label}
+      onClick={onClick}
+      className={`flex h-8 items-center gap-1.5 px-2.5 text-xs ${toggleClass(active)}`}
+    >
+      {children}
+    </button>
+  );
+}
+
 interface FieldProps {
   label: ReactNode;
   /** Short note on the right of the label (a few words). */

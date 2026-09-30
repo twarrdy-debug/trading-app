@@ -15,6 +15,15 @@ const envSchema = z.object({
   BASIS_INTERVAL_HOURS: z.coerce.number().min(0).default(4),
   /** How often to fetch the Forex Factory calendar; 0 turns it off. */
   CALENDAR_INTERVAL_HOURS: z.coerce.number().min(0).default(2),
+  /**
+   * How often to poll the FinancialJuice news feed, in seconds (at least 10); 0 turns it off.
+   * FinancialJuice answers 429 to about the third request within a minute from one IP.
+   */
+  NEWS_INTERVAL_SECONDS: z.coerce
+    .number()
+    .min(0)
+    .default(60)
+    .refine((s) => s === 0 || s >= 10, 'at least 10 seconds, or 0 to turn the feed off'),
   /** The seeded admin; outside production, requests without a session act as this user (see AUTH_DEV_BYPASS). */
   DEV_USER_EMAIL: z.string().default('admin@trading.local'),
   /** Public address of the web app, e.g. https://dziennik.example.com. Used for auth origin checks and links in e-mails. */

@@ -11,6 +11,7 @@ import {
   EVENT_CATEGORIES,
   EVENT_IMPACTS,
   LANGUAGES,
+  NEWS_CATEGORIES,
   LEVEL_TYPES,
   MARKETS,
   MEASURE_UNITS,
@@ -69,6 +70,12 @@ export const updateSettingsSchema = z
     lossStreakAlert: z.number().int().min(1).max(20),
     /** Count losses in a row (default) or all losing trades of the day. */
     lossAlertMode: z.enum(LOSS_ALERT_MODES),
+    /** Words that highlight a headline in the news feed and raise an alert (sound, notification). */
+    newsKeywords: z
+      .array(z.string().trim().min(2).max(40))
+      .max(30)
+      // Duplicates differing only in case are dropped; the first spelling stays.
+      .transform((words) => words.filter((w, i) => words.findIndex((o) => o.toLowerCase() === w.toLowerCase()) === i)),
   })
   .partial();
 
@@ -324,6 +331,35 @@ export const calendarQuerySchema = z.object({
 });
 
 export type CalendarQuery = z.infer<typeof calendarQuerySchema>;
+
+// --- News ----------------------------------------------------------------------
+
+export const newsQuerySchema = z.object({
+  /** Cursor from the previous page (`nextCursor`): older headlines only. */
+  before: z.string().max(100).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(80),
+  categories: csv(NEWS_CATEGORIES),
+  currencies: z
+    .string()
+    .transform((s) => s.split(',').map((v) => v.trim().toUpperCase()).filter(Boolean))
+    .optional(),
+  /** Headlines about the instrument's currencies or its market (gold, oil, indices). */
+  instrumentId: z.uuid().optional(),
+  /** Text search in the headline. */
+  q: z.string().trim().max(100).optional(),
+  /** Only headlines FinancialJuice marked red. */
+  important: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .optional(),
+  /** Include paywalled and image-only posts (hidden by default). */
+  noise: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .optional(),
+});
+
+export type NewsQuery = z.infer<typeof newsQuerySchema>;
 
 export type UpdateSettingsInput = z.infer<typeof updateSettingsSchema>;
 export type CreateInstrumentInput = z.infer<typeof createInstrumentSchema>;

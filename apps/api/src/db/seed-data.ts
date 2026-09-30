@@ -22,12 +22,13 @@ const cfd = (symbol: string, name: string, extra: Partial<CreateInstrumentInput>
   ...extra,
 });
 
+// Gold futures count in pips like XAUUSD (their 0.10 tick is the gold pip); the others in ticks.
 const future = (symbol: string, name: string, assetClass: 'index' | 'metal', unitSize: number, unitValue: number): CreateInstrumentInput => ({
   symbol,
   name,
   market: 'futures',
   assetClass,
-  measureUnit: 'tick',
+  measureUnit: assetClass === 'metal' ? 'pip' : 'tick',
   unitSize,
   unitValue,
   quoteCurrency: 'USD',

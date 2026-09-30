@@ -25,6 +25,7 @@ import { analysisRoutes } from './routes/analysis.ts';
 import { authRoutes } from './routes/auth.ts';
 import { basisRoutes } from './routes/basis.ts';
 import { calendarRoutes } from './routes/calendar.ts';
+import { newsRoutes } from './routes/news.ts';
 import { meRoutes } from './routes/me.ts';
 import { referenceRoutes } from './routes/reference.ts';
 import { signalRoutes } from './routes/signals.ts';
@@ -34,6 +35,7 @@ import { liveQuoteProvider, type QuoteProvider } from './services/basis.ts';
 import { forexFactorySource, type CalendarSource } from './services/calendar.ts';
 import { frankfurterProvider, type FxProvider } from './services/fx.ts';
 import { logMailer, type Mailer } from './services/mailer.ts';
+import { financialJuiceSource, NewsHub, type NewsSource } from './services/news.ts';
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
@@ -43,6 +45,7 @@ export async function buildApp({
   fx = frankfurterProvider,
   quotes = liveQuoteProvider,
   calendar = forexFactorySource,
+  news = financialJuiceSource,
   mailer,
   logger = true,
 }: {
@@ -51,6 +54,7 @@ export async function buildApp({
   fx?: FxProvider;
   quotes?: QuoteProvider;
   calendar?: CalendarSource;
+  news?: NewsSource;
   /** Defaults to writing e-mails to the log (no provider configured yet). */
   mailer?: Mailer;
   logger?: boolean;
@@ -66,6 +70,8 @@ export async function buildApp({
   app.decorate('fx', fx);
   app.decorate('quotes', quotes);
   app.decorate('calendar', calendar);
+  app.decorate('news', news);
+  app.decorate('newsHub', new NewsHub());
   app.decorate('uploadDir', uploadDir);
   app.decorate('auth', createAuth({ db, env, mailer: mailer ?? logMailer((msg) => app.log.info(msg)) }));
 
@@ -113,6 +119,7 @@ export async function buildApp({
   await app.register(spreadRoutes);
   await app.register(basisRoutes);
   await app.register(calendarRoutes);
+  await app.register(newsRoutes);
   await app.register(signalRoutes);
   await app.register(analysisRoutes);
 

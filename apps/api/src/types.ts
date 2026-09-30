@@ -6,6 +6,7 @@ import type { basisOverview } from './services/basis.ts';
 import type { listEvents, RefreshResult } from './services/calendar.ts';
 import type { invites } from './db/schema.ts';
 import type { importMt5 } from './services/mt5-import.ts';
+import type { listNews } from './services/news.ts';
 import type { createTrade, listTrades, tradeStats, tradingMonitor, TradeView } from './services/trades.ts';
 
 /** What a value looks like after JSON serialization (Dates become strings). */
@@ -28,6 +29,8 @@ export type BasisPair = BasisOverview[number];
 export type CalendarResponse = Jsonify<Awaited<ReturnType<typeof listEvents>>>;
 export type CalendarEvent = CalendarResponse['events'][number];
 export type CalendarRefresh = RefreshResult;
+export type NewsResponse = Jsonify<Awaited<ReturnType<typeof listNews>>>;
+export type NewsItem = NewsResponse['items'][number];
 export type TradingMonitor = Jsonify<Awaited<ReturnType<typeof tradingMonitor>>>;
 export type AccountSummary = Jsonify<AccountOverview>;
 export type TradingAccount = Jsonify<TradingAccountRow>;

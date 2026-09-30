@@ -136,6 +136,29 @@ export const EVENT_CATEGORY_LABELS: Record<Language, Record<EventCategory, strin
   },
 };
 
+/** Kinds of news headlines, derived from the title by parseNewsTitle() (shared/news.ts). */
+export const NEWS_CATEGORIES = ['data', 'central_bank', 'politics', 'geopolitics', 'markets', 'other'] as const;
+export type NewsCategory = (typeof NEWS_CATEGORIES)[number];
+
+export const NEWS_CATEGORY_LABELS: Record<Language, Record<NewsCategory, string>> = {
+  pl: {
+    data: 'Dane makro',
+    central_bank: 'Banki centralne',
+    politics: 'Polityka i cła',
+    geopolitics: 'Geopolityka',
+    markets: 'Rynki',
+    other: 'Inne',
+  },
+  en: {
+    data: 'Economic data',
+    central_bank: 'Central banks',
+    politics: 'Politics & tariffs',
+    geopolitics: 'Geopolitics',
+    markets: 'Markets',
+    other: 'Other',
+  },
+};
+
 /** Default number of losing trades in a row (same day) that trigger the trading monitor alert; each user can change it. */
 export const DEFAULT_LOSS_STREAK_ALERT = 3;
 

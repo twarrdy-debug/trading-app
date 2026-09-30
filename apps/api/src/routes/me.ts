@@ -20,6 +20,7 @@ export const toPublicUser = (u: CurrentUser, authenticated = true) => ({
     maxTradesPerDay: u.maxTradesPerDay,
     lossStreakAlert: u.lossStreakAlert,
     lossAlertMode: u.lossAlertMode,
+    newsKeywords: u.newsKeywords,
   },
 });
 

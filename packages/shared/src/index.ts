@@ -2,6 +2,7 @@ export * from './enums.ts';
 export * from './trade-math.ts';
 export * from './signal-parser.ts';
 export * from './calendar.ts';
+export * from './news.ts';
 export * from './dates.ts';
 export * from './instruments.ts';
 export * from './schemas.ts';

@@ -3,8 +3,10 @@ import {
   emotionLabel,
   riskQuote,
   formatDayLabel,
+  newsAffectsInstrument,
   toLocalDate,
   validatePriceSides,
+  type AssetClass,
   type CreateTradeInput,
   type FxRateSource,
   type TradeFilters,
@@ -14,7 +16,9 @@ import type { DB } from '../db/client.ts';
 import {
   dailySpreads,
   emotions,
+  instrumentCurrencies,
   instruments,
+  newsItems,
   signals,
   tradeEmotions,
   trades,
@@ -238,6 +242,8 @@ export async function updateTrade(ctx: TradeContext, user: CurrentUser, id: stri
 /**
  * Selects the user's trades with their daily number. The number is counted over all
  * trades of the day (before filters), so "3/26.09.2025" always means the third trade that day.
+ * `accountDayIndex` counts within the trade's account (trades without one form their own group),
+ * which is what the daily limit applies to, as in the trading monitor.
  */
 function selectNumbered(db: DB, userId: string) {
   const numbered = db.$with('numbered').as(
@@ -248,6 +254,9 @@ function selectNumbered(db: DB, userId: string) {
           .mapWith(Number)
           .as('day_index'),
         dayCount: sql<number>`count(*) over (partition by ${trades.tradeDate})`.mapWith(Number).as('day_count'),
+        accountDayIndex: sql<number>`row_number() over (partition by ${trades.tradeDate}, ${trades.accountId} order by ${trades.openedAt}, ${trades.createdAt})`
+          .mapWith(Number)
+          .as('account_day_index'),
       })
       .from(trades)
       .where(eq(trades.userId, userId)),
@@ -258,6 +267,7 @@ function selectNumbered(db: DB, userId: string) {
       ...getTableColumns(trades),
       dayIndex: numbered.dayIndex,
       dayCount: numbered.dayCount,
+      accountDayIndex: numbered.accountDayIndex,
       instrumentSymbol: instruments.symbol,
       measureUnit: instruments.measureUnit,
       market: instruments.market,
@@ -272,6 +282,41 @@ function selectNumbered(db: DB, userId: string) {
 
 type NumberedRow = Awaited<ReturnType<ReturnType<typeof selectNumbered>['execute']>>[number];
 
+/**
+ * Red headlines (news_items.important) within the time span of the given closed trades, and what
+ * each trade's instrument reacts to (newsAffectsInstrument()).
+ */
+async function importantNewsDuring(db: DB, rows: NumberedRow[]) {
+  const closed = rows.filter((r) => r.closedAt != null);
+  if (closed.length === 0) return { news: [], instrumentsById: new Map<string, { currencies: string[]; assetClass: AssetClass }>() };
+  const instrumentIds = [...new Set(closed.map((r) => r.instrumentId))];
+  const [instrumentRows, currencyRows] = await Promise.all([
+    db.select({ id: instruments.id, assetClass: instruments.assetClass }).from(instruments).where(inArray(instruments.id, instrumentIds)),
+    db.select().from(instrumentCurrencies).where(inArray(instrumentCurrencies.instrumentId, instrumentIds)),
+  ]);
+  const instrumentsById = new Map(
+    instrumentRows.map((i) => [
+      i.id,
+      { assetClass: i.assetClass, currencies: currencyRows.filter((c) => c.instrumentId === i.id).map((c) => c.currency) },
+    ]),
+  );
+  const from = new Date(Math.min(...closed.map((r) => r.openedAt.getTime())));
+  const to = new Date(Math.max(...closed.map((r) => r.closedAt!.getTime())));
+  const news = await db
+    .select({
+      id: newsItems.id,
+      title: newsItems.title,
+      publishedAt: newsItems.publishedAt,
+      currencies: newsItems.currencies,
+      assets: newsItems.assets,
+      category: newsItems.category,
+    })
+    .from(newsItems)
+    .where(and(eq(newsItems.important, true), eq(newsItems.noise, false), gte(newsItems.publishedAt, from), lte(newsItems.publishedAt, to)))
+    .orderBy(newsItems.publishedAt);
+  return { news, instrumentsById };
+}
+
 async function decorate(db: DB, user: CurrentUser, rows: NumberedRow[]) {
   const ids = rows.map((r) => r.id);
   const [emotionRows, screenshotRows] = ids.length
@@ -282,6 +327,7 @@ async function decorate(db: DB, user: CurrentUser, rows: NumberedRow[]) {
     : [[], []];
   const accounts = await listAccounts(db, user);
   const accountRows = await accountTradeRows(db, user, accounts.map((a) => a.id));
+  const redNews = await importantNewsDuring(db, rows);
 
   return rows.map(({ userId: _userId, instrumentSymbol, measureUnit, market, unitSize, unitValue, ...t }) => {
     const risk = riskQuote({ measureUnit, unitSize, unitValue }, t);
@@ -296,10 +342,21 @@ async function decorate(db: DB, user: CurrentUser, rows: NumberedRow[]) {
     /** The same as % of its account's balance when the trade was opened (null without an account). */
     riskPct: riskAccount != null && balance != null && balance > 0 ? round2((riskAccount / balance) * 100) : null,
     dayLabel: formatDayLabel(t.dayIndex, t.tradeDate, t.direction),
-    overDailyLimit: user.maxTradesPerDay != null && t.dayIndex > user.maxTradesPerDay,
+    /** Over the daily limit within the trade's account (the limit applies to each account). */
+    overDailyLimit: user.maxTradesPerDay != null && t.accountDayIndex > user.maxTradesPerDay,
     status: t.exitPrice == null ? ('open' as const) : ('closed' as const),
     instrument: { id: t.instrumentId, symbol: instrumentSymbol, measureUnit, market },
     emotionKeys: emotionRows.filter((e) => e.tradeId === t.id).map((e) => e.emotionKey),
+    /** Red headlines about the trade's instrument while it was open (closed trades only). */
+    redNews: t.closedAt
+      ? redNews.news
+          .filter((n) => n.publishedAt >= t.openedAt && n.publishedAt <= t.closedAt!)
+          .filter((n) => {
+            const instrument = redNews.instrumentsById.get(t.instrumentId);
+            return instrument != null && newsAffectsInstrument(n, instrument);
+          })
+          .map(({ id, title, publishedAt }) => ({ id, title, publishedAt }))
+      : [],
     screenshots: screenshotRows
       .filter((s) => s.tradeId === t.id)
       .map((s) => ({ id: s.id, url: `/files/${s.storageKey}`, mimeType: s.mimeType, sizeBytes: s.sizeBytes })),

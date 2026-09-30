@@ -5,7 +5,7 @@ import { Button } from '../../components/ui/Button.tsx';
 import { Field, Input } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
-import { formatMoney, formatNumber, formatPrice, formatUnits } from '../../lib/format.ts';
+import { currentLocale, formatMoney, formatNumber, formatPrice, formatUnits } from '../../lib/format.ts';
 
 const COLUMNS = 'grid grid-cols-[156px_104px_80px_minmax(128px,1fr)_60px_90px_90px_100px] gap-3 px-5';
 
@@ -77,6 +77,25 @@ export function TradeFilters({
         </div>
       )}
     </div>
+  );
+}
+
+/** White "N" on the FinancialJuice red: a red headline came out while the trade was open. */
+function RedNewsMark({ trade }: { trade: Trade }) {
+  const t = useT().table;
+  const titles = trade.redNews
+    .map((n) => `${new Date(n.publishedAt).toLocaleTimeString(currentLocale(), { hour: '2-digit', minute: '2-digit' })} ${n.title}`)
+    .join('\n');
+  const label = t.redNews(trade.redNews.length, titles);
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      className="inline-flex size-[18px] shrink-0 items-center justify-center rounded-[5px] bg-breaking font-sans text-[11px] leading-none font-bold text-on-breaking"
+    >
+      N
+    </span>
   );
 }
 
@@ -156,8 +175,11 @@ export function TradeTable({
                     )}
                   </span>
                   <DirectionMark direction={t.direction} />
-                  <span className="truncate text-dim">
-                    {formatPrice(t.entryPrice)} → {t.exitPrice == null ? all.common.open : formatPrice(t.exitPrice)}
+                  <span className="flex min-w-0 items-center gap-2 text-dim">
+                    <span className="truncate">
+                      {formatPrice(t.entryPrice)} → {t.exitPrice == null ? all.common.open : formatPrice(t.exitPrice)}
+                    </span>
+                    {t.redNews.length > 0 && <RedNewsMark trade={t} />}
                   </span>
                   <span className="text-dim">{t.riskPct != null ? `${formatNumber(t.riskPct)}%` : '—'}</span>
                   <span

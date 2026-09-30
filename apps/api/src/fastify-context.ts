@@ -6,6 +6,7 @@ import type { Env } from './env.ts';
 import type { QuoteProvider } from './services/basis.ts';
 import type { CalendarSource } from './services/calendar.ts';
 import type { FxProvider } from './services/fx.ts';
+import type { NewsHub, NewsSource } from './services/news.ts';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -14,6 +15,8 @@ declare module 'fastify' {
     fx: FxProvider;
     quotes: QuoteProvider;
     calendar: CalendarSource;
+    news: NewsSource;
+    newsHub: NewsHub;
     uploadDir: string;
     auth: Auth;
   }

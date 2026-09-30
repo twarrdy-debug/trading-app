@@ -18,6 +18,8 @@ import {
   ACCOUNT_TYPES,
   DRAWDOWN_TYPES,
   LOSS_ALERT_MODES,
+  NEWS_CATEGORIES,
+  type NewsData,
 } from '@trading/shared';
 import { relations } from 'drizzle-orm';
 import {
@@ -26,6 +28,7 @@ import {
   date,
   index,
   integer,
+  jsonb,
   numeric,
   pgEnum,
   pgTable,
@@ -56,6 +59,7 @@ export const language = pgEnum('language', LANGUAGES);
 export const accountType = pgEnum('account_type', ACCOUNT_TYPES);
 export const drawdownType = pgEnum('drawdown_type', DRAWDOWN_TYPES);
 export const lossAlertMode = pgEnum('loss_alert_mode', LOSS_ALERT_MODES);
+export const newsCategory = pgEnum('news_category', NEWS_CATEGORIES);
 
 // Prices and money are exact decimals, read back as JS numbers.
 const priceCol = (name: string) => numeric(name, { precision: 18, scale: 6, mode: 'number' });
@@ -91,6 +95,8 @@ export const users = pgTable('users', {
   /** Losses that trigger the overtrading warning, counted as `lossAlertMode` says. */
   lossStreakAlert: smallint('loss_streak_alert').notNull().default(3),
   lossAlertMode: lossAlertMode('loss_alert_mode').notNull().default('streak'),
+  /** Words that highlight a news headline and raise an alert. */
+  newsKeywords: text('news_keywords').array().notNull().default([]),
   /** Better Auth: set once the address is confirmed (sign-up by invite counts as confirmed later). */
   emailVerified: boolean('email_verified').notNull().default(false),
   image: text('image'),
@@ -499,6 +505,42 @@ export const economicEvents = pgTable(
   (t) => [
     uniqueIndex('events_source_external_idx').on(t.source, t.externalId),
     index('events_time_idx').on(t.eventTime),
+  ],
+);
+
+/**
+ * Headlines from a live news feed (FinancialJuice RSS). Shared by all users; tags are derived from
+ * the title by parseNewsTitle() when the headline is stored.
+ */
+export const newsItems = pgTable(
+  'news_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    source: text('source').notNull().default('financialjuice'),
+    /** The feed's own id (RSS guid), so a headline is stored once. */
+    externalId: text('external_id').notNull(),
+    title: text('title').notNull(),
+    url: text('url'),
+    speaker: text('speaker'),
+    sourceName: text('source_name'),
+    category: newsCategory('category').notNull().default('other'),
+    currencies: text('currencies').array().notNull().default([]),
+    assets: assetClass('assets').array().notNull().default([]),
+    /** Released value, for headlines like "… Actual 4.9% (Forecast 4.6%, Previous 4.3%)". */
+    data: jsonb('data').$type<NewsData>(),
+    /** The calendar event the release was matched to (its `actual` is filled from this headline). */
+    eventId: uuid('event_id').references(() => economicEvents.id, { onDelete: 'set null' }),
+    noise: boolean('noise').notNull().default(false),
+    /** Marked red by FinancialJuice (market-moving). Only their site API tells; the RSS does not. */
+    important: boolean('important').notNull().default(false),
+    /** FinancialJuice's own tags ("USD", "Energy", "US Indexes"…), when known. */
+    labels: text('labels').array().notNull().default([]),
+    publishedAt: timestamp('published_at', { withTimezone: true }).notNull(),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('news_source_external_idx').on(t.source, t.externalId),
+    index('news_published_idx').on(t.publishedAt),
   ],
 );
 

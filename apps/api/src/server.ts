@@ -4,6 +4,7 @@ import { seed } from './db/seed-data.ts';
 import { loadEnv } from './env.ts';
 import { liveQuoteProvider, startBasisScheduler } from './services/basis.ts';
 import { forexFactorySource, startCalendarScheduler } from './services/calendar.ts';
+import { financialJuiceRss, startNewsScheduler } from './services/news.ts';
 
 const env = loadEnv();
 const database = createDatabase(env.DATABASE_URL);
@@ -19,9 +20,14 @@ const stopCalendar =
   env.CALENDAR_INTERVAL_HOURS > 0
     ? startCalendarScheduler(database.db, forexFactorySource, env.CALENDAR_INTERVAL_HOURS, (msg) => app.log.info(msg))
     : () => {};
+const stopNews =
+  env.NEWS_INTERVAL_SECONDS > 0
+    ? startNewsScheduler(database.db, app.news, app.newsHub, env.NEWS_INTERVAL_SECONDS, (msg) => app.log.info(msg), financialJuiceRss)
+    : () => {};
 app.addHook('onClose', async () => {
   stopBasis();
   stopCalendar();
+  stopNews();
   await database.close();
 });
 

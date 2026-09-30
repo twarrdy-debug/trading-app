@@ -7,6 +7,7 @@ import { Segmented } from '../components/ui/Field.tsx';
 import { lossAlertMessage } from '../features/journal/MonitorPanel.tsx';
 import { SettingsDialog } from '../features/settings/SettingsDialog.tsx';
 import { useT, type Messages } from '../i18n/index.tsx';
+import { useNewsLive, useNewsStream } from '../lib/news-live.ts';
 import { ACCENT_OPTIONS, applyTheme, DEFAULT_ACCENT } from '../lib/theme.ts';
 
 export const APP_NAME = '[NAZWA]';
@@ -17,6 +18,7 @@ const NAV = [
   { to: '/kalkulator', label: 'calculator' },
   { to: '/analiza', label: 'analysis' },
   { to: '/kalendarz', label: 'calendar' },
+  { to: '/news', label: 'news' },
   // Signals are hidden from the menu for now; the page stays at /sygnaly.
 ] as const satisfies readonly { to: string; label: keyof Messages['nav'] }[];
 
@@ -113,6 +115,14 @@ export function AppShell() {
   const basis = useBasis();
   // The calculator covers gold only, so only its difference alert matters here.
   const basisAlert = basis.data?.find((p) => p.pairKey === 'gold')?.alert ?? false;
+  useNewsStream(Boolean(me), me?.settings.newsKeywords ?? [], t.news.alertTitle);
+  const newsUnseen = useNewsLive().unseen > 0;
+  const navDot = (to: string) =>
+    to === '/kalkulator' && basisAlert ? (
+      <span className="ml-1.5 inline-block size-2 rounded-full bg-sell align-middle" title={t.nav.basisChanged} />
+    ) : to === '/news' && newsUnseen ? (
+      <span className="ml-1.5 inline-block size-2 rounded-full bg-accent align-middle" title={t.nav.newsAlert} />
+    ) : null;
 
   const theme = me?.settings.theme ?? 'dark';
   const accent = me?.settings.accentColor ?? DEFAULT_ACCENT;
@@ -145,9 +155,7 @@ export function AppShell() {
                 activeOptions={{ exact: item.to === '/' }}
               >
                 {t.nav[item.label]}
-                {item.to === '/kalkulator' && basisAlert && (
-                  <span className="ml-1.5 inline-block size-2 rounded-full bg-sell align-middle" title={t.nav.basisChanged} />
-                )}
+                {navDot(item.to)}
               </Link>
             ))}
           </nav>
@@ -217,6 +225,7 @@ export function AppShell() {
               activeOptions={{ exact: item.to === '/' }}
             >
               {t.nav[item.label]}
+              {navDot(item.to)}
             </Link>
           ))}
         </nav>

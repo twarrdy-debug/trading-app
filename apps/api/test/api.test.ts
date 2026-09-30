@@ -10,6 +10,7 @@ import { loadEnv } from '../src/env.ts';
 import type { QuoteProvider, QuoteSource } from '../src/services/basis.ts';
 import type { CalendarSource, FfEvent } from '../src/services/calendar.ts';
 import type { FxProvider } from '../src/services/fx.ts';
+import { parseFjApiNews, refreshNews, type FeedItem, type NewsSource } from '../src/services/news.ts';
 
 /** Offline stand-in for the ECB feed; counts calls to check caching. */
 const rates: Record<string, number> = { 'USD/EUR': 0.85, 'USD/GBP': 0.75, 'USD/PLN': 3.66 };
@@ -37,6 +38,10 @@ const quotes: QuoteProvider = {
 let ffWeek: FfEvent[] = [];
 const calendar: CalendarSource = { fetchWeek: async () => ffWeek };
 
+/** Offline news feed; tests replace the headlines to simulate new ones arriving. */
+let feed: FeedItem[] = [];
+const news: NewsSource = { fetchLatest: async () => feed };
+
 let app: App;
 let database: Database;
 let uploadDir: string;
@@ -48,7 +53,7 @@ beforeAll(async () => {
   database = createDatabase(env.DATABASE_URL);
   await database.migrate();
   await seed(database.db, env.DEV_USER_EMAIL);
-  app = await buildApp({ db: database.db, env, fx, quotes, calendar, logger: false });
+  app = await buildApp({ db: database.db, env, fx, quotes, calendar, news, logger: false });
 
   const instruments = (await app.inject({ url: '/instruments' })).json<{ id: string; symbol: string }[]>();
   for (const i of instruments) ids[i.symbol] = i.id;
@@ -68,6 +73,11 @@ describe('reference data', () => {
     expect(Object.keys(ids).sort()).toEqual(
       ['ES1', 'GC1', 'MES1', 'MGC1', 'MNQ1', 'MYM1', 'NQ1', 'US100', 'US30', 'US500', 'XAUUSD', 'YM1'],
     );
+    // Gold futures count in pips like XAUUSD; other futures in ticks.
+    const units = Object.fromEntries(
+      (await app.inject({ url: '/instruments' })).json().map((i: { symbol: string; measureUnit: string }) => [i.symbol, i.measureUnit]),
+    );
+    expect(units).toMatchObject({ XAUUSD: 'pip', GC1: 'pip', MGC1: 'pip', NQ1: 'tick', MNQ1: 'tick' });
     const emotions = (await app.inject({ url: '/emotions' })).json();
     expect(emotions[0]).toEqual({ key: 'calm', label: 'Spokój' });
     const me = (await app.inject({ url: '/me' })).json();
@@ -438,6 +448,178 @@ describe('economic calendar', () => {
   it('feeds the pre-session checklist', async () => {
     const checklist = (await app.inject({ url: `/checklists/${ids.XAUUSD}/2025-10-14` })).json();
     expect(checklist.events.map((e: { title: string }) => e.title)).toEqual(['Core CPI m/m', 'FOMC Member Waller Speaks']);
+  });
+});
+
+describe('news', () => {
+  const item = (guid: string, title: string, publishedAt: string): FeedItem => ({
+    guid,
+    title: `FinancialJuice: ${title}`,
+    link: `https://www.financialjuice.com/News/${guid}/x.aspx`,
+    publishedAt: new Date(publishedAt),
+  });
+  type Headline = { title: string; category: string; event: { title: string; impact: string } | null; data: { actual: string } | null };
+  const titles = (url: string) => app.inject({ url }).then((r) => r.json().items.map((i: Headline) => i.title));
+
+  it('stores new headlines once, tagged, and fills the calendar actual', async () => {
+    // Both CPI prints are scheduled for 08:30 New York; the headline is headline CPI, not core.
+    const { importWeek } = await import('../src/services/calendar.ts');
+    ffWeek = [...ffWeek, { title: 'CPI m/m', country: 'USD', date: '2025-10-14T08:30:00-04:00', impact: 'High', forecast: '0.3%', previous: '0.4%' }];
+    await importWeek(database.db, ffWeek);
+
+    feed = [
+      item('1', 'US CPI MoM Actual 0.4% (Forecast 0.3%, Previous 0.4%)', '2025-10-14T12:30:04Z'),
+      item('2', "ECB's Lagarde: Inflation risks remain tilted to the upside.", '2025-10-14T12:40:00Z'),
+      item('3', 'Fed Interest Rate Probabilities', '2025-10-14T12:45:00Z'),
+      item('4', 'Gold climbs to a record as Treasury yields slip - Reuters', '2025-10-14T12:50:00Z'),
+    ];
+    expect(await refreshNews(app.db, app.news, app.newsHub)).toEqual({ status: 'updated', added: 4 });
+    // The feed repeats what it already sent.
+    expect(await refreshNews(app.db, app.news, app.newsHub)).toEqual({ status: 'updated', added: 0 });
+
+    const list = (await app.inject({ url: '/news' })).json();
+    expect(list.items.map((i: Headline) => i.title)).toEqual([
+      'Gold climbs to a record as Treasury yields slip',
+      "ECB's Lagarde: Inflation risks remain tilted to the upside.",
+      'US CPI MoM Actual 0.4% (Forecast 0.3%, Previous 0.4%)',
+    ]);
+    expect(list.items[0]).toMatchObject({ sourceName: 'Reuters', category: 'markets', currencies: ['USD'], assets: ['metal'] });
+    expect(list.items[1]).toMatchObject({ speaker: "ECB's Lagarde", category: 'central_bank', currencies: ['EUR'] });
+    expect(list.items[2]).toMatchObject({ category: 'data', data: { actual: '0.4%', forecast: '0.3%' }, event: { title: 'CPI m/m', impact: 'high' } });
+
+    const day = (await app.inject({ url: '/calendar?from=2025-10-14&to=2025-10-14&currencies=USD' })).json();
+    const actuals = Object.fromEntries(day.events.map((e: { title: string; actual: string | null }) => [e.title, e.actual]));
+    expect(actuals).toMatchObject({ 'CPI m/m': '0.4%', 'Core CPI m/m': null });
+  });
+
+  it('filters by category, currency, instrument and text, and hides noise', async () => {
+    expect(await titles('/news?noise=true')).toHaveLength(4);
+    expect(await titles('/news?categories=central_bank,data')).toHaveLength(2);
+    expect(await titles('/news?currencies=EUR')).toEqual(["ECB's Lagarde: Inflation risks remain tilted to the upside."]);
+    // XAUUSD: USD headlines and gold headlines.
+    expect(await titles(`/news?instrumentId=${ids.XAUUSD}`)).toEqual([
+      'Gold climbs to a record as Treasury yields slip',
+      'US CPI MoM Actual 0.4% (Forecast 0.3%, Previous 0.4%)',
+    ]);
+    expect(await titles('/news?q=lagarde')).toHaveLength(1);
+    expect(await titles('/news?q=100%25')).toEqual([]);
+    expect((await app.inject({ url: '/news?categories=rumours' })).statusCode).toBe(400);
+  });
+
+  it('pages back in time', async () => {
+    const first = (await app.inject({ url: '/news?limit=2' })).json();
+    expect(first.items).toHaveLength(2);
+    const second = (await app.inject({ url: `/news?limit=2&before=${encodeURIComponent(first.nextCursor)}` })).json();
+    expect(second.items.map((i: Headline) => i.title)).toEqual(['US CPI MoM Actual 0.4% (Forecast 0.3%, Previous 0.4%)']);
+    expect(second.nextCursor).toBeNull();
+    expect(first.feed).toMatchObject({ enabled: false, live: false, error: null });
+  });
+
+  it('keeps each user\'s alert keywords', async () => {
+    const me = (await app.inject({ method: 'PATCH', url: '/me', payload: { newsKeywords: ['Powell', ' gold ', 'powell'] } })).json();
+    expect(me.settings.newsKeywords).toEqual(['Powell', 'gold']);
+    expect((await app.inject({ method: 'PATCH', url: '/me', payload: { newsKeywords: ['x'] } })).statusCode).toBe(400);
+    await app.inject({ method: 'PATCH', url: '/me', payload: { newsKeywords: [] } });
+  });
+
+  it('reads the red marking from the FinancialJuice site API', () => {
+    const now = new Date('2026-09-29T10:47:00Z');
+    const items = parseFjApiNews(
+      [
+        // The site sends the right time of day with a wrong date.
+        { NewsID: 9, Title: 'RBA Cash Rate Actual 4.6% (Forecast 4.6%, Previous 4.35%)', DatePublished: '2026-09-24T04:30:05.1', Level: 'active', Labels: ['AUD', 'Forex'] },
+        { NewsID: 8, Title: 'Japanese Leading Indicator', DatePublished: '2026-09-24T05:05:42', Level: 'active active-critical' },
+        { NewsID: 7, Title: 'Late yesterday', DatePublished: '2026-09-24T23:50:00', Level: 'news-general' },
+        { NewsID: 6, Title: 'Breaking banner', DatePublished: '2026-09-29T10:40:00', Breaking: true, Level: '' },
+      ],
+      now,
+    );
+    expect(items.map((i) => [i.guid, i.publishedAt.toISOString(), i.important])).toEqual([
+      ['9', '2026-09-29T04:30:05.000Z', true],
+      ['8', '2026-09-29T05:05:42.000Z', true],
+      ['7', '2026-09-28T23:50:00.000Z', false],
+      ['6', '2026-09-29T10:40:00.000Z', true],
+    ]);
+    expect(items[0]!.labels).toEqual(['AUD', 'Forex']);
+  });
+
+  it('keeps red headlines and marks ones first seen in the RSS', async () => {
+    feed = [
+      { ...item('10', 'Iran fires missiles at tanker in Hormuz', '2025-10-14T14:00:00Z'), important: true, labels: ['Energy'] },
+      // RSS first: no marking known yet.
+      item('11', 'Israel strikes targets near Tehran', '2025-10-14T14:05:00Z'),
+      // FJ tags add a currency the title rules miss.
+      { ...item('12', 'Crude falls on demand worries', '2025-10-14T14:10:00Z'), important: false, labels: ['CAD', 'Energy'] },
+    ];
+    await refreshNews(app.db, app.news, app.newsHub);
+    expect(await titles('/news?important=true')).toEqual(['Iran fires missiles at tanker in Hormuz']);
+
+    // The site API later says it was red: it is updated, and pushed again only while recent.
+    const { db } = database;
+    const { newsItems } = await import('../src/db/schema.ts');
+    const { eq } = await import('drizzle-orm');
+    await db.update(newsItems).set({ publishedAt: new Date(Date.now() - 60_000) }).where(eq(newsItems.externalId, '11'));
+    feed = [{ ...item('11', 'Israel strikes targets near Tehran', '2025-10-14T14:05:00Z'), important: true, labels: [] }];
+    const pushed: string[] = [];
+    const off = app.newsHub.subscribe((items) => pushed.push(...items.map((i) => i.title)));
+    expect(await refreshNews(app.db, app.news, app.newsHub)).toEqual({ status: 'updated', added: 1 });
+    off();
+    expect(pushed).toEqual(['Israel strikes targets near Tehran']);
+    expect(await titles('/news?important=true')).toHaveLength(2);
+    // An old one (backfill after a restart) changes colour without an alert.
+    feed = [{ ...item('12', 'Crude falls on demand worries', '2025-10-14T14:10:00Z'), important: true, labels: ['CAD'] }];
+    expect(await refreshNews(app.db, app.news, app.newsHub)).toEqual({ status: 'updated', added: 0 });
+    expect(await titles('/news?important=true')).toHaveLength(3);
+    await db.update(newsItems).set({ important: false }).where(eq(newsItems.externalId, '12'));
+    const cad = (await app.inject({ url: '/news?currencies=CAD' })).json().items[0];
+    expect(cad).toMatchObject({ title: 'Crude falls on demand worries', currencies: ['CAD'], important: false });
+  });
+
+  it('marks closed trades during which a red headline came out', async () => {
+    const trade = (openedAt: string, closedAt: string | null) =>
+      post('/trades', {
+        instrumentId: ids.XAUUSD,
+        direction: 'long',
+        openedAt,
+        closedAt,
+        entryPrice: 4000,
+        exitPrice: closedAt ? 4010 : null,
+        stopLoss: 3990,
+        positionSize: 0.1,
+      }).then((r) => r.json().trade as { id: string; redNews: { title: string }[] });
+    // A red AUD release in the same hour does not concern gold.
+    feed = [{ ...item('20', 'RBA Cash Rate Actual 4.6% (Forecast 4.6%, Previous 4.35%)', '2025-10-14T14:15:00Z'), important: true, labels: ['AUD'] }];
+    await refreshNews(app.db, app.news, app.newsHub);
+    // The red "Iran fires missiles…" headline came out at 14:00 UTC (geopolitics: it concerns gold).
+    const during = await trade('2025-10-14T13:30:00Z', '2025-10-14T14:30:00Z');
+    const after = await trade('2025-10-14T14:30:00Z', '2025-10-14T15:00:00Z');
+    const open = await trade('2025-10-14T13:30:00Z', null);
+    expect(during.redNews.map((n) => n.title)).toEqual(['Iran fires missiles at tanker in Hormuz']);
+    expect(after.redNews).toEqual([]);
+    expect(open.redNews).toEqual([]);
+    const listed = (await app.inject({ url: '/trades?dateFrom=2025-10-14&dateTo=2025-10-14' })).json();
+    expect(listed.items.find((t: { id: string }) => t.id === during.id).redNews).toHaveLength(1);
+    for (const t of [during, after, open]) await app.inject({ method: 'DELETE', url: `/trades/${t.id}` });
+  });
+
+  it('streams new headlines as they arrive', async () => {
+    const address = await app.listen({ host: '127.0.0.1', port: 0 });
+    const controller = new AbortController();
+    const res = await fetch(`${address}/news/stream`, { signal: controller.signal });
+    expect(res.headers.get('content-type')).toContain('text/event-stream');
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    await reader.read(); // retry: …
+    expect(app.newsHub.subscribers).toBe(1);
+
+    feed = [item('5', "Fed's Powell: No preset course for rates.", '2025-10-14T13:00:00Z'), ...feed];
+    await refreshNews(app.db, app.news, app.newsHub);
+    let text = '';
+    while (!text.includes('\n\n')) text += decoder.decode((await reader.read()).value);
+    expect(text).toContain('event: news');
+    const pushed = JSON.parse(/data: (.*)/.exec(text)![1]!);
+    expect(pushed).toEqual([expect.objectContaining({ title: "Fed's Powell: No preset course for rates.", currencies: ['USD'] })]);
+    controller.abort();
   });
 });
 
@@ -921,6 +1103,30 @@ describe('trading accounts', () => {
       accountId: prop.id,
     });
     expect(foreign.statusCode).toBe(404);
+  });
+});
+
+describe('daily limit per account', () => {
+  it('flags only trades over the limit within their own account', async () => {
+    const before = (await app.inject({ url: '/me' })).json().settings.maxTradesPerDay;
+    await app.inject({ method: 'PATCH', url: '/me', payload: { maxTradesPerDay: 1 } });
+    const account = (await post('/accounts', { name: 'Limit test', type: 'live', size: 10_000 })).json();
+    const trade = (openedAt: string, accountId: string | null) =>
+      post('/trades', { instrumentId: ids.XAUUSD, direction: 'long', openedAt, entryPrice: 4000, stopLoss: 3990, positionSize: 0.1, accountId }).then(
+        (r) => r.json().trade as { id: string; dayLabel: string; overDailyLimit: boolean },
+      );
+    const a1 = await trade('2025-11-05T09:00:00Z', account.id);
+    const none1 = await trade('2025-11-05T10:00:00Z', null);
+    const a2 = await trade('2025-11-05T11:00:00Z', account.id);
+    // Numbering stays shared across accounts; the limit does not.
+    expect([a1, none1, a2].map((t) => [t.dayLabel.slice(0, 1), t.overDailyLimit])).toEqual([
+      ['1', false],
+      ['2', false],
+      ['3', true],
+    ]);
+    for (const t of [a1, none1, a2]) await app.inject({ method: 'DELETE', url: `/trades/${t.id}` });
+    await app.inject({ method: 'DELETE', url: `/accounts/${account.id}` });
+    await app.inject({ method: 'PATCH', url: '/me', payload: { maxTradesPerDay: before } });
   });
 });
 

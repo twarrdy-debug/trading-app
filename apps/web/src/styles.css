@@ -39,6 +39,9 @@
   --sell-soft: #fce8ea;
   --on-side: #ffffff;
   --warn-bg: #fff4de;
+  /* Headlines FinancialJuice marks red (their #b80101), so they read the same as in FJ. */
+  --breaking: #b80101;
+  --on-breaking: #ffffff;
   /* The accent darkened enough to read as a line or text on white. */
   --accent-ink: color-mix(in oklab, var(--accent) 72%, #000);
   --shadow: 0 1px 2px rgb(16 24 40 / 0.04), 0 8px 24px rgb(16 24 40 / 0.06);
@@ -61,6 +64,8 @@
   --sell-soft: rgb(255 107 119 / 0.14);
   --on-side: #0e1116;
   --warn-bg: #2a2210;
+  --breaking: #b80101;
+  --on-breaking: #ffffff;
   --accent-ink: var(--accent);
   --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.22);
   --shadow-pop: 0 4px 12px rgb(0 0 0 / 0.4), 0 20px 48px rgb(0 0 0 / 0.5);
@@ -81,6 +86,8 @@
   --color-sell-soft: var(--sell-soft);
   --color-on-side: var(--on-side);
   --color-warn-bg: var(--warn-bg);
+  --color-breaking: var(--breaking);
+  --color-on-breaking: var(--on-breaking);
   --color-accent: var(--accent);
   --color-accent-ink: var(--accent-ink);
   --color-on-accent: var(--on-accent);
@@ -93,6 +100,17 @@
   background: var(--panel);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
+}
+
+/* A headline that just arrived from the live stream: an accent wash that fades out. */
+@keyframes news-fresh {
+  from {
+    background-color: color-mix(in oklab, var(--accent) 24%, transparent);
+  }
+}
+
+@utility news-fresh {
+  animation: news-fresh 8s ease-out;
 }
 
 /* Small label above values and fields. */

@@ -8,6 +8,7 @@ import type {
   Emotion,
   Instrument,
   Mt5Import,
+  NewsResponse,
   PublicUser,
   Trade,
   TradeList,
@@ -25,7 +26,7 @@ import type {
   UpdateAccountInput,
   UpdateSettingsInput,
 } from '@trading/shared';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, qs } from './client.ts';
 
 const STATIC = { staleTime: 5 * 60_000 };
@@ -204,6 +205,40 @@ export function useRefreshCalendar() {
     onSuccess: () => client.invalidateQueries({ queryKey: ['calendar'] }),
   });
 }
+
+export interface NewsParams {
+  categories?: string[];
+  currencies?: string[];
+  instrumentId?: string;
+  q?: string;
+  noise?: boolean;
+  important?: boolean;
+}
+
+/**
+ * Headlines, newest first, a page at a time. The live stream (lib/news-live.ts) invalidates it when
+ * new ones arrive; the interval only matters while the stream is down.
+ */
+export const useNews = (p: NewsParams) =>
+  useInfiniteQuery({
+    queryKey: ['news', p],
+    queryFn: ({ pageParam }) =>
+      api<NewsResponse>(
+        `/news${qs({
+          before: pageParam,
+          categories: p.categories?.join(','),
+          currencies: p.currencies?.join(','),
+          instrumentId: p.instrumentId,
+          q: p.q,
+          noise: p.noise ? 'true' : undefined,
+          important: p.important ? 'true' : undefined,
+        })}`,
+      ),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    placeholderData: (previous) => previous,
+    refetchInterval: 60_000,
+  });
 
 /** Preview (commit = false) or import of an MT5 history report. */
 export function useMt5Import() {

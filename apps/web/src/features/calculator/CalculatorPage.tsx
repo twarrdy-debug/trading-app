@@ -418,7 +418,7 @@ export function CalculatorPage() {
                           <span>{t.fromSource(sourceSymbol, formatPrice(row.source))}</span>
                           {ticks != null && (
                             <span>
-                              {t.ticks(ticks, `${sign}${formatNumber(ticks)}`)} · {t.perContract1(`${sign}${formatMoney(ticks * tickValue, false)}`)}
+                              {t.pips(ticks, `${sign}${formatNumber(ticks)}`)} · {t.perContract1(`${sign}${formatMoney(ticks * tickValue, false)}`)}
                               {rr && ` · ${rr}`}
                             </span>
                           )}

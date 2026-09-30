@@ -7,6 +7,7 @@ import { ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage } from '
 import { CalculatorPage } from './features/calculator/CalculatorPage.tsx';
 import { CalendarPage } from './features/calendar/CalendarPage.tsx';
 import { JournalPage } from './features/journal/JournalPage.tsx';
+import { NewsPage } from './features/news/NewsPage.tsx';
 import { StatsPage } from './features/stats/StatsPage.tsx';
 import { I18nProvider } from './i18n/index.tsx';
 import { AppShell, ComingSoon } from './layout/AppShell.tsx';
@@ -28,6 +29,7 @@ const routeTree = rootRoute.addChildren([
     createRoute({ getParentRoute: () => appRoute, path: '/kalkulator', component: CalculatorPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/analiza', component: () => <ComingSoon module="analysis" /> }),
     createRoute({ getParentRoute: () => appRoute, path: '/kalendarz', component: CalendarPage }),
+    createRoute({ getParentRoute: () => appRoute, path: '/news', component: NewsPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/sygnaly', component: () => <ComingSoon module="signals" /> }),
   ]),
 ]);
