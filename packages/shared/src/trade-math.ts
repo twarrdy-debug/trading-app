@@ -1,4 +1,4 @@
-import type { Direction, MeasureUnit } from './enums.ts';
+import type { Direction, Language, MeasureUnit } from './enums.ts';
 
 export interface InstrumentSpec {
   measureUnit: MeasureUnit;
@@ -75,24 +75,67 @@ export function computeTradeMetrics(spec: InstrumentSpec, trade: TradeInput): Tr
   return { resultUnits, pnlQuote, pnlAccount, riskUnits, rMultiple, plannedRR, spreadCost };
 }
 
+/** Money at risk in the quote currency: stop distance × unit value × position size. Null without a stop. */
+export function riskQuote(spec: InstrumentSpec, trade: Pick<TradeInput, 'entryPrice' | 'stopLoss' | 'positionSize'>): number | null {
+  if (trade.stopLoss == null) return null;
+  return round((Math.abs(trade.entryPrice - trade.stopLoss) / spec.unitSize) * spec.unitValue * trade.positionSize, 2);
+}
+
+/**
+ * Position value in the quote currency: price / unit size × unit value × size.
+ * XAUUSD 4400, 1 lot: 4400 / 0.1 × 10 = 440 000 USD (100 oz).
+ */
+export const notionalQuote = (spec: InstrumentSpec, price: number, positionSize: number) =>
+  round((price / spec.unitSize) * spec.unitValue * positionSize, 2);
+
+/** CFD margin in the quote currency at the given leverage (1:leverage). */
+export const marginQuote = (spec: InstrumentSpec, price: number, positionSize: number, leverage: number) =>
+  round(notionalQuote(spec, price, positionSize) / leverage, 2);
+
+/**
+ * BUY (long) or SELL (short) read from a signal's levels: a stop above the entry means a sell,
+ * below means a buy. Without a stop, the first take profit decides. Null when neither is given.
+ */
+export function detectDirection(
+  entry: number,
+  stopLoss?: number | null,
+  takeProfits: readonly (number | null | undefined)[] = [],
+): Direction | null {
+  if (stopLoss != null && stopLoss !== entry) return stopLoss > entry ? 'short' : 'long';
+  const tp = takeProfits.find((t): t is number => t != null && t !== entry);
+  if (tp != null) return tp > entry ? 'long' : 'short';
+  return null;
+}
+
+const SIDE_MESSAGES = {
+  pl: {
+    slBelow: 'SL powinien być poniżej ceny wejścia',
+    slAbove: 'SL powinien być powyżej ceny wejścia',
+    tp: (n: number, above: boolean) => `TP${n} powinien być ${above ? 'powyżej' : 'poniżej'} ceny wejścia`,
+  },
+  en: {
+    slBelow: 'SL should be below the entry price',
+    slAbove: 'SL should be above the entry price',
+    tp: (n: number, above: boolean) => `TP${n} should be ${above ? 'above' : 'below'} the entry price`,
+  },
+};
+
 /** Warnings for prices on the wrong side of the entry, e.g. a long with SL above entry. */
 export function validatePriceSides(
   direction: Direction,
   entry: number,
   stopLoss?: number | null,
   takeProfits: readonly number[] = [],
+  language: Language = 'pl',
 ): string[] {
+  const m = SIDE_MESSAGES[language];
   const sign = directionSign(direction);
   const warnings: string[] = [];
   if (stopLoss != null && (stopLoss - entry) * sign >= 0) {
-    warnings.push(direction === 'long' ? 'SL powinien być poniżej ceny wejścia' : 'SL powinien być powyżej ceny wejścia');
+    warnings.push(direction === 'long' ? m.slBelow : m.slAbove);
   }
   takeProfits.forEach((tp, i) => {
-    if ((tp - entry) * sign <= 0) {
-      warnings.push(
-        `TP${i + 1} powinien być ${direction === 'long' ? 'powyżej' : 'poniżej'} ceny wejścia`,
-      );
-    }
+    if ((tp - entry) * sign <= 0) warnings.push(m.tp(i + 1, direction === 'long'));
   });
   return warnings;
 }

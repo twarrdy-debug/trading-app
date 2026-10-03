@@ -8,6 +8,104 @@
       "when": 1790428779745,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790437790859,
+      "tag": "0001_basis_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790439602684,
+      "tag": "0002_event_category",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790514957844,
+      "tag": "0003_language_external_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790525094783,
+      "tag": "0004_loss_streak_alert",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790584712986,
+      "tag": "0005_account_profile",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790585863265,
+      "tag": "0006_profit_target_loss_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790587255677,
+      "tag": "0007_leverage",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790588596483,
+      "tag": "0008_trading_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790590086506,
+      "tag": "0009_drawdown_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790595076333,
+      "tag": "0010_auth",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1790674764621,
+      "tag": "0011_aberrant_kid_colt",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1790678997335,
+      "tag": "0012_easy_harpoon",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1790770951978,
+      "tag": "0013_gold_futures_in_pips",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1790772533063,
+      "tag": "0014_accent_orange_or_mono",
+      "breakpoints": true
     }
   ]
 }

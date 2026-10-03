@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeTradeMetrics, formatDayLabel, parseSignal, toLocalDate, type InstrumentSpec } from '../src/index.ts';
+import { computeTradeMetrics, detectDirection, formatDayLabel, marginQuote, notionalQuote, riskQuote, parseSignal, toLocalDate, type InstrumentSpec } from '../src/index.ts';
 
 const XAUUSD: InstrumentSpec = { measureUnit: 'pip', unitSize: 0.1, unitValue: 10 };
 const NQ: InstrumentSpec = { measureUnit: 'tick', unitSize: 0.25, unitValue: 5 };
@@ -104,5 +104,33 @@ describe('dates', () => {
 
   it('formats the daily label', () => {
     expect(formatDayLabel(1, '2025-09-26', 'long')).toBe('1/26.09.2025 – LONG');
+  });
+});
+
+describe('detectDirection', () => {
+  it('reads SELL from a stop above the entry and BUY from a stop below', () => {
+    expect(detectDirection(4406.5, 4414, [4390])).toBe('short');
+    expect(detectDirection(4371, 4360, [4395])).toBe('long');
+  });
+  it('falls back to the first take profit without a stop', () => {
+    expect(detectDirection(4400, null, [4380, 4370])).toBe('short');
+    expect(detectDirection(4400, undefined, [null, 4420])).toBe('long');
+  });
+  it('returns null when the levels do not tell', () => {
+    expect(detectDirection(4400)).toBeNull();
+    expect(detectDirection(4400, 4400, [4400])).toBeNull();
+  });
+});
+
+describe('risk and margin', () => {
+  it('prices the stop distance in money', () => {
+    expect(riskQuote(XAUUSD, { entryPrice: 4406.5, stopLoss: 4414, positionSize: 0.5 })).toBe(375);
+    expect(riskQuote(NQ, { entryPrice: 19842, stopLoss: 19822, positionSize: 2 })).toBe(800);
+    expect(riskQuote(XAUUSD, { entryPrice: 4406.5, stopLoss: null, positionSize: 1 })).toBeNull();
+  });
+  it('computes the notional and the margin at a leverage', () => {
+    expect(notionalQuote(XAUUSD, 4400, 1)).toBe(440_000);
+    expect(marginQuote(XAUUSD, 4400, 0.1, 100)).toBe(440);
+    expect(marginQuote({ measureUnit: 'point', unitSize: 1, unitValue: 1 }, 19842, 1, 20)).toBe(992.1);
   });
 });

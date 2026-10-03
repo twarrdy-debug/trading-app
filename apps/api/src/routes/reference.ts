@@ -1,4 +1,4 @@
-import { createEducatorSchema, createInstrumentSchema } from '@trading/shared';
+import { createEducatorSchema, createInstrumentSchema, emotionLabel } from '@trading/shared';
 import { asc, eq } from 'drizzle-orm';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { emotions, instrumentCurrencies, instruments, users } from '../db/schema.ts';
@@ -20,7 +20,7 @@ export const referenceRoutes: FastifyPluginAsyncZod = async (app) => {
     const { currencies, ...values } = req.body;
     const created = await app.db.transaction(async (tx) => {
       const [row] = await tx.insert(instruments).values(values).onConflictDoNothing().returning();
-      if (!row) throw new HttpError(409, `Instrument ${values.symbol} już istnieje`);
+      if (!row) throw new HttpError(409, 'instrumentExists', { symbol: values.symbol });
       if (currencies.length > 0) {
         await tx.insert(instrumentCurrencies).values(currencies.map((currency) => ({ instrumentId: row.id, currency })));
       }
@@ -29,9 +29,10 @@ export const referenceRoutes: FastifyPluginAsyncZod = async (app) => {
     return reply.status(201).send(created);
   });
 
-  app.get('/emotions', { schema: { tags: ['słowniki'] } }, async () =>
-    app.db.select({ key: emotions.key, label: emotions.label }).from(emotions).orderBy(asc(emotions.sortOrder)),
-  );
+  app.get('/emotions', { schema: { tags: ['słowniki'] } }, async (req) => {
+    const rows = await app.db.select({ key: emotions.key, label: emotions.label }).from(emotions).orderBy(asc(emotions.sortOrder));
+    return rows.map((e) => ({ key: e.key, label: req.user.language === 'pl' ? e.label : emotionLabel(req.user.language, e.key) }));
+  });
 
   app.get('/educators', { schema: { tags: ['słowniki'] } }, async () =>
     app.db
@@ -48,7 +49,7 @@ export const referenceRoutes: FastifyPluginAsyncZod = async (app) => {
       .values({ displayName: req.body.displayName, email: req.body.email, role: 'educator' })
       .onConflictDoNothing()
       .returning({ id: users.id, displayName: users.displayName });
-    if (!row) throw new HttpError(409, 'Użytkownik z tym adresem e-mail już istnieje');
+    if (!row) throw new HttpError(409, 'emailExists');
     return reply.status(201).send(row);
   });
 };

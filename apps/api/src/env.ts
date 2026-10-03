@@ -11,9 +11,53 @@ const envSchema = z.object({
   DATABASE_URL: z.string().default('./.data/pglite'),
   UPLOAD_DIR: z.string().default('./.data/uploads'),
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
-  /** Until accounts exist, every request acts as this user (created by `npm run db:seed`). */
+  /** How often to measure the CFD/futures difference; 0 turns the scheduler off. */
+  BASIS_INTERVAL_HOURS: z.coerce.number().min(0).default(4),
+  /** How often to fetch the Forex Factory calendar; 0 turns it off. */
+  CALENDAR_INTERVAL_HOURS: z.coerce.number().min(0).default(2),
+  /**
+   * How often to poll the FinancialJuice news feed, in seconds (at least 10); 0 turns it off.
+   * FinancialJuice answers 429 to about the third request within a minute from one IP.
+   */
+  NEWS_INTERVAL_SECONDS: z.coerce
+    .number()
+    .min(0)
+    .default(60)
+    .refine((s) => s === 0 || s >= 10, 'at least 10 seconds, or 0 to turn the feed off'),
+  /**
+   * The first admin, created by the seed while there is no admin (production: your e-mail; then set its
+   * password with `npm run user:login`). Outside production, requests without a session act as this user.
+   */
   DEV_USER_EMAIL: z.string().default('admin@trading.local'),
-});
+  /** Public address of the web app, e.g. https://dziennik.example.com. Used for auth origin checks and links in e-mails. */
+  PUBLIC_URL: z.string().url().default('http://localhost:5173'),
+  /** Signs session cookies and tokens: at least 32 random characters in production. */
+  AUTH_SECRET: z.string().default('dev-secret-change-me-dev-secret-change-me'),
+  /** Who can create an account: `invite` (with a code from an admin), `open`, or `closed`. */
+  REGISTRATION: z.enum(['invite', 'open', 'closed']).default('invite'),
+  /**
+   * Development only: requests without a session act as DEV_USER_EMAIL (and `x-user-id` switches
+   * user), as before login existed. Always off in production.
+   */
+  AUTH_DEV_BYPASS: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  /** Sender of e-mails (password reset, invitations), e.g. `Dziennik tradera <noreply@twardy.it>`. */
+  MAIL_FROM: z.string().default('Dziennik tradera <no-reply@localhost>'),
+  /**
+   * SMTP server as a URL, e.g. `smtps://resend:<API key>@smtp.resend.com:465`. Without it e-mails
+   * are written to the log (development).
+   */
+  SMTP_URL: z.string().optional(),
+})
+  .superRefine((env, ctx) => {
+    if (env.NODE_ENV !== 'production') return;
+    if (env.AUTH_SECRET.startsWith('dev-secret') || env.AUTH_SECRET.length < 32) {
+      ctx.addIssue({ code: 'custom', path: ['AUTH_SECRET'], message: 'set AUTH_SECRET to at least 32 random characters in production' });
+    }
+  })
+  .transform((env) => ({ ...env, AUTH_DEV_BYPASS: env.NODE_ENV !== 'production' && env.AUTH_DEV_BYPASS }));
 
 export type Env = z.infer<typeof envSchema>;
 

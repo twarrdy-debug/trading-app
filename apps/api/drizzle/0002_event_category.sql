@@ -1,0 +1,2 @@
+CREATE TYPE "public"."event_category" AS ENUM('central_bank', 'inflation', 'labor', 'growth', 'business', 'consumer', 'housing', 'trade', 'energy', 'bonds', 'holiday', 'other');--> statement-breakpoint
+ALTER TABLE "economic_events" ADD COLUMN "category" "event_category" DEFAULT 'other' NOT NULL;

@@ -2,6 +2,7 @@ import {
   ASSET_CLASSES,
   BIASES,
   DIRECTIONS,
+  EVENT_CATEGORIES,
   EVENT_IMPACTS,
   FX_RATE_SOURCES,
   LEVEL_SOURCES,
@@ -13,6 +14,12 @@ import {
   THEMES,
   TIMEFRAMES,
   TRADE_SOURCES,
+  LANGUAGES,
+  ACCOUNT_TYPES,
+  DRAWDOWN_TYPES,
+  LOSS_ALERT_MODES,
+  NEWS_CATEGORIES,
+  type NewsData,
 } from '@trading/shared';
 import { relations } from 'drizzle-orm';
 import {
@@ -21,6 +28,7 @@ import {
   date,
   index,
   integer,
+  jsonb,
   numeric,
   pgEnum,
   pgTable,
@@ -45,7 +53,13 @@ export const levelSource = pgEnum('level_source', LEVEL_SOURCES);
 export const timeframe = pgEnum('timeframe', TIMEFRAMES);
 export const bias = pgEnum('bias', BIASES);
 export const eventImpact = pgEnum('event_impact', EVENT_IMPACTS);
+export const eventCategory = pgEnum('event_category', EVENT_CATEGORIES);
 export const theme = pgEnum('theme', THEMES);
+export const language = pgEnum('language', LANGUAGES);
+export const accountType = pgEnum('account_type', ACCOUNT_TYPES);
+export const drawdownType = pgEnum('drawdown_type', DRAWDOWN_TYPES);
+export const lossAlertMode = pgEnum('loss_alert_mode', LOSS_ALERT_MODES);
+export const newsCategory = pgEnum('news_category', NEWS_CATEGORIES);
 
 // Prices and money are exact decimals, read back as JS numbers.
 const priceCol = (name: string) => numeric(name, { precision: 18, scale: 6, mode: 'number' });
@@ -74,10 +88,87 @@ export const users = pgTable('users', {
   role: roleKey('role').notNull().default('user').references(() => roles.key),
   accountCurrency: char('account_currency', { length: 3 }).notNull().default('USD'),
   theme: theme('theme').notNull().default('dark'),
+  language: language('language').notNull().default('pl'),
   accentColor: text('accent_color'),
   timezone: text('timezone').notNull().default('Europe/Warsaw'),
   maxTradesPerDay: smallint('max_trades_per_day'),
+  /** Losses that trigger the overtrading warning, counted as `lossAlertMode` says. */
+  lossStreakAlert: smallint('loss_streak_alert').notNull().default(3),
+  lossAlertMode: lossAlertMode('loss_alert_mode').notNull().default('streak'),
+  /** Words that highlight a news headline and raise an alert. */
+  newsKeywords: text('news_keywords').array().notNull().default([]),
+  /** Better Auth: set once the address is confirmed (sign-up by invite counts as confirmed later). */
+  emailVerified: boolean('email_verified').notNull().default(false),
+  image: text('image'),
   ...timestamps,
+});
+
+// --- Authentication (Better Auth, see src/auth.ts) ----------------------------
+
+export const authSessions = pgTable(
+  'auth_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    token: text('token').notNull().unique(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    ipAddress: text('ip_address'),
+    userAgent: text('user_agent'),
+    ...timestamps,
+  },
+  (t) => [index('auth_sessions_user_idx').on(t.userId)],
+);
+
+/** Sign-in methods of a user; `providerId = 'credential'` holds the password hash. */
+export const authAccounts = pgTable(
+  'auth_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    accountId: text('account_id').notNull(),
+    providerId: text('provider_id').notNull(),
+    accessToken: text('access_token'),
+    refreshToken: text('refresh_token'),
+    idToken: text('id_token'),
+    accessTokenExpiresAt: timestamp('access_token_expires_at', { withTimezone: true }),
+    refreshTokenExpiresAt: timestamp('refresh_token_expires_at', { withTimezone: true }),
+    scope: text('scope'),
+    password: text('password'),
+    ...timestamps,
+  },
+  (t) => [index('auth_accounts_user_idx').on(t.userId)],
+);
+
+/** One-time tokens (password reset, e-mail verification). */
+export const authVerifications = pgTable(
+  'auth_verifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    identifier: text('identifier').notNull(),
+    value: text('value').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (t) => [index('auth_verifications_identifier_idx').on(t.identifier)],
+);
+
+/** Invitations for invite-only registration (REGISTRATION=invite). */
+export const invites = pgTable('invites', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  code: text('code').notNull().unique(),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  /** When set, only this address can use the invite. */
+  email: text('email'),
+  /** Role given to the new user. */
+  role: roleKey('role').notNull().default('user'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  usedBy: uuid('used_by').references(() => users.id, { onDelete: 'set null' }),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 // --- Instruments -------------------------------------------------------------
@@ -148,6 +239,37 @@ export const signalTakeProfits = pgTable(
   (t) => [uniqueIndex('signal_tp_level_idx').on(t.signalId, t.level)],
 );
 
+// --- Trading accounts --------------------------------------------------------
+
+/**
+ * A user's trading accounts (live or prop). Balances are the size plus the results of the
+ * trades assigned to the account, in the user's account currency.
+ */
+export const tradingAccounts = pgTable(
+  'trading_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    type: accountType('type').notNull(),
+    /** cfd or futures; required for prop accounts, null = any market. */
+    market: market('market'),
+    size: moneyCol('size').notNull(),
+    /** Prop: static maximum drawdown, % of the size. */
+    maxDrawdownPct: numeric('max_drawdown_pct', { precision: 5, scale: 2, mode: 'number' }),
+    /** Prop: static floor, or trailing the highest end-of-day balance. */
+    drawdownType: drawdownType('drawdown_type').notNull().default('static'),
+    /** Prop: profit target, % of the size. */
+    profitTargetPct: numeric('profit_target_pct', { precision: 6, scale: 2, mode: 'number' }),
+    /** CFD leverage 1:n (LEVERAGE_OPTIONS); only used to show margins. */
+    leverage: smallint('leverage'),
+    ...timestamps,
+  },
+  (t) => [index('trading_accounts_user_idx').on(t.userId)],
+);
+
 // --- Trading journal ---------------------------------------------------------
 
 export const trades = pgTable(
@@ -189,11 +311,17 @@ export const trades = pgTable(
     source: tradeSource('source').notNull().default('own'),
     educatorId: uuid('educator_id').references(() => users.id),
     signalId: uuid('signal_id').references(() => signals.id, { onDelete: 'set null' }),
+    /** Trading account the trade belongs to; null = none. Deleting the account keeps the trade. */
+    accountId: uuid('account_id').references(() => tradingAccounts.id, { onDelete: 'set null' }),
+    /** Position id on the trading platform for imported trades ("mt5:<account>:<position>"); prevents duplicates. */
+    externalId: text('external_id'),
     ...timestamps,
   },
   (t) => [
     index('trades_user_date_idx').on(t.userId, t.tradeDate, t.openedAt),
     index('trades_user_instrument_idx').on(t.userId, t.instrumentId),
+    index('trades_account_idx').on(t.accountId),
+    uniqueIndex('trades_user_external_idx').on(t.userId, t.externalId),
   ],
 );
 
@@ -257,6 +385,28 @@ export const fxRates = pgTable(
     fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.date, t.base, t.quote] })],
+);
+
+/**
+ * Measured difference between a CFD's reference price and its futures, per pair
+ * (CFD_FUTURES_PAIRS). `live` means both quotes were current and taken within minutes
+ * of each other; outside market hours the cash index is frozen, so such snapshots are
+ * shown with a warning and never used for alerts.
+ */
+export const basisSnapshots = pgTable(
+  'basis_snapshots',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    pairKey: text('pair_key').notNull(),
+    cfdPrice: priceCol('cfd_price').notNull(),
+    futuresPrice: priceCol('futures_price').notNull(),
+    difference: priceCol('difference').notNull(),
+    cfdQuotedAt: timestamp('cfd_quoted_at', { withTimezone: true }).notNull(),
+    futuresQuotedAt: timestamp('futures_quoted_at', { withTimezone: true }).notNull(),
+    live: boolean('live').notNull(),
+    measuredAt: timestamp('measured_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('basis_pair_measured_idx').on(t.pairKey, t.measuredAt)],
 );
 
 // --- Daily analysis ----------------------------------------------------------
@@ -344,6 +494,8 @@ export const economicEvents = pgTable(
     title: text('title').notNull(),
     currency: char('currency', { length: 3 }).notNull(),
     impact: eventImpact('impact').notNull(),
+    /** Derived from the title by categorizeEvent(); Forex Factory has no event type. */
+    category: eventCategory('category').notNull().default('other'),
     eventTime: timestamp('event_time', { withTimezone: true }).notNull(),
     forecast: text('forecast'),
     previous: text('previous'),
@@ -353,6 +505,42 @@ export const economicEvents = pgTable(
   (t) => [
     uniqueIndex('events_source_external_idx').on(t.source, t.externalId),
     index('events_time_idx').on(t.eventTime),
+  ],
+);
+
+/**
+ * Headlines from a live news feed (FinancialJuice RSS). Shared by all users; tags are derived from
+ * the title by parseNewsTitle() when the headline is stored.
+ */
+export const newsItems = pgTable(
+  'news_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    source: text('source').notNull().default('financialjuice'),
+    /** The feed's own id (RSS guid), so a headline is stored once. */
+    externalId: text('external_id').notNull(),
+    title: text('title').notNull(),
+    url: text('url'),
+    speaker: text('speaker'),
+    sourceName: text('source_name'),
+    category: newsCategory('category').notNull().default('other'),
+    currencies: text('currencies').array().notNull().default([]),
+    assets: assetClass('assets').array().notNull().default([]),
+    /** Released value, for headlines like "… Actual 4.9% (Forecast 4.6%, Previous 4.3%)". */
+    data: jsonb('data').$type<NewsData>(),
+    /** The calendar event the release was matched to (its `actual` is filled from this headline). */
+    eventId: uuid('event_id').references(() => economicEvents.id, { onDelete: 'set null' }),
+    noise: boolean('noise').notNull().default(false),
+    /** Marked red by FinancialJuice (market-moving). Only their site API tells; the RSS does not. */
+    important: boolean('important').notNull().default(false),
+    /** FinancialJuice's own tags ("USD", "Energy", "US Indexes"…), when known. */
+    labels: text('labels').array().notNull().default([]),
+    publishedAt: timestamp('published_at', { withTimezone: true }).notNull(),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('news_source_external_idx').on(t.source, t.externalId),
+    index('news_published_idx').on(t.publishedAt),
   ],
 );
 

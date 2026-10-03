@@ -1,0 +1,177 @@
+@import 'tailwindcss';
+@import '@fontsource/manrope/400.css';
+@import '@fontsource/manrope/500.css';
+@import '@fontsource/manrope/600.css';
+@import '@fontsource/manrope/700.css';
+@import '@fontsource/dm-mono/400.css';
+@import '@fontsource/dm-mono/500.css';
+
+/*
+ * Design tokens – direction "Chmura" (cloud): white cards with a soft shadow on a cool grey
+ * ground, generous radii, sentence-case labels, Manrope for UI and DM Mono for numbers.
+ * Every visual decision lives here: swapping the look means editing this file
+ * (and the few shape rules in components/ui), not the screens.
+ * --accent / --on-accent are set at runtime from the user's settings (lib/theme.ts).
+ */
+:root {
+  --accent: #ffb020;
+  --on-accent: #18202b;
+
+  /* Shape */
+  --radius: 18px;
+  --radius-control: 12px;
+  --radius-chip: 10px;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #eef1f5;
+  --panel: #ffffff;
+  --raised: #f7f9fb;
+  --line: #e1e6ec;
+  --grid: #eef1f5;
+  --chip: #f0f3f7;
+  --ink: #18202b;
+  --dim: #5f6b7a;
+  --buy: #147a48;
+  --sell: #c0303c;
+  --buy-soft: #e3f5eb;
+  --sell-soft: #fce8ea;
+  --on-side: #ffffff;
+  --warn-bg: #fff4de;
+  /* Headlines FinancialJuice marks red (their #b80101), so they read the same as in FJ. */
+  --breaking: #b80101;
+  --on-breaking: #ffffff;
+  /* The accent darkened enough to read as a line or text on white. */
+  --accent-ink: color-mix(in oklab, var(--accent) 72%, #000);
+  --shadow: 0 1px 2px rgb(16 24 40 / 0.04), 0 8px 24px rgb(16 24 40 / 0.06);
+  --shadow-pop: 0 4px 12px rgb(16 24 40 / 0.08), 0 20px 48px rgb(16 24 40 / 0.14);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0e1116;
+  --panel: #171b22;
+  --raised: #1e232c;
+  --line: #262c36;
+  --grid: #222832;
+  --chip: #1f242d;
+  --ink: #e8ecf1;
+  --dim: #9aa4b2;
+  --buy: #3dd68c;
+  --sell: #ff6b77;
+  --buy-soft: rgb(61 214 140 / 0.14);
+  --sell-soft: rgb(255 107 119 / 0.14);
+  --on-side: #0e1116;
+  --warn-bg: #2a2210;
+  --breaking: #b80101;
+  --on-breaking: #ffffff;
+  --accent-ink: var(--accent);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.22);
+  --shadow-pop: 0 4px 12px rgb(0 0 0 / 0.4), 0 20px 48px rgb(0 0 0 / 0.5);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-grid: var(--grid);
+  --color-chip: var(--chip);
+  --color-ink: var(--ink);
+  --color-dim: var(--dim);
+  --color-buy: var(--buy);
+  --color-sell: var(--sell);
+  --color-buy-soft: var(--buy-soft);
+  --color-sell-soft: var(--sell-soft);
+  --color-on-side: var(--on-side);
+  --color-warn-bg: var(--warn-bg);
+  --color-breaking: var(--breaking);
+  --color-on-breaking: var(--on-breaking);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-on-accent: var(--on-accent);
+  --font-sans: 'Manrope', ui-sans-serif, sans-serif;
+  --font-mono: 'DM Mono', ui-monospace, monospace;
+}
+
+/* White card with a soft shadow: panels, tiles, dialogs, the header bar. */
+@utility card {
+  background: var(--panel);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+/* A headline that just arrived from the live stream: an accent wash that fades out. */
+@keyframes news-fresh {
+  from {
+    background-color: color-mix(in oklab, var(--accent) 24%, transparent);
+  }
+}
+
+@utility news-fresh {
+  animation: news-fresh 8s ease-out;
+}
+
+/* The header clock's colon ticks once a second. */
+@keyframes clock-colon {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@utility clock-colon {
+  animation: clock-colon 1s steps(1) infinite;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+/* Small label above values and fields. */
+@utility eyebrow {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--dim);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent-ink);
+    outline-offset: 2px;
+  }
+
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  ::selection {
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+}

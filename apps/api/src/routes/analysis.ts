@@ -55,7 +55,7 @@ async function eventsForDay(db: DB, user: CurrentUser, instrumentId: string, dat
 export const analysisRoutes: FastifyPluginAsyncZod = async (app) => {
   const assertInstrument = async (id: string) => {
     const [row] = await app.db.select({ id: instruments.id }).from(instruments).where(eq(instruments.id, id));
-    if (!row) throw badRequest('Nieznany instrument');
+    if (!row) throw badRequest('unknownInstrument');
   };
 
   // --- Liquidity levels --------------------------------------------------------
@@ -96,7 +96,7 @@ export const analysisRoutes: FastifyPluginAsyncZod = async (app) => {
       .set(req.body)
       .where(and(eq(liquidityLevels.id, req.params.id), eq(liquidityLevels.userId, req.user.id)))
       .returning();
-    if (!row) throw notFound('Nie znaleziono poziomu');
+    if (!row) throw notFound('levelNotFound');
     return row;
   });
 
@@ -105,7 +105,7 @@ export const analysisRoutes: FastifyPluginAsyncZod = async (app) => {
       .delete(liquidityLevels)
       .where(and(eq(liquidityLevels.id, req.params.id), eq(liquidityLevels.userId, req.user.id)))
       .returning({ id: liquidityLevels.id });
-    if (!row) throw notFound('Nie znaleziono poziomu');
+    if (!row) throw notFound('levelNotFound');
     return reply.status(204).send();
   });
 
@@ -129,7 +129,7 @@ export const analysisRoutes: FastifyPluginAsyncZod = async (app) => {
         if (created) {
           await tx
             .insert(checklistItems)
-            .values(DEFAULT_CHECKLIST_ITEMS.map((label, i) => ({ checklistId: created.id, label, sortOrder: i })));
+            .values(DEFAULT_CHECKLIST_ITEMS[user.language].map((label, i) => ({ checklistId: created.id, label, sortOrder: i })));
         }
       });
       [checklist] = await app.db.select().from(sessionChecklists).where(match);
@@ -199,14 +199,14 @@ export const analysisRoutes: FastifyPluginAsyncZod = async (app) => {
     { schema: { tags: ['analiza'], params: idParams, body: updateChecklistItemSchema } },
     async (req) => {
       const [row] = await app.db.update(checklistItems).set(req.body).where(ownedItem(req.user, req.params.id)).returning();
-      if (!row) throw notFound('Nie znaleziono pozycji checklisty');
+      if (!row) throw notFound('checklistItemNotFound');
       return row;
     },
   );
 
   app.delete('/checklist-items/:id', { schema: { tags: ['analiza'], params: idParams } }, async (req, reply) => {
     const [row] = await app.db.delete(checklistItems).where(ownedItem(req.user, req.params.id)).returning({ id: checklistItems.id });
-    if (!row) throw notFound('Nie znaleziono pozycji checklisty');
+    if (!row) throw notFound('checklistItemNotFound');
     return reply.status(204).send();
   });
 };
