@@ -113,6 +113,21 @@
   animation: news-fresh 8s ease-out;
 }
 
+/* The header clock's colon ticks once a second. */
+@keyframes clock-colon {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@utility clock-colon {
+  animation: clock-colon 1s steps(1) infinite;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
 /* Small label above values and fields. */
 @utility eyebrow {
   font-size: 12px;

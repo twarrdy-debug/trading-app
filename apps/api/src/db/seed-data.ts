@@ -87,8 +87,13 @@ export async function seed(db: DB, adminEmail: string) {
     await db.update(instruments).set({ name: to }).where(eq(instruments.name, from));
   }
 
-  await db
-    .insert(users)
-    .values({ email: adminEmail, displayName: 'Administrator', role: 'admin' })
-    .onConflictDoNothing({ target: users.email });
+  // The first admin, only while there is none: after its address is changed (user:login --email),
+  // a restart must not create another one.
+  const [admin] = await db.select({ id: users.id }).from(users).where(eq(users.role, 'admin')).limit(1);
+  if (!admin) {
+    await db
+      .insert(users)
+      .values({ email: adminEmail, displayName: 'Administrator', role: 'admin' })
+      .onConflictDoNothing({ target: users.email });
+  }
 }

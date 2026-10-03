@@ -1,0 +1,23 @@
+# systemd unit for the API. Copy to /etc/systemd/system/trading-app.service.
+[Unit]
+Description=Trading journal API
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=trading
+Group=trading
+WorkingDirectory=/opt/trading-app/apps/api
+# Reads apps/api/.env (see deploy/env.production.example).
+ExecStart=/usr/bin/npm start
+Restart=on-failure
+RestartSec=5
+# Uploads live outside the code so updates never touch them.
+ReadWritePaths=/var/lib/trading-app
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

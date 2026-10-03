@@ -5,7 +5,7 @@ import { Button } from '../../components/ui/Button.tsx';
 import { Field, Input } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
-import { currentLocale, formatMoney, formatNumber, formatPrice, formatUnits } from '../../lib/format.ts';
+import { currentLocale, formatAmount, formatNumber, formatPrice, formatUnits } from '../../lib/format.ts';
 
 const COLUMNS = 'grid grid-cols-[156px_104px_80px_minmax(128px,1fr)_60px_90px_90px_100px] gap-3 px-5';
 
@@ -184,13 +184,13 @@ export function TradeTable({
                   <span className="text-dim">{t.riskPct != null ? `${formatNumber(t.riskPct)}%` : '—'}</span>
                   <span
                     className="truncate text-dim"
-                    title={t.riskAccount != null ? labels.riskTitle(`${formatMoney(t.riskAccount, false)} ${t.accountCurrency}`) : undefined}
+                    title={t.riskAccount != null ? labels.riskTitle(formatAmount(t.riskAccount, t.accountCurrency, false)) : undefined}
                   >
-                    {t.riskAccount != null ? formatMoney(-t.riskAccount) : '—'}
+                    {t.riskAccount != null ? formatAmount(-t.riskAccount, t.accountCurrency) : '—'}
                   </span>
                   <span className={tone}>{formatUnits(t.resultUnits, all.units.short[t.instrument.measureUnit])}</span>
                   <span className={`text-right ${tone}`}>
-                    {t.pnlAccount != null ? formatMoney(t.pnlAccount) : t.pnlQuote != null ? all.table.noRate : '—'}
+                    {t.pnlAccount != null ? formatAmount(t.pnlAccount, t.accountCurrency) : t.pnlQuote != null ? all.table.noRate : '—'}
                   </span>
                 </button>
               </li>

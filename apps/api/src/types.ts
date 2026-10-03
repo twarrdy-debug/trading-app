@@ -35,6 +35,8 @@ export type TradingMonitor = Jsonify<Awaited<ReturnType<typeof tradingMonitor>>>
 export type AccountSummary = Jsonify<AccountOverview>;
 export type TradingAccount = Jsonify<TradingAccountRow>;
 export type Invite = Jsonify<typeof invites.$inferSelect>;
+/** A new invite; `emailed` when it was sent to its address. */
+export type CreatedInvite = Invite & { emailed: boolean };
 export interface AuthConfig {
   registration: 'invite' | 'open' | 'closed';
   devBypass: boolean;

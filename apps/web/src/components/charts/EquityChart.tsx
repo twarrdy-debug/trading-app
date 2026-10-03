@@ -2,7 +2,7 @@ import { scaleLinear, scaleTime } from 'd3-scale';
 import { area, line } from 'd3-shape';
 import { useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
 import { useT } from '../../i18n/index.tsx';
-import { formatMoney, formatNumber, formatShortDate } from '../../lib/format.ts';
+import { formatAmount, formatNumber, formatShortDate } from '../../lib/format.ts';
 
 export interface EquityPoint {
   date: string;
@@ -84,7 +84,7 @@ export function EquityChart({
     .nice(5)
     .range([height - MARGIN.top - MARGIN.bottom, 0]);
   const ticks = y.ticks(5);
-  const tickLabel = (v: number) => (balance ? formatNumber(v) : formatMoney(v, false));
+  const tickLabel = (v: number) => (balance ? formatNumber(v) : formatAmount(v, currency, false));
   // Room for the longest axis label.
   const left = Math.max(44, Math.max(...ticks.map((v) => tickLabel(v).length)) * 7 + 14);
   const innerW = Math.max(0, width - left - MARGIN.right);
@@ -166,10 +166,10 @@ export function EquityChart({
         >
           <span className="text-dim">{formatShortDate(days[active - 1]!)}</span>
           <span>
-            {t.day}: {formatMoney(pnlOf(days[active - 1]!))} {currency}
+            {t.day}: {formatAmount(pnlOf(days[active - 1]!), currency)}
           </span>
           <span className="font-semibold">
-            {balance ? t.balance : t.total}: {formatMoney(values[active]!, !balance)} {currency}
+            {balance ? t.balance : t.total}: {formatAmount(values[active]!, currency, !balance)}
           </span>
         </div>
       )}

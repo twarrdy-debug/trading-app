@@ -19,7 +19,7 @@ import { Field, Input, Segmented, Textarea, toggleClass } from '../../components
 import { Select } from '../../components/ui/Select.tsx';
 import { accountKind } from '../account/AccountViews.tsx';
 import { useT } from '../../i18n/index.tsx';
-import { formatDate, formatMoney, formatNumber, formatPrice, parseDecimal, toDateTimeLocal, toInputNumber } from '../../lib/format.ts';
+import { formatAmount, formatDate, formatNumber, formatPrice, parseDecimal, toDateTimeLocal, toInputNumber } from '../../lib/format.ts';
 
 const priceText = toInputNumber;
 
@@ -289,7 +289,7 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, accou
       )}
 
       {accounts.length > 0 && (
-        <Field label={all.accounts.switcher} hint={tradeAccount ? accountKind(all, tradeAccount) : undefined}>
+        <Field label={all.accounts.switcher} hint={tradeAccount ? accountKind(all, tradeAccount, account) : undefined}>
           <Select
             value={accountId}
             onChange={chooseAccount}
@@ -517,15 +517,15 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, accou
           <dt className="text-dim">{t.inCurrency}</dt>
           <dd className="m-0 text-right">
             {preview.pnlAccount != null
-              ? `${formatMoney(preview.pnlAccount)} ${account}`
+              ? formatAmount(preview.pnlAccount, account)
               : preview.pnlQuote != null
-                ? `${formatMoney(preview.pnlQuote)} ${instrument?.quoteCurrency}`
+                ? formatAmount(preview.pnlQuote, instrument?.quoteCurrency)
                 : '—'}
           </dd>
           <dt className="text-dim">{t.risk}</dt>
           <dd className="m-0 text-right">
             {preview.riskUnits == null ? '—' : `${formatNumber(preview.riskUnits)} ${unit}`}
-            {riskMoney != null && ` · ${formatMoney(riskMoney, false)} ${account}`}
+            {riskMoney != null && ` · ${formatAmount(riskMoney, account, false)}`}
             {riskMoney != null && balance != null && balance > 0 && (
               <span className="block text-dim">{t.riskOfBalance(`${formatNumber((riskMoney / balance) * 100)}%`)}</span>
             )}
@@ -534,7 +534,7 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, accou
             <>
               <dt className="text-dim">{t.margin(leverage)}</dt>
               <dd className="m-0 text-right">
-                {formatMoney(margin, false)} {account}
+                {formatAmount(margin, account, false)}
               </dd>
             </>
           )}

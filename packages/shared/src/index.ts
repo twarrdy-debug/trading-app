@@ -4,6 +4,7 @@ export * from './signal-parser.ts';
 export * from './calendar.ts';
 export * from './news.ts';
 export * from './dates.ts';
+export * from './sessions.ts';
 export * from './instruments.ts';
 export * from './schemas.ts';
 export * from './mt5-report.ts';

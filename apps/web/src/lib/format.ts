@@ -22,6 +22,19 @@ const sign = (value: number, signed: boolean) => (signed && value > 0 ? '+' : va
 export const formatMoney = (value: number | null | undefined, signed = true) =>
   value == null ? '—' : `${sign(value, signed)}${number(2, 2).format(Math.abs(value))}`;
 
+/**
+ * Money in a currency: "+$2,340.50" for USD (the sign first, then $), "+2 340,50 EUR" for others.
+ * USD amounts carry no currency code anywhere in the app.
+ */
+export const formatAmount = (value: number | null | undefined, currency: string | null | undefined, signed = true) => {
+  if (value == null) return '—';
+  const digits = number(2, 2).format(Math.abs(value));
+  return currency === 'USD' || currency == null ? `${sign(value, signed)}$${digits}` : `${sign(value, signed)}${digits} ${currency}`;
+};
+
+/** The currency code shown next to amounts; empty for USD (its amounts carry $ instead). */
+export const currencyLabel = (currency: string | null | undefined) => (currency && currency !== 'USD' ? currency : '');
+
 export const formatPrice = (value: number | null | undefined) => (value == null ? '—' : number(0, 6).format(value));
 
 export const formatNumber = (value: number | null | undefined, signed = false) =>

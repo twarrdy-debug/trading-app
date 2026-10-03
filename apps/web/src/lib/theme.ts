@@ -1,9 +1,7 @@
-import type { Theme } from '@trading/shared';
+import { ACCENT_COLORS, type Theme } from '@trading/shared';
 
-export const DEFAULT_ACCENT = '#FFB020';
-
-/** Accent colors offered in the picker; any other #RRGGBB can be entered in settings. */
-export const ACCENT_OPTIONS = ['#FFB020', '#3FD0FF', '#A78BFA', '#FF5CA8', '#E8EDF2'];
+/** Orange is the app's default accent. */
+export const DEFAULT_ACCENT = ACCENT_COLORS.orange;
 
 /** Perceived brightness 0–255 of a #RRGGBB colour. */
 function brightness(hex: string): number {
@@ -17,18 +15,15 @@ export function readableOn(hex: string): string {
   return brightness(hex) > 150 ? '#18202b' : '#ffffff';
 }
 
-/**
- * The accent as drawn in a theme: a near-white accent (the neutral option) would vanish on the
- * light background, so it becomes graphite there; a near-black one becomes light on dark.
- */
+/** Monochrome draws with the theme's own ink: black details on white, white details on black. */
+const MONO_BY_THEME = { light: '#18202b', dark: '#ffffff' } as const;
+
+/** The accent as drawn in a theme (anything but monochrome is used as it is). */
 export function accentForTheme(hex: string, theme: 'light' | 'dark'): string {
-  const level = brightness(hex);
-  if (theme === 'light' && level > 215) return '#2a3340';
-  if (theme === 'dark' && level < 45) return '#e8edf2';
-  return hex;
+  return hex.toUpperCase() === ACCENT_COLORS.mono ? MONO_BY_THEME[theme] : hex;
 }
 
-const systemTheme = () => (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+export const systemTheme = () => (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
 
 /** localStorage key read by the inline script in index.html, so the first paint already has the right theme. */
 const STORED_THEME_KEY = 'theme';

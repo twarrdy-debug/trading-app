@@ -19,6 +19,8 @@ export function InvitesManager({ timezone }: { timezone: string }) {
   const [role, setRole] = useState<InviteRole>('user');
   const [copied, setCopied] = useState<string | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
+  /** What happened to the last invite: e-mailed to an address, or its link copied. */
+  const [notice, setNotice] = useState<string | null>(null);
 
   const link = (code: string) => `${window.location.origin}/rejestracja?kod=${code}`;
   const copy = async (code: string) => {
@@ -33,12 +35,14 @@ export function InvitesManager({ timezone }: { timezone: string }) {
 
   const submit = () => {
     setErrors([]);
+    setNotice(null);
     create.mutate(
       { email: email.trim() || undefined, role },
       {
         onSuccess: (invite) => {
           setEmail('');
           void copy(invite.code);
+          setNotice(invite.email ? (invite.emailed ? t.emailed(invite.email) : t.emailFailed(invite.email)) : t.linkCopied);
         },
         onError: (err) => setErrors(err instanceof ApiError ? err.lines : [err.message]),
       },
@@ -69,6 +73,7 @@ export function InvitesManager({ timezone }: { timezone: string }) {
         </Button>
       </div>
       {errors.length > 0 && <p className="m-0 text-[13px] text-sell">{errors.join(' ')}</p>}
+      {notice && <p className="m-0 text-[13px] text-dim" role="status">{notice}</p>}
       {invites.length === 0 ? (
         <span className="text-[13px] text-dim">{t.empty}</span>
       ) : (

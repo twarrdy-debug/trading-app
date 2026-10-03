@@ -6,6 +6,7 @@ import type { Env } from './env.ts';
 import type { QuoteProvider } from './services/basis.ts';
 import type { CalendarSource } from './services/calendar.ts';
 import type { FxProvider } from './services/fx.ts';
+import type { Mailer } from './services/mailer.ts';
 import type { NewsHub, NewsSource } from './services/news.ts';
 
 declare module 'fastify' {
@@ -18,6 +19,7 @@ declare module 'fastify' {
     news: NewsSource;
     newsHub: NewsHub;
     uploadDir: string;
+    mailer: Mailer;
     auth: Auth;
   }
 }

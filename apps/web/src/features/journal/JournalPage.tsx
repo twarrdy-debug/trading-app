@@ -7,7 +7,7 @@ import { Button } from '../../components/ui/Button.tsx';
 import { Panel } from '../../components/ui/Panel.tsx';
 import { Gauge, Stat } from '../../components/ui/Stat.tsx';
 import { useT } from '../../i18n/index.tsx';
-import { formatMoney, formatNumber, formatPercent } from '../../lib/format.ts';
+import { currencyLabel, formatAmount, formatNumber, formatPercent } from '../../lib/format.ts';
 import { AccountSwitcher, useSelectedAccount } from '../account/AccountSwitcher.tsx';
 import { AccountPanel, accountLevels } from '../account/AccountViews.tsx';
 import { MonitorPanel } from './MonitorPanel.tsx';
@@ -24,19 +24,29 @@ function MonthOverview({ user, today }: { user: PublicUser; today: string }) {
   const { filter } = useSelectedAccount();
   const { data: stats } = useTradeStats({ dateFrom: monthStart, dateTo: today, account: filter || undefined });
   const s = stats?.summary;
+  // Today in the user's time zone, for the same account selection.
+  const { data: todayStats } = useTradeStats({ dateFrom: today, dateTo: today, account: filter || undefined });
+  const d = todayStats?.summary;
   const currency = user.settings.accountCurrency;
   const month = all.months[Number(today.slice(5, 7)) - 1]!;
 
   return (
     <>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {/* Five in a row from 1400 px (87.5rem, in rem so it sorts after sm:); below that pairs, so today and the month share a row. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 min-[87.5rem]:grid-cols-5">
         <Stat label={t.winRate} value={formatPercent(s?.winRate)} visual={<Gauge percent={s?.winRate ?? null} />} foot={s ? t.winsLosses(s.wins, s.losses) : undefined} />
         <Stat label={t.avgR} value={s?.avgR == null ? '—' : `${formatNumber(s.avgR, true)} R`} foot={s?.avgPlannedRR != null ? t.planRR(formatNumber(s.avgPlannedRR)) : undefined} />
         <Stat
+          label={t.resultToday}
+          value={formatAmount(d?.pnl, currency)}
+          tone={d && d.pnl < 0 ? 'sell' : d && d.pnl > 0 ? 'buy' : 'ink'}
+          foot={d ? `${t.currencyTrades(currencyLabel(currency), d.trades)}${d.returnPct != null ? ` · ${formatNumber(d.returnPct, true)}%` : ''}` : undefined}
+        />
+        <Stat
           label={t.resultIn(month)}
-          value={formatMoney(s?.pnl)}
+          value={formatAmount(s?.pnl, currency)}
           tone={s && s.pnl < 0 ? 'sell' : s && s.pnl > 0 ? 'buy' : 'ink'}
-          foot={s ? `${t.currencyTrades(currency, s.trades)}${s.returnPct != null ? ` · ${formatNumber(s.returnPct, true)}%` : ''}` : undefined}
+          foot={s ? `${t.currencyTrades(currencyLabel(currency), s.trades)}${s.returnPct != null ? ` · ${formatNumber(s.returnPct, true)}%` : ''}` : undefined}
         />
         <Stat label={t.profitFactor} value={formatNumber(s?.profitFactor)} foot={s ? t.maxLossStreak(s.maxLossStreak) : undefined} />
       </div>

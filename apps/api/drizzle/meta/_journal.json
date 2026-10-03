@@ -99,6 +99,13 @@
       "when": 1790770951978,
       "tag": "0013_gold_futures_in_pips",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1790772533063,
+      "tag": "0014_accent_orange_or_mono",
+      "breakpoints": true
     }
   ]
 }

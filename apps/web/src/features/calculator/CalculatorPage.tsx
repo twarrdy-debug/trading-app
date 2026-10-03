@@ -1,4 +1,12 @@
-import { CFD_FUTURES_PAIRS, convertLevel, detectDirection, roundToStep, validatePriceSides, type BasisMethod } from '@trading/shared';
+import {
+  CFD_FUTURES_PAIRS,
+  convertLevel,
+  detectDirection,
+  roundToStep,
+  validatePriceSides,
+  type BasisMethod,
+  type CfdFuturesPair,
+} from '@trading/shared';
 import { useEffect, useState } from 'react';
 import { useBasis, useInstruments, useRefreshBasis } from '../../api/hooks.ts';
 import { Button } from '../../components/ui/Button.tsx';
@@ -6,15 +14,34 @@ import { Field, Input, Segmented } from '../../components/ui/Field.tsx';
 import { Panel } from '../../components/ui/Panel.tsx';
 import { Stat } from '../../components/ui/Stat.tsx';
 import { useLanguage, useT } from '../../i18n/index.tsx';
-import { currentLocale, formatMoney, formatNumber, formatPrice, parseDecimal } from '../../lib/format.ts';
+import { currentLocale, formatAmount, formatMoney, formatNumber, formatPrice, parseDecimal } from '../../lib/format.ts';
 
-/** The calculator covers gold only: XAUUSD (CFD) ↔ GC1 (futures). */
-const PAIR = CFD_FUTURES_PAIRS.find((p) => p.key === 'gold')!;
+// Every CFD ↔ futures pair (gold and the three US indices). Mini and micro futures quote the same
+// price, so they are one side of the conversion; only the money per contract differs.
 
 type Side = 'cfd' | 'futures';
 type BasisMode = 'auto' | 'prices' | 'offset';
 
-const STORAGE_KEY = 'calc-basis-gold';
+const PAIR_KEY = 'calc-pair';
+/** Basis settings are kept per pair (gold kept its original key). */
+const storageKey = (pair: CfdFuturesPair) => `calc-basis-${pair.key}`;
+
+/** Placeholder prices until a measurement gives real ones. */
+const EXAMPLES: Record<string, { cfd: string; futures: string; offset: string }> = {
+  gold: { cfd: '4400', futures: '4435', offset: '35' },
+  nasdaq: { cfd: '24000', futures: '24200', offset: '200' },
+  sp500: { cfd: '6600', futures: '6650', offset: '50' },
+  dow: { cfd: '46000', futures: '46300', offset: '300' },
+};
+
+function loadPair(): CfdFuturesPair {
+  try {
+    const key = localStorage.getItem(PAIR_KEY);
+    return CFD_FUTURES_PAIRS.find((p) => p.key === key) ?? CFD_FUTURES_PAIRS.find((p) => p.key === 'gold')!;
+  } catch {
+    return CFD_FUTURES_PAIRS.find((p) => p.key === 'gold')!;
+  }
+}
 
 interface StoredBasis {
   mode: BasisMode;
@@ -23,17 +50,17 @@ interface StoredBasis {
   offset: string;
 }
 
-function loadStored(): Partial<StoredBasis> {
+function loadStored(pair: CfdFuturesPair): Partial<StoredBasis> {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
+    return JSON.parse(localStorage.getItem(storageKey(pair)) ?? '{}');
   } catch {
     return {};
   }
 }
 
-function store(value: StoredBasis) {
+function store(pair: CfdFuturesPair, value: StoredBasis) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+    localStorage.setItem(storageKey(pair), JSON.stringify(value));
   } catch {
     // Storage unavailable (private mode): the calculator still works for this visit.
   }
@@ -42,8 +69,6 @@ function store(value: StoredBasis) {
 const shortTime = (iso: string) =>
   new Date(iso).toLocaleString(currentLocale(), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
-const SIDE_LABEL: Record<Side, string> = { cfd: `${PAIR.cfd} (CFD)`, futures: `${PAIR.mini} (Futures)` };
-
 export function CalculatorPage() {
   const all = useT();
   const t = all.calculator;
@@ -51,6 +76,12 @@ export function CalculatorPage() {
   const { data: instruments } = useInstruments();
   const basisData = useBasis();
   const refresh = useRefreshBasis();
+
+  const [PAIR, setPair] = useState<CfdFuturesPair>(loadPair);
+  /** "NQ1 / MNQ1": the futures side, one price for both contract sizes. */
+  const FUT = `${PAIR.mini} / ${PAIR.micro}`;
+  const SIDE_LABEL: Record<Side, string> = { cfd: `${PAIR.cfd} (CFD)`, futures: `${FUT} (Futures)` };
+  const examples = EXAMPLES[PAIR.key] ?? EXAMPLES.gold!;
 
   const [basisMode, setBasisMode] = useState<BasisMode>('auto');
   const [cfdPrice, setCfdPrice] = useState('');
@@ -66,12 +97,26 @@ export function CalculatorPage() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    const stored = loadStored();
+    const stored = loadStored(PAIR);
     setBasisMode(stored.mode ?? 'auto');
     setCfdPrice(stored.cfd ?? '');
     setFuturesPrice(stored.futures ?? '');
     setOffsetText(stored.offset ?? '');
-  }, []);
+  }, [PAIR]);
+
+  const choosePair = (key: string) => {
+    const next = CFD_FUTURES_PAIRS.find((p) => p.key === key);
+    if (!next) return;
+    setPair(next);
+    // Prices typed for one market mean nothing on another.
+    setPriceInput('');
+    setLevels({ entry: '', stopLoss: '', tp1: '', tp2: '' });
+    try {
+      localStorage.setItem(PAIR_KEY, next.key);
+    } catch {
+      // The choice resets to gold on the next visit.
+    }
+  };
 
   const updateBasis = (patch: Partial<StoredBasis>) => {
     const next = { mode: basisMode, cfd: cfdPrice, futures: futuresPrice, offset: offsetText, ...patch };
@@ -79,12 +124,21 @@ export function CalculatorPage() {
     setCfdPrice(next.cfd);
     setFuturesPrice(next.futures);
     setOffsetText(next.offset);
-    store(next);
+    store(PAIR, next);
   };
 
-  const gc = instruments?.find((i) => i.symbol === PAIR.mini);
-  const tick = gc?.unitSize ?? 0.1;
-  const tickValue = gc?.unitValue ?? 10;
+  const mini = instruments?.find((i) => i.symbol === PAIR.mini);
+  const micro = instruments?.find((i) => i.symbol === PAIR.micro);
+  const cfdInstrument = instruments?.find((i) => i.symbol === PAIR.cfd);
+  /** Mini and micro share the tick (NQ/ES 0.25, YM 1, GC 0.1). */
+  const tick = mini?.unitSize ?? 0.1;
+  const contracts = [mini, micro].filter((i) => i != null);
+  /** Distances read in the CFD's unit: pips for gold (0.1), points for the indices (1). */
+  const distanceStep = cfdInstrument?.unitSize ?? 1;
+  const distanceUnit = cfdInstrument ? all.units.short[cfdInstrument.measureUnit] : '';
+  /** "$200 NQ1 · $20 MNQ1" for a price move on the futures (contracts are quoted in USD). */
+  const perContracts = (move: number, sign = '') =>
+    contracts.map((c) => t.tickValue(`${sign}${formatAmount((move / c.unitSize) * c.unitValue, c.quoteCurrency, false)}`, c.symbol)).join(' · ');
 
   const measured = basisData.data?.find((p) => p.pairKey === PAIR.key);
   const snapshot = measured?.latest ?? null;
@@ -100,7 +154,7 @@ export function CalculatorPage() {
   const difference = basisMode === 'offset' ? offset : basis ? basis.futuresPrice - basis.cfdPrice : undefined;
   const ready = basisMode === 'offset' ? offset != null : basis != null;
 
-  /** Converts a price to the other market: GC1 rounded to the tick, XAUUSD to 0.01. */
+  /** Converts a price to the other market: futures rounded to the tick, the CFD to 0.01. */
   const convertTo = (price: number, target: Side) => {
     const raw =
       basisMode === 'offset'
@@ -134,10 +188,11 @@ export function CalculatorPage() {
     entry != null && direction != null
       ? validatePriceSides(direction, entry, stopLoss, tps.filter((tp): tp is number => tp != null), language)
       : [];
-  const onGc = (source: number) => (levelsSide === 'futures' ? source : convertTo(source, 'futures'));
-  const entryGc = ready && entry != null ? onGc(entry) : null;
-  const slGc = ready && stopLoss != null ? onGc(stopLoss) : null;
-  const riskTicks = entryGc != null && slGc != null ? Math.abs(entryGc - slGc) / tick : null;
+  // Distances are measured on the futures prices (rounded to the tick), the same for both sides.
+  const onFutures = (source: number) => (levelsSide === 'futures' ? source : convertTo(source, 'futures'));
+  const entryFut = ready && entry != null ? onFutures(entry) : null;
+  const slFut = ready && stopLoss != null ? onFutures(stopLoss) : null;
+  const riskMove = entryFut != null && slFut != null ? Math.abs(entryFut - slFut) : null;
 
   const rows = [
     { label: 'IN', source: entry },
@@ -151,7 +206,7 @@ export function CalculatorPage() {
   const copyText =
     ready && entry != null
       ? [
-          `${target === 'futures' ? PAIR.mini : PAIR.cfd}${sideWord ? ` - ${sideWord}` : ''}`,
+          `${target === 'futures' ? FUT : PAIR.cfd}${sideWord ? ` - ${sideWord}` : ''}`,
           ...rows.map((r) => `${r.label}: ${convertTo(r.source, target).toFixed(decimals)}`),
         ].join('\n')
       : null;
@@ -177,9 +232,19 @@ export function CalculatorPage() {
 
   return (
     <main className="flex grow flex-col gap-5 p-4 md:px-8 md:py-6">
-      <h1 className="m-0 text-2xl font-bold tracking-tight">
-        {t.title(PAIR.cfd, PAIR.mini)}
-      </h1>
+      <div className="flex flex-wrap items-center gap-4">
+        <h1 className="m-0 text-2xl font-bold tracking-tight">{t.title}</h1>
+        <div className="grow" />
+        <Segmented
+          label={t.pair}
+          value={PAIR.key}
+          onChange={choosePair}
+          options={CFD_FUTURES_PAIRS.map((p) => ({ value: p.key, label: p.label[language] }))}
+        />
+      </div>
+      <p className="m-0 -mt-2 font-mono text-sm text-dim">
+        {PAIR.cfd} ↔ {FUT} · <span className="font-sans">{t.miniMicro}</span>
+      </p>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
         <Panel title={t.basisTitle(PAIR.mini, PAIR.cfd)} className="flex flex-col self-start">
@@ -205,14 +270,14 @@ export function CalculatorPage() {
                       <dt className="text-dim">{PAIR.cfd}</dt>
                       <dd className="m-0 text-right">{formatMoney(snapshot.cfdPrice, false)}</dd>
                       <dd className="m-0 text-right text-dim">{shortTime(snapshot.cfdQuotedAt)}</dd>
-                      <dt className="text-dim">{PAIR.mini}</dt>
+                      <dt className="text-dim">{FUT}</dt>
                       <dd className="m-0 text-right">{formatMoney(snapshot.futuresPrice, false)}</dd>
                       <dd className="m-0 text-right text-dim">{shortTime(snapshot.futuresQuotedAt)}</dd>
                     </dl>
                     <span className={`text-xs ${snapshot.live ? 'text-dim' : 'text-accent-ink'}`}>
                       {snapshot.live
-                        ? t.measuredAt(shortTime(snapshot.measuredAt), PAIR.cfd)
-                        : t.marketClosed(PAIR.cfd)}
+                        ? t.measuredAt(shortTime(snapshot.measuredAt), PAIR.cfd, t.reference[PAIR.key] ?? '')
+                        : t.marketClosed(PAIR.cfd, t.reference[PAIR.key] ?? '')}
                     </span>
                     {measured?.alert ? (
                       <p role="alert" className="m-0 rounded-(--radius-control) bg-sell-soft p-3 text-[13px] text-sell">
@@ -262,10 +327,10 @@ export function CalculatorPage() {
                 <p className="m-0 text-[13px] text-dim">{t.readBoth}</p>
                 <div className="grid grid-cols-2 gap-3">
                   <Field label={t.priceNow(PAIR.cfd)}>
-                    <Input inputMode="decimal" value={cfdPrice} onChange={(e) => updateBasis({ cfd: e.target.value })} placeholder={t.example('4400')} />
+                    <Input inputMode="decimal" value={cfdPrice} onChange={(e) => updateBasis({ cfd: e.target.value })} placeholder={t.example(examples.cfd)} />
                   </Field>
                   <Field label={t.priceNow(PAIR.mini)}>
-                    <Input inputMode="decimal" value={futuresPrice} onChange={(e) => updateBasis({ futures: e.target.value })} placeholder={t.example('4435')} />
+                    <Input inputMode="decimal" value={futuresPrice} onChange={(e) => updateBasis({ futures: e.target.value })} placeholder={t.example(examples.futures)} />
                   </Field>
                 </div>
               </>
@@ -273,7 +338,7 @@ export function CalculatorPage() {
 
             {basisMode === 'offset' && (
               <Field label={t.offsetLabel(PAIR.mini, PAIR.cfd)} hint={t.offsetHint(PAIR.mini)}>
-                <Input inputMode="decimal" value={offsetText} onChange={(e) => updateBasis({ offset: e.target.value })} placeholder={t.example('35')} />
+                <Input inputMode="decimal" value={offsetText} onChange={(e) => updateBasis({ offset: e.target.value })} placeholder={t.example(examples.offset)} />
               </Field>
             )}
 
@@ -325,7 +390,7 @@ export function CalculatorPage() {
                 />
               </div>
               <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
-                <Field label={t.priceOf(priceSide === 'cfd' ? PAIR.cfd : PAIR.mini)}>
+                <Field label={t.priceOf(priceSide === 'cfd' ? PAIR.cfd : FUT)}>
                   <Input
                     inputMode="decimal"
                     value={priceInput}
@@ -346,7 +411,7 @@ export function CalculatorPage() {
               </div>
               <span className="text-xs text-dim">
                 {ready
-                  ? t.rounding(PAIR.mini, formatNumber(tick), formatMoney(tickValue, false), PAIR.cfd, formatNumber(0.01))
+                  ? t.rounding(FUT, formatNumber(tick), perContracts(tick), PAIR.cfd, formatNumber(0.01))
                   : t.basisFirst}
               </span>
             </div>
@@ -384,7 +449,7 @@ export function CalculatorPage() {
             {ready && entry != null && (
               <div className="flex justify-end px-5 pb-5">
                 <Button variant="primary" onClick={copy}>
-                  {copied ? t.copied : t.copy(target === 'cfd' ? PAIR.cfd : PAIR.mini)}
+                  {copied ? t.copied : t.copy(target === 'cfd' ? PAIR.cfd : FUT)}
                 </Button>
               </div>
             )}
@@ -401,12 +466,12 @@ export function CalculatorPage() {
               />
               {ready &&
                 rows.map((row) => {
-                  const ticks = entryGc != null && row.label !== 'IN' ? Math.abs(onGc(row.source) - entryGc) / tick : null;
+                  const move = entryFut != null && row.label !== 'IN' ? Math.abs(onFutures(row.source) - entryFut) : null;
                   const isSl = row.label === 'SL';
                   const sign = isSl ? '−' : '+';
-                  const targetSymbol = target === 'cfd' ? PAIR.cfd : PAIR.mini;
-                  const sourceSymbol = levelsSide === 'cfd' ? PAIR.cfd : PAIR.mini;
-                  const rr = row.label.startsWith('TP') && riskTicks && ticks != null ? t.rr(formatNumber(ticks / riskTicks)) : null;
+                  const targetSymbol = target === 'cfd' ? PAIR.cfd : FUT;
+                  const sourceSymbol = levelsSide === 'cfd' ? PAIR.cfd : FUT;
+                  const rr = row.label.startsWith('TP') && riskMove && move != null ? t.rr(formatNumber(move / riskMove)) : null;
                   return (
                     <Stat
                       key={row.label}
@@ -416,11 +481,14 @@ export function CalculatorPage() {
                       foot={
                         <span className="flex flex-col">
                           <span>{t.fromSource(sourceSymbol, formatPrice(row.source))}</span>
-                          {ticks != null && (
-                            <span>
-                              {t.pips(ticks, `${sign}${formatNumber(ticks)}`)} · {t.perContract1(`${sign}${formatMoney(ticks * tickValue, false)}`)}
-                              {rr && ` · ${rr}`}
-                            </span>
+                          {move != null && (
+                            <>
+                              <span>
+                                {t.distance(`${sign}${formatNumber(move / distanceStep)}`, distanceUnit)}
+                                {rr && ` · ${rr}`}
+                              </span>
+                              <span>{t.perContract(perContracts(move, sign))}</span>
+                            </>
                           )}
                         </span>
                       }

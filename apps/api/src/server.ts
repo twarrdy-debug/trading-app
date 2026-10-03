@@ -9,7 +9,9 @@ import { financialJuiceRss, startNewsScheduler } from './services/news.ts';
 const env = loadEnv();
 const database = createDatabase(env.DATABASE_URL);
 await database.migrate();
-if (env.NODE_ENV !== 'production') await seed(database.db, env.DEV_USER_EMAIL);
+// Roles, emotions, instruments and the first admin; idempotent, so every start (production too)
+// brings new reference data in.
+await seed(database.db, env.DEV_USER_EMAIL);
 
 const app = await buildApp({ db: database.db, env });
 const stopBasis =

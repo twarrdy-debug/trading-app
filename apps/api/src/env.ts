@@ -24,7 +24,10 @@ const envSchema = z.object({
     .min(0)
     .default(60)
     .refine((s) => s === 0 || s >= 10, 'at least 10 seconds, or 0 to turn the feed off'),
-  /** The seeded admin; outside production, requests without a session act as this user (see AUTH_DEV_BYPASS). */
+  /**
+   * The first admin, created by the seed while there is no admin (production: your e-mail; then set its
+   * password with `npm run user:login`). Outside production, requests without a session act as this user.
+   */
   DEV_USER_EMAIL: z.string().default('admin@trading.local'),
   /** Public address of the web app, e.g. https://dziennik.example.com. Used for auth origin checks and links in e-mails. */
   PUBLIC_URL: z.string().url().default('http://localhost:5173'),
@@ -40,8 +43,13 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
-  /** Sender of e-mails (password reset). Until a provider is configured, e-mails are written to the log. */
+  /** Sender of e-mails (password reset, invitations), e.g. `Dziennik tradera <noreply@twardy.it>`. */
   MAIL_FROM: z.string().default('Dziennik tradera <no-reply@localhost>'),
+  /**
+   * SMTP server as a URL, e.g. `smtps://resend:<API key>@smtp.resend.com:465`. Without it e-mails
+   * are written to the log (development).
+   */
+  SMTP_URL: z.string().optional(),
 })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV !== 'production') return;

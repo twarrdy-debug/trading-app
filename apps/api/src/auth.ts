@@ -22,7 +22,13 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
     secret: env.AUTH_SECRET,
     trustedOrigins: [env.PUBLIC_URL, ...env.CORS_ORIGIN.split(',').map((o) => o.trim())],
     database: drizzleAdapter(db, { provider: 'pg', schema: { users, authSessions, authAccounts, authVerifications } }),
-    advanced: { database: { generateId: 'uuid' }, cookiePrefix: 'tj' },
+    advanced: {
+      database: { generateId: 'uuid' },
+      cookiePrefix: 'tj',
+      // Behind Cloudflare Tunnel (and Caddy) the client's address is in CF-Connecting-IP; without it
+      // every visitor would share one rate limit.
+      ipAddress: { ipAddressHeaders: ['cf-connecting-ip', 'x-forwarded-for'] },
+    },
     user: {
       modelName: 'users',
       fields: { name: 'displayName' },

@@ -1,5 +1,5 @@
 import type { PublicUser } from '@trading/api/types';
-import { AUTO_FX_CURRENCIES, LANGUAGES, type Language, type Theme } from '@trading/shared';
+import { ACCENT_COLORS, AUTO_FX_CURRENCIES, LANGUAGES, type AccentKey, type Language, type Theme } from '@trading/shared';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ApiError } from '../../api/client.ts';
 import { useUpdateSettings } from '../../api/hooks.ts';
@@ -7,7 +7,7 @@ import { Button } from '../../components/ui/Button.tsx';
 import { Field, Input, Segmented, toggleClass } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
-import { ACCENT_OPTIONS, DEFAULT_ACCENT } from '../../lib/theme.ts';
+import { DEFAULT_ACCENT } from '../../lib/theme.ts';
 import { AccountsManager } from '../account/AccountsManager.tsx';
 import { InvitesManager } from '../auth/InvitesManager.tsx';
 
@@ -138,31 +138,30 @@ export function SettingsDialog({ user, onClose }: { user: PublicUser; onClose: (
 
         <div className="flex flex-col gap-2">
           <span className="eyebrow">{t.accent}</span>
-          <div className="flex items-center gap-3">
-            {ACCENT_OPTIONS.map((color) => (
-              <button
-                key={color}
-                type="button"
-                aria-label={t.color(color)}
-                aria-pressed={color.toLowerCase() === accent.toLowerCase()}
-                onClick={() => setAccent(color)}
-                className="size-6 rounded-full border border-black/10 p-0"
-                style={{
-                  background: color,
-                  boxShadow: color.toLowerCase() === accent.toLowerCase() ? `0 0 0 2px var(--panel), 0 0 0 4px ${color}` : 'none',
-                }}
-              />
-            ))}
-            <label className="ml-2 flex items-center gap-2 text-xs text-dim">
-              {t.custom}
-              <input
-                type="color"
-                value={accent}
-                onChange={(e) => setAccent(e.target.value.toUpperCase())}
-                className="h-8 w-10 cursor-pointer rounded-lg border border-line bg-transparent p-0.5"
-              />
-            </label>
+          <div role="group" aria-label={t.accent} className="flex flex-wrap gap-2">
+            {(Object.keys(ACCENT_COLORS) as AccentKey[]).map((key) => {
+              const color = ACCENT_COLORS[key];
+              const active = color === accent.toUpperCase();
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setAccent(color)}
+                  className={`flex h-10 items-center gap-2.5 px-3.5 text-[13px] ${toggleClass(active)}`}
+                >
+                  {/* Monochrome shows both halves: black details on light, white on dark. */}
+                  <span
+                    aria-hidden
+                    className="size-4 rounded-full border border-black/15"
+                    style={{ background: key === 'mono' ? 'linear-gradient(135deg, #18202b 50%, #ffffff 50%)' : color }}
+                  />
+                  {t.accents[key]}
+                </button>
+              );
+            })}
           </div>
+          <span className="text-xs text-dim">{t.accentHint}</span>
         </div>
 
         {update.error && (

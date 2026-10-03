@@ -3,12 +3,12 @@ import { useEffect, useState } from 'react';
 import { authApi, useResetSession } from '../api/auth.ts';
 import { ApiError } from '../api/client.ts';
 import { useBasis, useMe, useTradingMonitor, useUpdateSettings } from '../api/hooks.ts';
-import { Segmented } from '../components/ui/Field.tsx';
 import { lossAlertMessage } from '../features/journal/MonitorPanel.tsx';
 import { SettingsDialog } from '../features/settings/SettingsDialog.tsx';
 import { useT, type Messages } from '../i18n/index.tsx';
 import { useNewsLive, useNewsStream } from '../lib/news-live.ts';
-import { ACCENT_OPTIONS, applyTheme, DEFAULT_ACCENT } from '../lib/theme.ts';
+import { applyTheme, DEFAULT_ACCENT, systemTheme } from '../lib/theme.ts';
+import { SessionClock, ThemeIcon } from './SessionClock.tsx';
 
 export const APP_NAME = '[NAZWA]';
 
@@ -72,23 +72,6 @@ function LossStreakBanner() {
   );
 }
 
-function Clock({ timezone }: { timezone: string }) {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 30_000);
-    return () => clearInterval(id);
-  }, []);
-  const t = useT();
-  const text = new Intl.DateTimeFormat(t.locale, {
-    timeZone: timezone,
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(now);
-  return <span className="hidden font-mono text-xs whitespace-nowrap text-dim xl:inline">{text}</span>;
-}
-
 export function AppShell() {
   const t = useT();
   const { data: me, error } = useMe();
@@ -113,8 +96,8 @@ export function AppShell() {
   const update = useUpdateSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const basis = useBasis();
-  // The calculator covers gold only, so only its difference alert matters here.
-  const basisAlert = basis.data?.find((p) => p.pairKey === 'gold')?.alert ?? false;
+  // A changed CFD/futures difference on any market the calculator covers.
+  const basisAlert = basis.data?.some((p) => p.alert) ?? false;
   useNewsStream(Boolean(me), me?.settings.newsKeywords ?? [], t.news.alertTitle);
   const newsUnseen = useNewsLive().unseen > 0;
   const navDot = (to: string) =>
@@ -130,6 +113,9 @@ export function AppShell() {
   useEffect(() => {
     if (me) applyTheme(theme, accent);
   }, [me, theme, accent]);
+
+  // "system" shows (and switches away from) whatever the operating system uses now.
+  const shownTheme = theme === 'system' ? systemTheme() : theme;
 
   if (signedOut) return null;
 
@@ -160,34 +146,18 @@ export function AppShell() {
             ))}
           </nav>
           <div className="grow" />
-          {me && <Clock timezone={me.settings.timezone} />}
+          {me && <SessionClock timezone={me.settings.timezone} />}
           {me && (
             <>
-              <Segmented
-                label={t.nav.theme}
-                value={theme}
-                onChange={(value) => update.mutate({ theme: value })}
-                options={[
-                  { value: 'dark', label: t.nav.dark },
-                  { value: 'light', label: t.nav.light },
-                ]}
-              />
-              <div role="group" aria-label={t.nav.accent} className="hidden items-center gap-2 xl:flex">
-                {ACCENT_OPTIONS.map((color) => (
-                  <button
-                    key={color}
-                    type="button"
-                    aria-label={t.nav.accentColor(color)}
-                    aria-pressed={color.toLowerCase() === accent.toLowerCase()}
-                    onClick={() => update.mutate({ accentColor: color })}
-                    className="size-4 rounded-full border border-black/10 p-0"
-                    style={{
-                      background: color,
-                      boxShadow: color.toLowerCase() === accent.toLowerCase() ? `0 0 0 2px var(--panel), 0 0 0 4px ${color}` : 'none',
-                    }}
-                  />
-                ))}
-              </div>
+              <button
+                type="button"
+                onClick={() => update.mutate({ theme: shownTheme === 'dark' ? 'light' : 'dark' })}
+                aria-label={shownTheme === 'dark' ? t.nav.toLight : t.nav.toDark}
+                title={shownTheme === 'dark' ? t.nav.toLight : t.nav.toDark}
+                className="flex size-10 items-center justify-center rounded-[11px] text-dim transition hover:bg-chip hover:text-ink"
+              >
+                <ThemeIcon theme={shownTheme} />
+              </button>
               {me.authenticated && (
                 <button
                   type="button"
@@ -208,8 +178,10 @@ export function AppShell() {
                 className="flex size-10 items-center justify-center rounded-[11px] text-dim transition hover:bg-chip hover:text-ink"
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden>
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
+                  {/* Sliders, so it does not look like the sun of the theme switch next to it. */}
+                  <path d="M4 7h9M17 7h3M4 17h3M11 17h9" strokeLinecap="round" />
+                  <circle cx="15" cy="7" r="2" />
+                  <circle cx="9" cy="17" r="2" />
                 </svg>
               </button>
             </>

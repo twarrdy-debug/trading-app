@@ -137,6 +137,13 @@ export const EVENT_CATEGORY_LABELS: Record<Language, Record<EventCategory, strin
 };
 
 /** Kinds of news headlines, derived from the title by parseNewsTitle() (shared/news.ts). */
+/**
+ * The two accent colours a user can pick: orange (default) and monochrome, stored as white and drawn
+ * as black details on the light theme and white ones on the dark theme (apps/web lib/theme.ts).
+ */
+export const ACCENT_COLORS = { orange: '#FFB020', mono: '#FFFFFF' } as const;
+export type AccentKey = keyof typeof ACCENT_COLORS;
+
 export const NEWS_CATEGORIES = ['data', 'central_bank', 'politics', 'geopolitics', 'markets', 'other'] as const;
 export type NewsCategory = (typeof NEWS_CATEGORIES)[number];
 

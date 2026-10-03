@@ -1,4 +1,5 @@
 import { createInviteSchema, idParams } from '@trading/shared';
+import { t } from '../i18n.ts';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { requireRole } from '../plugins/current-user.ts';
@@ -44,9 +45,32 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
     return listInvites(app.db);
   });
 
+  /**
+   * Creates an invitation. One bound to an address is also e-mailed there (in the admin's language);
+   * the invite stays when sending fails, and `emailed` tells the client whether it went out.
+   */
   app.post('/invites', { schema: { tags: ['konto'], body: createInviteSchema } }, async (req, reply) => {
     requireRole(req, 'admin');
-    return reply.status(201).send(await createInvite(app.db, req.user, req.body));
+    const invite = await createInvite(app.db, req.user, req.body);
+    let emailed = false;
+    if (invite.email) {
+      const language = req.user.language;
+      const url = `${app.env.PUBLIC_URL}/rejestracja?kod=${encodeURIComponent(invite.code)}`;
+      const expires = invite.expiresAt
+        ? new Intl.DateTimeFormat(language === 'pl' ? 'pl-PL' : 'en-GB', { dateStyle: 'long', timeZone: req.user.timezone }).format(invite.expiresAt)
+        : '—';
+      try {
+        await app.mailer.send({
+          to: invite.email,
+          subject: t(language, 'inviteSubject'),
+          text: t(language, 'inviteBody', { inviter: req.user.displayName, url, code: invite.code, expires }),
+        });
+        emailed = true;
+      } catch (err) {
+        req.log.error(err, 'invite e-mail failed');
+      }
+    }
+    return reply.status(201).send({ ...invite, emailed });
   });
 
   app.delete('/invites/:id', { schema: { tags: ['konto'], params: idParams } }, async (req, reply) => {

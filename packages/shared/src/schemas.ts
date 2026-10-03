@@ -1,6 +1,7 @@
 // Request schemas shared by the API (validation) and clients (forms).
 import { z } from 'zod';
 import {
+  ACCENT_COLORS,
   ACCOUNT_TYPES,
   ASSET_CLASSES,
   DRAWDOWN_TYPES,
@@ -28,7 +29,7 @@ import { BROKER_TIMEZONES } from './dates.ts';
  */
 export const VALIDATION_KEYS = [
   'validation.currencyCode',
-  'validation.colorFormat',
+  'validation.accent',
   'validation.timezone',
   'validation.educatorOrSignal',
   'validation.leverage',
@@ -62,7 +63,12 @@ export const updateSettingsSchema = z
     displayName: z.string().trim().min(1).max(80),
     accountCurrency: currency,
     theme: z.enum(THEMES),
-    accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'validation.colorFormat').nullable(),
+    /** One of ACCENT_COLORS (orange or monochrome). */
+    accentColor: z
+      .string()
+      .transform((c) => c.toUpperCase())
+      .refine((c) => (Object.values(ACCENT_COLORS) as string[]).includes(c), 'validation.accent')
+      .nullable(),
     timezone: z.string().refine(isValidTimeZone, 'validation.timezone'),
     language: z.enum(LANGUAGES),
     maxTradesPerDay: z.number().int().min(1).max(100).nullable(),

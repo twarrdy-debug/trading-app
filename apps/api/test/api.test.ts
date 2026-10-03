@@ -89,8 +89,10 @@ describe('reference data', () => {
     const bad = await app.inject({ method: 'PATCH', url: '/me', payload: { accentColor: 'red', timezone: 'Mars/Base' } });
     expect(bad.statusCode).toBe(400);
     expect(bad.json().issues).toHaveLength(2);
-    const ok = await app.inject({ method: 'PATCH', url: '/me', payload: { accentColor: '#FF5A1F', maxTradesPerDay: 2 } });
-    expect(ok.json().settings).toMatchObject({ accentColor: '#FF5A1F', maxTradesPerDay: 2 });
+    const ok = await app.inject({ method: 'PATCH', url: '/me', payload: { accentColor: '#ffffff', maxTradesPerDay: 2 } });
+    expect(ok.json().settings).toMatchObject({ accentColor: '#FFFFFF', maxTradesPerDay: 2 });
+    // Only orange and monochrome are offered.
+    expect((await app.inject({ method: 'PATCH', url: '/me', payload: { accentColor: '#FF5A1F' } })).statusCode).toBe(400);
   });
 });
 
@@ -794,7 +796,7 @@ describe('language', () => {
     expect(emotions[0]).toEqual({ key: 'calm', label: 'Calm' });
 
     const bad = await app.inject({ method: 'PATCH', url: '/me', payload: { accentColor: 'red' } });
-    expect(bad.json()).toMatchObject({ error: 'Invalid data', issues: [{ message: 'Colour in #RRGGBB format' }] });
+    expect(bad.json()).toMatchObject({ error: 'Invalid data', issues: [{ message: 'Available colours: orange or monochrome' }] });
 
     const unknown = await post('/trades', {
       instrumentId: '00000000-0000-4000-8000-000000000000',
@@ -1228,6 +1230,26 @@ describe('authentication', () => {
 
     await newcomer('POST', '/auth/sign-out', {});
     expect((await newcomer('GET', '/me')).statusCode).toBe(401);
+  });
+
+  it('e-mails invitations bound to an address, and seeds no second admin', async () => {
+    const admin = browser();
+    await admin('POST', '/auth/sign-in/email', { email: 'owner@example.com', password: 'owner-password-1' });
+    const invite = (await admin('POST', '/invites', { email: 'Ewa@Example.com', role: 'user' })).json();
+    expect(invite).toMatchObject({ email: 'ewa@example.com', emailed: true });
+    const mail = sent.at(-1)!;
+    expect(mail).toMatchObject({ to: 'ewa@example.com', subject: 'Zaproszenie do dziennika tradera' });
+    expect(mail.text).toContain(`/rejestracja?kod=${invite.code}`);
+    // Without an address nothing is sent.
+    const before = sent.length;
+    expect((await admin('POST', '/invites', { role: 'user' })).json().emailed).toBe(false);
+    expect(sent).toHaveLength(before);
+
+    // The admin's address changed (owner@example.com): starting again must not recreate admin@trading.local.
+    await seed(authDb.db, 'admin@trading.local');
+    const { users } = await import('../src/db/schema.ts');
+    const { eq } = await import('drizzle-orm');
+    expect(await authDb.db.select({ email: users.email }).from(users).where(eq(users.role, 'admin'))).toEqual([{ email: 'owner@example.com' }]);
   });
 
   it('resets a forgotten password with the e-mailed link', async () => {

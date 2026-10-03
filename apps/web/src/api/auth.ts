@@ -1,4 +1,4 @@
-import type { AuthConfig, Invite } from '@trading/api/types';
+import type { AuthConfig, CreatedInvite, Invite } from '@trading/api/types';
 import type { CreateInviteInput } from '@trading/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client.ts';
@@ -46,7 +46,7 @@ export const useInvites = (enabled: boolean) =>
 export function useCreateInvite() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: Partial<CreateInviteInput>) => api<Invite>('/invites', { method: 'POST', json: input }),
+    mutationFn: (input: Partial<CreateInviteInput>) => api<CreatedInvite>('/invites', { method: 'POST', json: input }),
     onSuccess: () => void client.invalidateQueries({ queryKey: ['invites'] }),
   });
 }

@@ -7,7 +7,7 @@ import { Button } from '../../components/ui/Button.tsx';
 import { Field, Input, Segmented } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
-import { parseDecimal, toInputNumber } from '../../lib/format.ts';
+import { currencyLabel, parseDecimal, toInputNumber } from '../../lib/format.ts';
 import { accountKind } from './AccountViews.tsx';
 
 /**
@@ -50,7 +50,7 @@ export function AccountsManager({ currency }: { currency: string }) {
               <div className="flex min-w-0 grow flex-col">
                 <span className="truncate text-sm font-semibold">{a.name}</span>
                 <span className="truncate font-mono text-[11px] text-dim">
-                  {accountKind(all, a)} {currency}
+                  {accountKind(all, a, currency)}
                   {a.prop ? ` · DD ${toInputNumber(a.prop.maxDrawdownPct)}%${a.prop.drawdownType === 'eod' ? ' EOD' : ''}` : ''}
                   {a.prop?.target ? ` · ${all.accounts.profitTarget} ${toInputNumber(a.prop.target.pct)}%` : ''}
                   {a.leverage ? ` · 1:${a.leverage}` : ''}
@@ -127,7 +127,7 @@ function AccountForm({ account, currency, onDone }: { account?: AccountSummary; 
         <Field label={t.name}>
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t.namePlaceholder} maxLength={60} className="font-sans" />
         </Field>
-        <Field label={t.size} hint={currency}>
+        <Field label={t.size} hint={currencyLabel(currency) || '$'}>
           <Input inputMode="decimal" value={size} onChange={(e) => setSize(e.target.value)} placeholder="10000" />
         </Field>
       </div>

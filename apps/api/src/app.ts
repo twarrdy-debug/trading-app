@@ -34,7 +34,7 @@ import { tradeRoutes } from './routes/trades.ts';
 import { liveQuoteProvider, type QuoteProvider } from './services/basis.ts';
 import { forexFactorySource, type CalendarSource } from './services/calendar.ts';
 import { frankfurterProvider, type FxProvider } from './services/fx.ts';
-import { logMailer, type Mailer } from './services/mailer.ts';
+import { logMailer, smtpMailer, type Mailer } from './services/mailer.ts';
 import { financialJuiceSource, NewsHub, type NewsSource } from './services/news.ts';
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -55,7 +55,7 @@ export async function buildApp({
   quotes?: QuoteProvider;
   calendar?: CalendarSource;
   news?: NewsSource;
-  /** Defaults to writing e-mails to the log (no provider configured yet). */
+  /** Defaults to SMTP_URL, or to writing e-mails to the log when it is not set. */
   mailer?: Mailer;
   logger?: boolean;
 }) {
@@ -73,7 +73,9 @@ export async function buildApp({
   app.decorate('news', news);
   app.decorate('newsHub', new NewsHub());
   app.decorate('uploadDir', uploadDir);
-  app.decorate('auth', createAuth({ db, env, mailer: mailer ?? logMailer((msg) => app.log.info(msg)) }));
+  const outgoing = mailer ?? (env.SMTP_URL ? smtpMailer(env.SMTP_URL, env.MAIL_FROM) : logMailer((msg) => app.log.info(msg)));
+  app.decorate('mailer', outgoing);
+  app.decorate('auth', createAuth({ db, env, mailer: outgoing }));
 
   app.setErrorHandler((error, req, reply) => {
     // The user is missing when the error happens before it is resolved (e.g. unknown user).

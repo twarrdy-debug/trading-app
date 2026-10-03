@@ -4,7 +4,7 @@ import type { Messages } from '../../i18n/index.tsx';
 import { Panel } from '../../components/ui/Panel.tsx';
 import { Gauge, Stat } from '../../components/ui/Stat.tsx';
 import { useT } from '../../i18n/index.tsx';
-import { formatMoney, formatNumber } from '../../lib/format.ts';
+import { currencyLabel, formatAmount, formatNumber } from '../../lib/format.ts';
 
 export type AccountOverview = AccountSummary;
 
@@ -18,12 +18,12 @@ export const accountLevels = (t: Messages, account: AccountOverview | null | und
         ...(account.prop?.target ? [{ value: account.prop.target.balance, label: t.chart.target, tone: 'buy' as const }] : []),
       ];
 
-/** "Prop · CFD · 10 000" – type, market and size in one line. */
-export const accountKind = (t: Messages, account: Pick<AccountOverview, 'type' | 'market' | 'size'>) =>
+/** "Prop · CFD · $10 000" – type, market and size in one line (whole amounts without ",00"). */
+export const accountKind = (t: Messages, account: Pick<AccountOverview, 'type' | 'market' | 'size'>, currency: string) =>
   t.accounts.summary(
     t.accounts[account.type],
     account.market ? t.accounts[account.market] : null,
-    formatMoney(account.size, false).replace(/[.,]00$/, ''),
+    formatAmount(account.size, currency, false).replace(/[.,]00(?= |$)/, ''),
   );
 
 const pct = (value: number, signed = false) => `${formatNumber(value, signed)}%`;
@@ -33,21 +33,21 @@ const DANGER_PCT = 80;
 /** Account tiles on the statistics page: balance, drawdown and, for prop accounts, the limit. */
 export function AccountTiles({ account, currency }: { account: AccountOverview; currency: string }) {
   const t = useT().account;
-  const money = (value: number) => `${formatMoney(value, false)} ${currency}`;
+  const money = (value: number, signed = false) => formatAmount(value, currency, signed);
   const prop = account.prop;
   const danger = prop != null && (prop.breached || prop.usedPct >= DANGER_PCT);
   const balanceTiles = (
     <>
       <Stat
         label={`${t.balance} · ${account.name}`}
-        value={formatMoney(account.balance, false)}
-        foot={`${currency} · ${t.startBalance(formatMoney(account.size, false))}`}
+        value={money(account.balance)}
+        foot={[currencyLabel(currency), t.startBalance(money(account.size))].filter(Boolean).join(' · ')}
       />
       <Stat
         label={t.returnAll}
         value={pct(account.returnPct, true)}
         tone={account.pnl > 0 ? 'buy' : account.pnl < 0 ? 'sell' : 'ink'}
-        foot={`${formatMoney(account.pnl)} ${currency}`}
+        foot={money(account.pnl, true)}
       />
       <Stat
         label={t.currentDrawdown}
@@ -64,7 +64,7 @@ export function AccountTiles({ account, currency }: { account: AccountOverview; 
         value={pct(prop.usedPct)}
         tone={danger ? 'sell' : 'ink'}
         visual={<Gauge percent={prop.usedPct} tone={danger ? 'sell' : 'accent'} />}
-        foot={prop.breached ? t.breached : t.remaining(money(prop.remaining), formatMoney(prop.floor, false))}
+        foot={prop.breached ? t.breached : t.remaining(money(prop.remaining), money(prop.floor))}
       />
       {prop.target && (
         <Stat
@@ -72,7 +72,7 @@ export function AccountTiles({ account, currency }: { account: AccountOverview; 
           value={pct(prop.target.progressPct)}
           tone={prop.target.reached ? 'buy' : 'ink'}
           visual={<Gauge percent={prop.target.progressPct} tone={prop.target.reached ? 'buy' : 'accent'} />}
-          foot={prop.target.reached ? t.targetReached : t.targetRemaining(money(prop.target.remaining), formatMoney(prop.target.balance, false))}
+          foot={prop.target.reached ? t.targetReached : t.targetRemaining(money(prop.target.remaining), money(prop.target.balance))}
         />
       )}
     </>
@@ -98,22 +98,23 @@ export function AccountTiles({ account, currency }: { account: AccountOverview; 
 /** Compact account summary in the journal's side column. */
 export function AccountPanel({ account, currency }: { account: AccountOverview; currency: string }) {
   const all = useT();
+  const money = (value: number, signed = false) => formatAmount(value, currency, signed);
   const t = all.account;
   const prop = account.prop;
   const danger = prop != null && (prop.breached || prop.usedPct >= DANGER_PCT);
   return (
     <Panel
       title={account.name}
-      actions={<span className="font-mono text-xs text-dim">{accountKind(all, account)}</span>}
+      actions={<span className="font-mono text-xs text-dim">{accountKind(all, account, currency)}</span>}
     >
       <div className="flex flex-col gap-4 px-5 pt-1 pb-5">
         <div className="flex items-end justify-between gap-3">
           <div className="flex flex-col gap-0.5">
             <span className="eyebrow">{t.balance}</span>
-            <span className="text-2xl font-bold tracking-tight tabular-nums">{formatMoney(account.balance, false)}</span>
+            <span className="text-2xl font-bold tracking-tight tabular-nums">{money(account.balance)}</span>
           </div>
           <span className={`font-mono text-sm ${account.pnl > 0 ? 'text-buy' : account.pnl < 0 ? 'text-sell' : 'text-dim'}`}>
-            {formatMoney(account.pnl)} · {pct(account.returnPct, true)}
+            {money(account.pnl, true)} · {pct(account.returnPct, true)}
           </span>
         </div>
         {prop ? (
@@ -126,7 +127,7 @@ export function AccountPanel({ account, currency }: { account: AccountOverview; 
               <div className={`h-2 rounded-full ${danger ? 'bg-sell' : 'bg-accent'}`} style={{ width: `${Math.max(prop.usedPct, prop.usedPct > 0 ? 2 : 0)}%` }} />
             </div>
             <span className={`text-[13px] ${prop.breached ? 'font-semibold text-sell' : 'text-dim'}`}>
-              {prop.breached ? t.breached : t.remaining(`${formatMoney(prop.remaining, false)} ${currency}`, formatMoney(prop.floor, false))}
+              {prop.breached ? t.breached : t.remaining(money(prop.remaining), money(prop.floor))}
             </span>
             {prop.target && (
               <>
@@ -140,14 +141,14 @@ export function AccountPanel({ account, currency }: { account: AccountOverview; 
                 <span className={`text-[13px] ${prop.target.reached ? 'font-semibold text-buy' : 'text-dim'}`}>
                   {prop.target.reached
                     ? t.targetReached
-                    : t.targetRemaining(`${formatMoney(prop.target.remaining, false)} ${currency}`, formatMoney(prop.target.balance, false))}
+                    : t.targetRemaining(money(prop.target.remaining), money(prop.target.balance))}
                 </span>
               </>
             )}
           </div>
         ) : (
           <span className="text-[13px] text-dim">
-            {t.currentDrawdown}: {pct(account.currentDrawdownPct)} · {t.maxDrawdown(pct(account.maxDrawdownPct), formatMoney(account.maxDrawdown, false))}
+            {t.currentDrawdown}: {pct(account.currentDrawdownPct)} · {t.maxDrawdown(pct(account.maxDrawdownPct), money(account.maxDrawdown))}
           </span>
         )}
       </div>
@@ -167,11 +168,12 @@ export function AccountCards({ accounts, currency }: { accounts: AccountOverview
           <div key={a.id} className="card flex flex-col gap-3 px-5 py-4">
             <div className="flex items-baseline justify-between gap-3">
               <span className="truncate text-[15px] font-bold">{a.name}</span>
-              <span className="shrink-0 font-mono text-[11px] text-dim">{accountKind(all, a)}</span>
+              <span className="shrink-0 font-mono text-[11px] text-dim">{accountKind(all, a, currency)}</span>
             </div>
             <div className="flex items-end justify-between gap-3">
               <span className="text-2xl font-bold tracking-tight tabular-nums">
-                {formatMoney(a.balance, false)} <span className="text-xs font-medium text-dim">{currency}</span>
+                {formatAmount(a.balance, currency, false)}
+                {currencyLabel(currency) && <span className="text-xs font-medium text-dim"> {currencyLabel(currency)}</span>}
               </span>
               <span className={`font-mono text-sm ${a.pnl > 0 ? 'text-buy' : a.pnl < 0 ? 'text-sell' : 'text-dim'}`}>{pct(a.returnPct, true)}</span>
             </div>

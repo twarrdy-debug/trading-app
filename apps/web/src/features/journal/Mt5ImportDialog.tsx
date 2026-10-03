@@ -7,7 +7,7 @@ import { Button } from '../../components/ui/Button.tsx';
 import { Field } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
-import { formatDateTime, formatMoney, formatNumber } from '../../lib/format.ts';
+import { currencyLabel, formatAmount, formatDateTime, formatNumber } from '../../lib/format.ts';
 
 const TIMEZONE_KEY = 'mt5-timezone';
 const SYMBOL_MAP_KEY = 'mt5-symbol-map';
@@ -190,7 +190,7 @@ export function Mt5ImportDialog({
         {preview && s && (
           <>
             <div className="flex flex-wrap items-center gap-2 text-[13px]">
-              {preview.account && <span className="mr-2 font-semibold">{t.account(preview.account, preview.currency)}</span>}
+              {preview.account && <span className="mr-2 font-semibold">{t.account(preview.account, currencyLabel(preview.currency) || null)}</span>}
               <span className="rounded-md bg-buy-soft px-2 py-1 font-semibold text-buy">{t.ready(s.ready)}</span>
               {s.duplicate > 0 && <span className="rounded-md bg-chip px-2 py-1 font-semibold text-dim">{t.duplicate(s.duplicate)}</span>}
               {s.unknownSymbol > 0 && <span className="rounded-md bg-warn-bg px-2 py-1 font-semibold">{t.unknown(s.unknownSymbol)}</span>}
@@ -261,7 +261,7 @@ export function Mt5ImportDialog({
                       <td className="px-3 py-2 text-right">{formatNumber(p.volume)}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{formatDateTime(p.openedAt, userTimezone)}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{formatDateTime(p.closedAt, userTimezone)}</td>
-                      <td className={`px-3 py-2 text-right ${p.profit >= 0 ? 'text-buy' : 'text-sell'}`}>{formatMoney(p.profit)}</td>
+                      <td className={`px-3 py-2 text-right ${p.profit >= 0 ? 'text-buy' : 'text-sell'}`}>{formatAmount(p.profit, preview.currency)}</td>
                       <td className="px-3 py-2">
                         <span className={`rounded-md px-2 py-0.5 font-sans text-[11px] font-semibold whitespace-nowrap ${STATUS_TONE[p.status]}`}>
                           {t.statuses[p.status]}
