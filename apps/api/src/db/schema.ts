@@ -102,6 +102,10 @@ export const users = pgTable('users', {
    * Null until then; existing users and users created outside sign-up count as done.
    */
   onboardedAt: timestamp('onboarded_at', { withTimezone: true }).defaultNow(),
+  /** Set by an admin to block the account: no sign-in and no API access until cleared. */
+  disabledAt: timestamp('disabled_at', { withTimezone: true }),
+  /** The invitation code used at sign-up (null for accounts created otherwise). */
+  signupCode: text('signup_code'),
   /** Better Auth: set once the address is confirmed (sign-up by invite counts as confirmed later). */
   emailVerified: boolean('email_verified').notNull().default(false),
   image: text('image'),
@@ -172,7 +176,12 @@ export const invites = pgTable('invites', {
   role: roleKey('role').notNull().default('user'),
   expiresAt: timestamp('expires_at', { withTimezone: true }),
   usedBy: uuid('used_by').references(() => users.id, { onDelete: 'set null' }),
+  /** Single-use: when it was used. Multi-use: the latest sign-up with it. */
   usedAt: timestamp('used_at', { withTimezone: true }),
+  /** A shared code (e.g. for a group): any number of sign-ups until it expires or is deleted. */
+  multiUse: boolean('multi_use').notNull().default(false),
+  /** Sign-ups with this code. */
+  useCount: integer('use_count').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

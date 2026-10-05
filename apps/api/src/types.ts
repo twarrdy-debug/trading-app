@@ -8,6 +8,7 @@ import type { invites } from './db/schema.ts';
 import type { importMt5 } from './services/mt5-import.ts';
 import type { listNews } from './services/news.ts';
 import type { StrategyView } from './services/strategies.ts';
+import type { appStats, listAllInstruments, listUsers, systemStatus } from './services/admin.ts';
 import type { createTrade, listTrades, tradeStats, tradingMonitor, TradeView } from './services/trades.ts';
 
 /** What a value looks like after JSON serialization (Dates become strings). */
@@ -43,6 +44,10 @@ export interface AuthConfig {
   registration: 'invite' | 'open' | 'closed';
   devBypass: boolean;
 }
+export type AdminUser = Jsonify<Awaited<ReturnType<typeof listUsers>>[number]>;
+export type AdminStats = Jsonify<Awaited<ReturnType<typeof appStats>>>;
+export type SystemStatus = Jsonify<Awaited<ReturnType<typeof systemStatus>>>;
+export type AdminInstrument = Jsonify<Awaited<ReturnType<typeof listAllInstruments>>[number]>;
 export type Strategy = Jsonify<StrategyView>;
 export type StrategyRule = Strategy['rules'][number];
 export type Mt5Import = Jsonify<Awaited<ReturnType<typeof importMt5>>>;

@@ -21,6 +21,7 @@ import { HttpError } from './errors.ts';
 import { isMessageKey, t } from './i18n.ts';
 import { currentUserPlugin } from './plugins/current-user.ts';
 import { accountRoutes } from './routes/accounts.ts';
+import { adminRoutes } from './routes/admin.ts';
 import { analysisRoutes } from './routes/analysis.ts';
 import { authRoutes } from './routes/auth.ts';
 import { basisRoutes } from './routes/basis.ts';
@@ -126,6 +127,7 @@ export async function buildApp({
   await app.register(signalRoutes);
   await app.register(analysisRoutes);
   await app.register(strategyRoutes);
+  await app.register(adminRoutes);
 
   return app;
 }

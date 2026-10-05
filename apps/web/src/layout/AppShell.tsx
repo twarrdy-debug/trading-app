@@ -23,6 +23,9 @@ const NAV = [
   // Signals are hidden from the menu for now; the page stays at /sygnaly.
 ] as const satisfies readonly { to: string; label: keyof Messages['nav'] }[];
 
+/** Shown in the menu only for the admin role. */
+const ADMIN_ITEM = { to: '/admin', label: 'admin' } as const;
+
 const DISMISSED_KEY = 'monitor-dismissed-streak';
 
 /** Page-wide warning after too many losing trades in a row; comes back after the next loss. */
@@ -139,7 +142,7 @@ export function AppShell() {
             <span className="hidden text-[15px] font-bold sm:inline">{APP_NAME}</span>
           </Link>
           <nav aria-label={t.nav.main} className="hidden gap-1 text-sm lg:flex">
-            {NAV.map((item) => (
+            {[...NAV, ...(me?.role === 'admin' ? [ADMIN_ITEM] : [])].map((item) => (
               <Link
                 key={item.to}
                 to={item.to}
@@ -197,7 +200,7 @@ export function AppShell() {
           )}
         </header>
         <nav aria-label={t.nav.mobile} className="flex gap-1 overflow-x-auto pt-3 text-[13px] lg:hidden">
-          {NAV.map((item) => (
+          {[...NAV, ...(me?.role === 'admin' ? [ADMIN_ITEM] : [])].map((item) => (
             <Link
               key={item.to}
               to={item.to}

@@ -83,3 +83,19 @@ export const addDays = (isoDate: string, days: number) => {
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 };
+
+/** "5 min temu", "in 2 hours": a date relative to now, in the formatting locale. */
+export function formatRelative(iso: string | Date | null | undefined) {
+  if (!iso) return '—';
+  const seconds = Math.round((new Date(iso).getTime() - Date.now()) / 1000);
+  const units: [Intl.RelativeTimeFormatUnit, number][] = [
+    ['day', 86_400],
+    ['hour', 3_600],
+    ['minute', 60],
+  ];
+  const format = new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style: 'short' });
+  for (const [unit, size] of units) {
+    if (Math.abs(seconds) >= size) return format.format(Math.round(seconds / size), unit);
+  }
+  return format.format(seconds, 'second');
+}

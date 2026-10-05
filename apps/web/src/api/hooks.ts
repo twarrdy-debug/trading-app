@@ -1,5 +1,9 @@
 import type {
   AccountSummary,
+  AdminInstrument,
+  AdminStats,
+  AdminUser,
+  SystemStatus,
   BasisOverview,
   CalendarRefresh,
   CalendarResponse,
@@ -20,7 +24,10 @@ import type {
 } from '@trading/api/types';
 import type {
   BrokerTimezone,
+  AdminUpdateUserInput,
   CreateAccountInput,
+  CreateInstrumentInput,
+  UpdateInstrumentInput,
   CreateStrategyInput,
   CreateTradeInput,
   ParsedSignal,
@@ -395,5 +402,61 @@ export function useChangeStrategyRules(strategyId: string) {
       }
     },
     onSuccess: store,
+  });
+}
+
+// --- Admin panel ---------------------------------------------------------------------
+
+export const useAdminUsers = () => useQuery({ queryKey: ['admin', 'users'], queryFn: () => api<AdminUser[]>('/admin/users') });
+export const useAdminStats = () => useQuery({ queryKey: ['admin', 'stats'], queryFn: () => api<AdminStats>('/admin/stats') });
+/** Refreshes every 30 s while the status page is open. */
+export const useSystemStatus = () =>
+  useQuery({ queryKey: ['admin', 'system'], queryFn: () => api<SystemStatus>('/admin/system'), refetchInterval: 30_000 });
+export const useAdminInstruments = () => useQuery({ queryKey: ['admin', 'instruments'], queryFn: () => api<AdminInstrument[]>('/admin/instruments') });
+
+export function useAdminUpdateUser() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: AdminUpdateUserInput }) => api<AdminUser>(`/admin/users/${id}`, { method: 'PATCH', json: patch }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['admin'] }),
+  });
+}
+
+export type AdminUserAction = 'revoke' | 'reset' | 'delete';
+export type AdminActionResult = { revoked?: number; sent?: boolean; emailConfigured?: boolean; deleted?: boolean };
+
+/** Sign out everywhere, e-mail a password reset link, or delete the account. */
+export function useAdminUserAction() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action }: { id: string; action: AdminUserAction }): Promise<AdminActionResult> =>
+      action === 'revoke'
+        ? api<{ revoked: number }>(`/admin/users/${id}/sessions/revoke`, { method: 'POST' })
+        : action === 'reset'
+          ? api<{ sent: boolean; emailConfigured: boolean }>(`/admin/users/${id}/password-reset`, { method: 'POST' })
+          : api<{ deleted: boolean }>(`/admin/users/${id}`, { method: 'DELETE' }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['admin'] }),
+  });
+}
+
+export function useRefreshNews() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<{ status: string }>('/admin/news/refresh', { method: 'POST' }),
+    onSettled: () => client.invalidateQueries({ queryKey: ['admin', 'system'] }),
+  });
+}
+
+export function useSaveInstrument() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id?: string; input: CreateInstrumentInput | UpdateInstrumentInput }) =>
+      id
+        ? api<AdminInstrument>(`/admin/instruments/${id}`, { method: 'PATCH', json: input })
+        : api<AdminInstrument>('/instruments', { method: 'POST', json: input }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['admin', 'instruments'] });
+      void client.invalidateQueries({ queryKey: ['instruments'] });
+    },
   });
 }

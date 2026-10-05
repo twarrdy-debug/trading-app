@@ -68,6 +68,11 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        // A blocked account cannot sign in (the API refuses it anyway; this gives a clear message).
+        if (ctx.path === '/sign-in/email' && typeof ctx.body?.email === 'string') {
+          const [row] = await db.select({ disabledAt: users.disabledAt }).from(users).where(eq(users.email, ctx.body.email.trim().toLowerCase()));
+          if (row?.disabledAt) throw new APIError('FORBIDDEN', { message: 'Account blocked', code: 'ACCOUNT_DISABLED' });
+        }
         if (ctx.path !== '/sign-up/email' || env.REGISTRATION !== 'invite') return;
         const invite = await findUsableInvite(db, ctx.body?.inviteCode, ctx.body?.email);
         if (!invite) throw new APIError('BAD_REQUEST', { message: 'Invalid or used invite code', code: 'INVALID_INVITE' });

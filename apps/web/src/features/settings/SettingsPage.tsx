@@ -21,7 +21,6 @@ import { useT } from '../../i18n/index.tsx';
 import { DEFAULT_ACCENT } from '../../lib/theme.ts';
 import { AccountsManager } from '../account/AccountsManager.tsx';
 import { FavoriteInstrumentsPicker } from './FavoriteInstruments.tsx';
-import { InvitesManager } from '../auth/InvitesManager.tsx';
 import { KeywordAlertsFields } from '../news/KeywordAlerts.tsx';
 
 const TIMEZONES = ['Europe/Warsaw', 'Europe/London', 'America/New_York', 'America/Chicago', 'Asia/Tokyo', 'UTC'];
@@ -35,7 +34,6 @@ const SECTIONS = [
   { slug: 'konta', key: 'accounts' },
   { slug: 'instrumenty', key: 'instruments' },
   { slug: 'alerty', key: 'alerts' },
-  { slug: 'zaproszenia', key: 'invites', admin: true },
 ] as const;
 type SectionKey = (typeof SECTIONS)[number]['key'];
 
@@ -61,7 +59,7 @@ export function SettingsPage() {
 
   if (!me) return <main className="grow p-8 text-dim">{all.common.loading}</main>;
 
-  const sections = SECTIONS.filter((s) => !('admin' in s) || me.role === 'admin');
+  const sections = SECTIONS;
   const current = sections.find((s) => s.slug === slug) ?? sections[0]!;
   const save: Save = (patch) => update.mutate(patch, { onSuccess: () => setSavedAt(Date.now()) });
 
@@ -132,12 +130,6 @@ function Section({ section, user, save }: { section: SectionKey; user: PublicUse
       return (
         <Card padded>
           <KeywordAlertsFields keywords={user.settings.newsKeywords} />
-        </Card>
-      );
-    case 'invites':
-      return (
-        <Card padded>
-          <InvitesManager timezone={user.settings.timezone} />
         </Card>
       );
   }

@@ -1131,6 +1131,64 @@ describe('strategies', () => {
   });
 });
 
+describe('admin panel', () => {
+  it('is for admins only and manages users', async () => {
+    const me = (await app.inject({ url: '/me' })).json();
+    const user = (await post('/educators', { displayName: 'Panel user', email: 'panel@example.com' })).json();
+    const headers = { 'x-user-id': user.id };
+    await app.inject({ method: 'PATCH', url: `/admin/users/${user.id}`, payload: { role: 'user' } });
+    expect((await app.inject({ url: '/admin/users', headers })).statusCode).toBe(403);
+    expect((await app.inject({ url: '/admin/stats', headers })).statusCode).toBe(403);
+
+    // The user's data shows in the list.
+    await post('/trades', { instrumentId: ids.XAUUSD, direction: 'long', openedAt: '2025-06-02T08:00:00Z', entryPrice: 4000, positionSize: 0.1 }, headers);
+    const listed = (await app.inject({ url: '/admin/users' })).json().find((u: { id: string }) => u.id === user.id);
+    expect(listed).toMatchObject({ email: 'panel@example.com', role: 'user', trades: 1, accounts: 1, disabledAt: null, canSignIn: false });
+
+    // Promote, block (no API access), unblock.
+    expect((await app.inject({ method: 'PATCH', url: `/admin/users/${user.id}`, payload: { role: 'vip' } })).json().role).toBe('vip');
+    expect((await app.inject({ method: 'PATCH', url: `/admin/users/${user.id}`, payload: { disabled: true } })).json().disabledAt).not.toBeNull();
+    const blocked = await app.inject({ url: '/me', headers });
+    expect(blocked.statusCode).toBe(403);
+    expect(blocked.json().error).toBe('Konto jest zablokowane. Skontaktuj się z administratorem.');
+    await app.inject({ method: 'PATCH', url: `/admin/users/${user.id}`, payload: { disabled: false } });
+    expect((await app.inject({ url: '/me', headers })).statusCode).toBe(200);
+
+    // Not on yourself.
+    const self = await app.inject({ method: 'PATCH', url: `/admin/users/${me.id}`, payload: { disabled: true } });
+    expect(self.statusCode).toBe(400);
+    expect((await app.inject({ method: 'DELETE', url: `/admin/users/${me.id}` })).statusCode).toBe(400);
+
+    // Deleting removes the account with its trades and accounts.
+    expect((await app.inject({ method: 'DELETE', url: `/admin/users/${user.id}` })).json()).toMatchObject({ deleted: true });
+    expect((await app.inject({ url: '/admin/users' })).json().some((u: { id: string }) => u.id === user.id)).toBe(false);
+    expect((await app.inject({ url: '/me', headers })).statusCode).toBe(401);
+  });
+
+  it('reports statistics and system status', async () => {
+    const stats = (await app.inject({ url: '/admin/stats' })).json();
+    expect(stats.users.total).toBeGreaterThan(1);
+    expect(stats.users.byRole.some((r: { role: string }) => r.role === 'admin')).toBe(true);
+    expect(stats.trades.total).toBeGreaterThan(0);
+    expect(Array.isArray(stats.signupsPerWeek)).toBe(true);
+
+    const system = (await app.inject({ url: '/admin/system' })).json();
+    expect(system.database.migrations).toBeGreaterThan(15);
+    expect(system.mail).toMatchObject({ configured: false });
+    expect(system.basis.pairs).toHaveLength(4);
+  });
+
+  it('edits instruments and hides inactive ones', async () => {
+    const before = (await app.inject({ url: '/admin/instruments' })).json().find((i: { symbol: string }) => i.symbol === 'NZDUSD');
+    expect(before).toMatchObject({ active: true, currencies: ['NZD', 'USD'] });
+    const edited = await app.inject({ method: 'PATCH', url: `/admin/instruments/${before.id}`, payload: { name: 'Kiwi', active: false, currencies: ['NZD'] } });
+    expect(edited.json()).toMatchObject({ name: 'Kiwi', active: false, currencies: ['NZD'] });
+    expect((await app.inject({ url: '/instruments' })).json().some((i: { symbol: string }) => i.symbol === 'NZDUSD')).toBe(false);
+    await app.inject({ method: 'PATCH', url: `/admin/instruments/${before.id}`, payload: { name: before.name, active: true, currencies: ['NZD', 'USD'] } });
+    expect((await app.inject({ url: '/instruments' })).json().some((i: { symbol: string }) => i.symbol === 'NZDUSD')).toBe(true);
+  });
+});
+
 describe('trading accounts', () => {
   let trader: Record<string, string>;
   let prop: { id: string };
@@ -1450,6 +1508,31 @@ describe('authentication', () => {
     const { users } = await import('../src/db/schema.ts');
     const { eq } = await import('drizzle-orm');
     expect(await authDb.db.select({ email: users.email }).from(users).where(eq(users.role, 'admin'))).toEqual([{ email: 'owner@example.com' }]);
+  });
+
+  it('lets a whole group sign up with one shared code', async () => {
+    const admin = browser();
+    await admin('POST', '/auth/sign-in/email', { email: 'owner@example.com', password: 'owner-password-1' });
+    const group = await admin('POST', '/invites', { code: 'dixigroup26', multiUse: true, expiresInDays: null, role: 'user' });
+    expect(group.statusCode).toBe(201);
+    expect(group.json()).toMatchObject({ code: 'DIXIGROUP26', multiUse: true, expiresAt: null, useCount: 0 });
+    // Codes are unique, and must look like codes.
+    expect((await admin('POST', '/invites', { code: 'DIXIGROUP26' })).statusCode).toBe(409);
+    expect((await admin('POST', '/invites', { code: 'a b' })).statusCode).toBe(400);
+
+    for (const name of ['Adam', 'Basia']) {
+      const user = browser();
+      const res = await user('POST', '/auth/sign-up/email', { name, email: `${name.toLowerCase()}@group.example`, password: 'group-password-1', inviteCode: 'Dixigroup26' });
+      expect(res.statusCode).toBe(200);
+      expect((await user('GET', '/me')).json()).toMatchObject({ displayName: name, role: 'user', onboarded: false });
+    }
+    const stored = (await admin('GET', '/invites')).json().find((i: { code: string }) => i.code === 'DIXIGROUP26');
+    expect(stored).toMatchObject({ useCount: 2, usedBy: null });
+
+    // Deleting the code closes it.
+    await admin('DELETE', `/invites/${stored.id}`);
+    const late = await browser()('POST', '/auth/sign-up/email', { name: 'Cezary', email: 'cezary@group.example', password: 'group-password-1', inviteCode: 'DIXIGROUP26' });
+    expect(late.json().code).toBe('INVALID_INVITE');
   });
 
   it('resets a forgotten password with the e-mailed link', async () => {
