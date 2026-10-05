@@ -13,13 +13,14 @@ import { Link, useParams } from '@tanstack/react-router';
 import { useEffect, useId, useState, type FormEvent, type InputHTMLAttributes, type ReactNode } from 'react';
 import { AuthError, authApi } from '../../api/auth.ts';
 import { ApiError } from '../../api/client.ts';
-import { useInstruments, useMe, useToggleFavoriteInstrument, useUpdateSettings } from '../../api/hooks.ts';
+import { useMe, useOnboarding, useUpdateSettings } from '../../api/hooks.ts';
 import { Button } from '../../components/ui/Button.tsx';
-import { Chip, FieldLabelContext, Input, Segmented, toggleClass } from '../../components/ui/Field.tsx';
+import { FieldLabelContext, Input, Segmented, toggleClass } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
 import { DEFAULT_ACCENT } from '../../lib/theme.ts';
 import { AccountsManager } from '../account/AccountsManager.tsx';
+import { FavoriteInstrumentsPicker } from './FavoriteInstruments.tsx';
 import { InvitesManager } from '../auth/InvitesManager.tsx';
 import { KeywordAlertsFields } from '../news/KeywordAlerts.tsx';
 
@@ -142,39 +143,11 @@ function Section({ section, user, save }: { section: SectionKey; user: PublicUse
   }
 }
 
-/** Favourite instruments as toggle pills, one row per market. */
+/** Favourite instruments as toggle pills (shared with the introduction). */
 function FavoriteInstrumentsSection() {
-  const all = useT();
-  const t = all.instruments;
-  const { data: instruments = [] } = useInstruments();
-  const toggle = useToggleFavoriteInstrument();
-  const markets = [
-    { key: 'cfd', label: 'CFD' },
-    { key: 'futures', label: 'Futures' },
-  ] as const;
-
   return (
     <Card padded>
-      <div className="flex flex-col gap-4">
-        <p className="m-0 text-[13px] text-dim">{t.favoritesHelp}</p>
-        {markets.map((m) => (
-          <div key={m.key} className="flex flex-col gap-2">
-            <span className="text-xs font-semibold text-dim">{m.label}</span>
-            <div className="flex flex-wrap gap-1.5">
-              {instruments
-                .filter((i) => i.market === m.key)
-                .map((i) => (
-                  <Chip key={i.id} active={i.favorite} label={t.toggle(i.symbol, i.favorite)} onClick={() => toggle.mutate({ id: i.id, favorite: !i.favorite })}>
-                    <span aria-hidden className={i.favorite ? 'text-accent-ink' : 'opacity-40'}>
-                      {i.favorite ? '★' : '☆'}
-                    </span>
-                    <span className="font-mono">{i.symbol}</span>
-                  </Chip>
-                ))}
-            </div>
-          </div>
-        ))}
-      </div>
+      <FavoriteInstrumentsPicker />
     </Card>
   );
 }
@@ -237,6 +210,7 @@ function AutoInput({
 
 function ProfileSection({ user, save }: { user: PublicUser; save: Save }) {
   const t = useT().settings;
+  const onboarding = useOnboarding();
   const id = useId();
   return (
     <>
@@ -256,6 +230,11 @@ function ProfileSection({ user, save }: { user: PublicUser; save: Save }) {
         </Row>
         <Row label={t.role}>
           <span className="rounded-(--radius-chip) bg-chip px-3 py-1 text-xs font-semibold">{t.roles[user.role] ?? user.role}</span>
+        </Row>
+        <Row label={t.onboarding} help={t.onboardingHelp}>
+          <Button size="sm" onClick={() => onboarding.mutate('restart')} disabled={onboarding.isPending}>
+            {t.onboardingRestart}
+          </Button>
         </Row>
       </Card>
       {user.authenticated && <PasswordCard />}

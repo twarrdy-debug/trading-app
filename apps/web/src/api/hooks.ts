@@ -55,6 +55,15 @@ export const useEmotions = () =>
 export const useEducators = () =>
   useQuery({ queryKey: ['educators'], queryFn: () => api<Educator[]>('/educators'), ...STATIC });
 
+/** Finishes (or skips) the first-run introduction; `restart` shows it again. */
+export function useOnboarding() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (action: 'finish' | 'restart') => api<PublicUser>('/me/onboarding', { method: action === 'finish' ? 'POST' : 'DELETE' }),
+    onSuccess: (user) => client.setQueryData(['me'], user),
+  });
+}
+
 export function useUpdateSettings() {
   const client = useQueryClient();
   return useMutation({
@@ -79,8 +88,8 @@ export const useTrades = (filters: TradeQuery) =>
     placeholderData: (previous) => previous,
   });
 
-export const useTradeStats = (range: { dateFrom?: string; dateTo?: string; instrumentId?: string; account?: string }) =>
-  useQuery({ queryKey: ['stats', range], queryFn: () => api<TradeStats>(`/trades/stats${qs(range)}`) });
+export const useTradeStats = (range: { dateFrom?: string; dateTo?: string; instrumentId?: string; account?: string }, enabled = true) =>
+  useQuery({ queryKey: ['stats', range], queryFn: () => api<TradeStats>(`/trades/stats${qs(range)}`), enabled });
 
 function useInvalidateTrades() {
   const client = useQueryClient();

@@ -1,14 +1,13 @@
 import type { AccountSummary, Instrument, Trade } from '@trading/api/types';
-import { DIRECTIONS } from '@trading/shared';
+import { DIRECTIONS, exitReason } from '@trading/shared';
 import type { TradeQuery } from '../../api/hooks.ts';
 import { Button } from '../../components/ui/Button.tsx';
 import { Field, Input } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
 import { currentLocale, formatAmount, formatNumber, formatPrice, formatUnits } from '../../lib/format.ts';
+import { InstrumentBadge } from '../../components/ui/InstrumentBadge.tsx';
 import { instrumentOptions } from '../../lib/instruments.ts';
-
-const COLUMNS = 'grid grid-cols-[156px_104px_80px_minmax(128px,1fr)_60px_90px_90px_100px] gap-3 px-5';
 
 export function TradeFilters({
   value,
@@ -100,24 +99,92 @@ function RedNewsMark({ trade }: { trade: Trade }) {
   );
 }
 
+type Outcome = 'tp' | 'sl' | 'be' | 'win' | 'loss' | 'open';
+
+/** The badge in the result column: TP/SL/BE from the exit, otherwise the plain outcome. */
+export function rowOutcome(trade: Trade): Outcome {
+  if (trade.status === 'open') return 'open';
+  return exitReason(trade) ?? (trade.outcome === 'loss' ? 'loss' : 'win');
+}
+
+/** Row tint and left edge by outcome: green for wins, red for losses, amber for breakeven. */
+const ROW_TONE: Record<Outcome, string> = {
+  tp: 'bg-buy-soft/70 shadow-[inset_3px_0_0_var(--buy)]',
+  win: 'bg-buy-soft/70 shadow-[inset_3px_0_0_var(--buy)]',
+  sl: 'bg-sell-soft/70 shadow-[inset_3px_0_0_var(--sell)]',
+  loss: 'bg-sell-soft/70 shadow-[inset_3px_0_0_var(--sell)]',
+  be: 'bg-warn-bg/80 shadow-[inset_3px_0_0_var(--warn)]',
+  open: 'shadow-[inset_3px_0_0_var(--accent-ink)]',
+};
+
+const BADGE: Record<Outcome, string> = {
+  tp: 'border-buy/50 text-buy',
+  win: 'border-buy/50 text-buy',
+  sl: 'border-sell/50 text-sell',
+  loss: 'border-sell/50 text-sell',
+  be: 'border-warn/60 text-warn',
+  open: 'border-accent-ink/60 text-accent-ink',
+};
+
+function OutcomeBadge({ outcome }: { outcome: Outcome }) {
+  const t = useT().table;
+  const icon =
+    outcome === 'tp' || outcome === 'win' ? <path d="m8 12.5 2.5 2.5L16 9.5" /> : outcome === 'sl' || outcome === 'loss' ? <path d="m9.5 9.5 5 5m0-5-5 5" /> : outcome === 'be' ? <path d="M8.5 12h7" /> : <path d="M12 8v4l2.5 1.5" />;
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-sans text-[11px] font-bold whitespace-nowrap ${BADGE[outcome]}`}>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <circle cx="12" cy="12" r="9" />
+        {icon}
+      </svg>
+      {t.outcomes[outcome]}
+    </span>
+  );
+}
+
 function DirectionMark({ direction }: { direction: Trade['direction'] }) {
   const t = useT().table;
   return direction === 'long' ? (
-    <span className="justify-self-start rounded-md bg-buy-soft px-2 py-1 font-sans text-[11px] font-bold text-buy">{t.long}</span>
+    <span className="rounded-md border border-buy/40 bg-buy-soft px-2 py-0.5 font-sans text-[11px] font-bold text-buy uppercase">{t.long}</span>
   ) : (
-    <span className="justify-self-start rounded-md bg-sell-soft px-2 py-1 font-sans text-[11px] font-bold text-sell">{t.short}</span>
+    <span className="rounded-md border border-sell/40 bg-sell-soft px-2 py-0.5 font-sans text-[11px] font-bold text-sell uppercase">{t.short}</span>
+  );
+}
+
+const tone = (v: number | null | undefined) => (v == null || v === 0 ? '' : v > 0 ? 'text-buy' : 'text-sell');
+
+/** "2 h 15 min", "1 d 6 h" between opening and closing. */
+export function tradeDuration(trade: Trade, format: (d: number, h: number, m: number) => string) {
+  if (!trade.closedAt) return null;
+  const minutes = Math.max(0, Math.round((new Date(trade.closedAt).getTime() - new Date(trade.openedAt).getTime()) / 60_000));
+  return format(Math.floor(minutes / 1440), Math.floor((minutes % 1440) / 60), minutes % 60);
+}
+
+function HeaderCell({ children, help, className = '' }: { children: string; help?: string; className?: string }) {
+  return (
+    <th scope="col" className={`px-3 py-2.5 text-left font-sans text-xs font-semibold whitespace-nowrap text-dim ${className}`}>
+      <span className="inline-flex items-center gap-1" title={help}>
+        {children}
+        {help && (
+          <span aria-hidden className="inline-flex size-3.5 items-center justify-center rounded-full border border-dim/50 text-[9px] leading-none">
+            ?
+          </span>
+        )}
+      </span>
+    </th>
   );
 }
 
 export function TradeTable({
   trades,
   accounts = [],
+  timezone,
   selectedId,
   onSelect,
 }: {
   trades: Trade[];
-  /** When given (the "all accounts" view), each row shows its account name. */
+  /** The user's accounts; with any, an account column is shown. */
   accounts?: AccountSummary[];
+  timezone: string;
   selectedId: string | null;
   onSelect: (trade: Trade) => void;
 }) {
@@ -126,79 +193,138 @@ export function TradeTable({
   if (trades.length === 0) {
     return <p className="m-0 px-5 py-10 text-center text-sm text-dim">{labels.empty}</p>;
   }
+  const dateFormat = new Intl.DateTimeFormat(currentLocale(), { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: timezone });
+  const timeFormat = new Intl.DateTimeFormat(currentLocale(), { hour: '2-digit', minute: '2-digit', timeZone: timezone });
+  const showAccount = accounts.length > 0;
 
   return (
     <div className="overflow-x-auto">
-      <div className="min-w-[940px]">
-        <div className={`${COLUMNS} eyebrow bg-raised py-2.5 text-[11px]`} aria-hidden>
-          <span>{labels.dayNumber}</span>
-          <span>{labels.instrument}</span>
-          <span>{labels.direction}</span>
-          <span>{labels.entryExit}</span>
-          <span>{labels.risk}</span>
-          <span title={labels.slTitle}>{labels.slMoney}</span>
-          <span>{labels.result}</span>
-          <span className="text-right">{labels.accountCurrency}</span>
-        </div>
-        <ul className="m-0 list-none p-0">
+      <table className="w-full min-w-[1080px] border-collapse font-mono text-sm">
+        <thead className="bg-raised">
+          <tr>
+            <HeaderCell>{labels.actions}</HeaderCell>
+            <HeaderCell>{labels.date}</HeaderCell>
+            {showAccount && <HeaderCell>{labels.account}</HeaderCell>}
+            <HeaderCell>{labels.instrument}</HeaderCell>
+            <HeaderCell>{labels.direction}</HeaderCell>
+            <HeaderCell>{labels.result}</HeaderCell>
+            <HeaderCell help={labels.feesHelp}>{labels.fees}</HeaderCell>
+            <HeaderCell help={labels.profitPctHelp}>{labels.profitPct}</HeaderCell>
+            <HeaderCell help={labels.riskPctHelp}>{labels.riskPct}</HeaderCell>
+            <HeaderCell help={labels.rrHelp}>{labels.rr}</HeaderCell>
+            <HeaderCell help={labels.outcomeHelp}>{labels.outcome}</HeaderCell>
+          </tr>
+        </thead>
+        <tbody>
           {trades.map((t) => {
-            const tone = t.pnlAccount == null && t.resultUnits == null ? 'text-dim' : (t.resultUnits ?? 0) >= 0 ? 'text-buy' : 'text-sell';
+            const outcome = rowOutcome(t);
+            const opened = new Date(t.openedAt);
+            const closed = t.closedAt ? new Date(t.closedAt) : null;
+            const sameDay = closed != null && dateFormat.format(closed) === dateFormat.format(opened);
+            const account = accounts.find((a) => a.id === t.accountId);
+            const selected = t.id === selectedId;
             return (
-              <li key={t.id} className="border-b border-grid last:border-b-0">
-                <button
-                  type="button"
-                  onClick={() => onSelect(t)}
-                  aria-current={t.id === selectedId}
-                  className={`${COLUMNS} w-full items-center py-3.5 text-left font-mono text-sm text-ink transition hover:bg-raised ${
-                    t.id === selectedId ? 'bg-raised' : t.overDailyLimit ? 'bg-warn-bg' : ''
-                  }`}
-                >
-                  <span className="flex items-center gap-2">
-                    {t.dayLabel.split(' – ')[0]}
-                    {t.overDailyLimit && (
-                      <span className="rounded-md bg-accent px-1.5 py-0.5 font-sans text-[10px] font-bold text-on-accent">{labels.limitBadge}</span>
-                    )}
-                    {t.source === 'educator' && (
-                      <span title={labels.educatorSignal} className="rounded-md bg-chip px-1.5 py-0.5 font-sans text-[10px] font-bold text-dim">
-                        E
-                      </span>
-                    )}
-                    {t.externalId?.startsWith('mt5:') && (
-                      <span title={all.table.importedMt5} className="rounded-md bg-chip px-1.5 py-0.5 font-sans text-[10px] font-bold text-dim">
-                        MT5
-                      </span>
-                    )}
-                  </span>
-                  <span className="flex min-w-0 flex-col font-sans">
-                    <span className="font-bold">{t.instrument.symbol}</span>
-                    {accounts.length > 0 && (
-                      <span className="truncate text-[11px] text-dim">{accounts.find((a) => a.id === t.accountId)?.name ?? all.accounts.none}</span>
-                    )}
-                  </span>
-                  <DirectionMark direction={t.direction} />
-                  <span className="flex min-w-0 items-center gap-2 text-dim">
-                    <span className="truncate">
-                      {formatPrice(t.entryPrice)} → {t.exitPrice == null ? all.common.open : formatPrice(t.exitPrice)}
-                    </span>
-                    {t.redNews.length > 0 && <RedNewsMark trade={t} />}
-                  </span>
-                  <span className="text-dim">{t.riskPct != null ? `${formatNumber(t.riskPct)}%` : '—'}</span>
-                  <span
-                    className="truncate text-dim"
-                    title={t.riskAccount != null ? labels.riskTitle(formatAmount(t.riskAccount, t.accountCurrency, false)) : undefined}
+              <tr
+                key={t.id}
+                onClick={() => onSelect(t)}
+                className={`cursor-pointer border-b border-line transition last:border-b-0 hover:brightness-110 ${ROW_TONE[outcome]} ${
+                  selected ? 'outline-2 -outline-offset-2 outline-accent-ink' : ''
+                }`}
+              >
+                <td className="px-3 py-3">
+                  <button
+                    type="button"
+                    aria-current={selected || undefined}
+                    aria-label={labels.openTradeAria(t.dayLabel)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelect(t);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-[9px] border border-line bg-panel px-2.5 py-1.5 font-sans text-[11px] font-semibold text-dim transition hover:text-ink"
                   >
-                    {t.riskAccount != null ? formatAmount(-t.riskAccount, t.accountCurrency) : '—'}
-                  </span>
-                  <span className={tone}>{formatUnits(t.resultUnits, all.units.short[t.instrument.measureUnit])}</span>
-                  <span className={`text-right ${tone}`}>
-                    {t.pnlAccount != null ? formatAmount(t.pnlAccount, t.accountCurrency) : t.pnlQuote != null ? all.table.noRate : '—'}
-                  </span>
-                </button>
-              </li>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+                    </svg>
+                    {labels.openTrade}
+                  </button>
+                </td>
+                <td className="px-3 py-3 whitespace-nowrap">
+                  <div className="flex flex-col gap-0.5">
+                    <span>
+                      <span className="text-dim">{dateFormat.format(opened)}</span> <span className="font-semibold">{timeFormat.format(opened)}</span>
+                    </span>
+                    <span className="flex items-center gap-1.5 font-sans text-[11px] text-dim">
+                      <span title={all.table.dayNumber} className="font-mono">
+                        #{t.dayIndex}
+                      </span>
+                      {closed && <span>· {tradeDuration(t, labels.duration)}</span>}
+                      {t.overDailyLimit && <span className="rounded-md bg-accent px-1.5 py-px text-[10px] font-bold text-on-accent">{labels.limitBadge}</span>}
+                      {t.source === 'educator' && (
+                        <span title={labels.educatorSignal} className="rounded-md bg-chip px-1.5 py-px text-[10px] font-bold">
+                          E
+                        </span>
+                      )}
+                      {t.externalId?.startsWith('mt5:') && (
+                        <span title={labels.importedMt5} className="rounded-md bg-chip px-1.5 py-px text-[10px] font-bold">
+                          MT5
+                        </span>
+                      )}
+                    </span>
+                    {closed && (
+                      <span>
+                        {!sameDay && <span className="text-dim">{dateFormat.format(closed)} </span>}
+                        <span className="font-semibold">{timeFormat.format(closed)}</span>
+                      </span>
+                    )}
+                  </div>
+                </td>
+                {showAccount && <td className="max-w-36 truncate px-3 py-3 font-sans">{account?.name ?? <span className="text-dim">{all.accounts.none}</span>}</td>}
+                <td className="px-3 py-3">
+                  <div className="flex flex-col items-start gap-1">
+                    <InstrumentBadge symbol={t.instrument.symbol} />
+                    <span className="flex items-center gap-1.5 text-[11px] whitespace-nowrap text-dim">
+                      {formatPrice(t.entryPrice)} → {t.exitPrice == null ? '…' : formatPrice(t.exitPrice)}
+                      {t.redNews.length > 0 && <RedNewsMark trade={t} />}
+                    </span>
+                  </div>
+                </td>
+                <td className="px-3 py-3">
+                  <DirectionMark direction={t.direction} />
+                </td>
+                <td className="px-3 py-3 whitespace-nowrap">
+                  <div className="flex flex-col gap-0.5">
+                    <span className={`font-semibold ${tone(t.pnlAccount)}`}>
+                      {t.pnlAccount != null ? formatAmount(t.pnlAccount, t.accountCurrency) : t.pnlQuote != null ? labels.noRate : '—'}
+                    </span>
+                    <span className="text-[11px] text-dim">{t.resultUnits == null ? all.common.open : formatUnits(t.resultUnits, all.units.short[t.instrument.measureUnit])}</span>
+                  </div>
+                </td>
+                <td className="px-3 py-3 whitespace-nowrap text-dim">{t.fees ? formatAmount(t.fees, t.accountCurrency, false) : '—'}</td>
+                <td className={`px-3 py-3 whitespace-nowrap ${tone(t.pnlPct)}`}>{t.pnlPct == null ? '—' : `${formatNumber(t.pnlPct, true)}%`}</td>
+                <td className="px-3 py-3 whitespace-nowrap">
+                  <div className="flex flex-col gap-0.5">
+                    <span>{t.riskPct != null ? `${formatNumber(t.riskPct)}%` : '—'}</span>
+                    {t.riskAccount != null && (
+                      <span className="text-[11px] text-dim" title={labels.riskTitle(formatAmount(t.riskAccount, t.accountCurrency, false))}>
+                        {formatAmount(-t.riskAccount, t.accountCurrency)}
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-3 py-3 whitespace-nowrap">
+                  <div className="flex flex-col gap-0.5">
+                    <span className={`font-semibold ${tone(t.rMultiple)}`}>{t.rMultiple == null ? '—' : `${formatNumber(t.rMultiple, true)} R`}</span>
+                    {t.plannedRR != null && <span className="text-[11px] text-dim">{labels.plan(formatNumber(t.plannedRR))}</span>}
+                  </div>
+                </td>
+                <td className="px-3 py-3">
+                  <OutcomeBadge outcome={outcome} />
+                </td>
+              </tr>
             );
           })}
-        </ul>
-      </div>
+        </tbody>
+      </table>
     </div>
   );
 }

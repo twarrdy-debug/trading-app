@@ -70,17 +70,22 @@ export function Mt5ImportDialog({
   /** Remounts the file input, so choosing another file starts empty. */
   const [fileInputKey, setFileInputKey] = useState(0);
   const [errors, setErrors] = useState<string[]>([]);
-  const [accountId, setAccountId] = useState(defaultAccountId);
+  const [accountId, setAccountId] = useState(defaultAccountId || (accounts.length === 1 ? accounts[0]!.id : ''));
 
   useEffect(() => ref.current?.showModal(), []);
 
   const request = (commit: boolean, map = symbolMap, zone = timezone, account = accountId) => {
     if (!file) return;
+    // Imported trades need an account, like every trade.
+    if (!account) {
+      setErrors([all.form.errAccount]);
+      return;
+    }
     setErrors([]);
     // Only assignments for symbols in this report are sent.
     const relevant = Object.fromEntries(Object.entries(map).filter(([, id]) => instruments.some((i) => i.id === id)));
     run.mutate(
-      { file, timezone: zone, symbolMap: relevant, commit, accountId: account || undefined },
+      { file, timezone: zone, symbolMap: relevant, commit, accountId: account },
       {
         onSuccess: (result) => {
           if (commit) {
@@ -158,17 +163,21 @@ export function Mt5ImportDialog({
             />
             <span className="text-xs text-dim">{t.serverTimeHint}</span>
           </Field>
-          {accounts.length > 0 && (
+          {accounts.length > 0 ? (
             <Field label={t.targetAccount}>
               <Select
                 value={accountId}
                 onChange={(id) => {
                   setAccountId(id);
-                  if (preview) request(false, symbolMap, timezone, id);
+                  if (file) request(false, symbolMap, timezone, id);
                 }}
-                options={[{ value: '', label: all.accounts.none }, ...accounts.map((a) => ({ value: a.id, label: a.name }))]}
+                options={[...(accountId ? [] : [{ value: '', label: all.form.chooseAccount }]), ...accounts.map((a) => ({ value: a.id, label: a.name }))]}
               />
             </Field>
+          ) : (
+            <p role="alert" className="m-0 rounded-(--radius-control) bg-warn-bg p-3 text-[13px]">
+              {all.form.noAccounts}
+            </p>
           )}
         </div>
 

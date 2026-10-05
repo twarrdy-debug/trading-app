@@ -97,6 +97,11 @@ export const users = pgTable('users', {
   lossAlertMode: lossAlertMode('loss_alert_mode').notNull().default('streak'),
   /** Words that highlight a news headline and raise an alert. */
   newsKeywords: text('news_keywords').array().notNull().default([]),
+  /**
+   * When the user finished the first-run introduction (currency, favourites, account, strategy).
+   * Null until then; existing users and users created outside sign-up count as done.
+   */
+  onboardedAt: timestamp('onboarded_at', { withTimezone: true }).defaultNow(),
   /** Better Auth: set once the address is confirmed (sign-up by invite counts as confirmed later). */
   emailVerified: boolean('email_verified').notNull().default(false),
   image: text('image'),

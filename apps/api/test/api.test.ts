@@ -65,8 +65,22 @@ afterAll(async () => {
   rmSync(uploadDir, { recursive: true, force: true });
 });
 
-const post = (url: string, payload: object, headers: Record<string, string> = {}) =>
-  app.inject({ method: 'POST', url, payload, headers });
+/** Each acting user's "Test" account, created on first use. */
+const defaultAccounts = new Map<string, string>();
+async function defaultAccount(headers: Record<string, string> = {}) {
+  const key = headers['x-user-id'] ?? '';
+  if (!defaultAccounts.has(key)) {
+    const res = await app.inject({ method: 'POST', url: '/accounts', headers, payload: { name: 'Test', type: 'live', size: 100_000 } });
+    defaultAccounts.set(key, res.json().id);
+  }
+  return defaultAccounts.get(key)!;
+}
+
+/** Every trade needs an account: a new trade without `accountId` goes to the user's "Test" account. */
+const post = async (url: string, payload: object, headers: Record<string, string> = {}) => {
+  const body = url === '/trades' && !('accountId' in payload) ? { ...payload, accountId: await defaultAccount(headers) } : payload;
+  return app.inject({ method: 'POST', url, payload: body, headers });
+};
 
 describe('reference data', () => {
   it('seeds instruments, emotions and the admin user', async () => {
@@ -201,7 +215,7 @@ describe('trading journal', () => {
   it('returns stats for closed trades', async () => {
     const stats = (await app.inject({ url: '/trades/stats' })).json();
     expect(stats.summary).toMatchObject({ trades: 2, wins: 1, losses: 1, winRate: 50, pnl: 920.5, profitFactor: 5.5 });
-    expect(stats.equityCurve).toEqual([{ date: '2025-09-26', pnl: 920.5, cumulative: 920.5 }]);
+    expect(stats.equityCurve).toMatchObject([{ date: '2025-09-26', pnl: 920.5, cumulative: 920.5 }]);
     expect(stats.byDayIndex.map((d: { key: string }) => d.key)).toEqual(['1', '2']);
     expect(stats.byEmotion.find((e: { key: string }) => e.key === 'fomo')).toMatchObject({ label: 'FOMO', winRate: 0 });
   });
@@ -666,10 +680,11 @@ describe('trading monitor', () => {
     }).then((r) => r.json().trade.id as string);
 
   it('alerts after three losing trades in a row today', async () => {
-    // Without accounts, everything is one group of trades without an account.
+    // One account, so one group.
     const monitor = async () => (await app.inject({ url: '/trades/monitor' })).json();
+    const accountId = await defaultAccount();
     const created = [await trade(40, 3995), await trade(30, 3990)];
-    expect((await monitor()).groups).toMatchObject([{ accountId: null, lossCount: 2, alert: false }]);
+    expect((await monitor()).groups).toMatchObject([{ accountId, lossCount: 2, alert: false }]);
 
     created.push(await trade(20, 3998));
     const alerted = await monitor();
@@ -685,7 +700,7 @@ describe('trading monitor', () => {
     await app.inject({ method: 'PATCH', url: '/me', payload: { lossAlertMode: 'day' } });
     const daily = await monitor();
     expect(daily).toMatchObject({ lossMode: 'day', alert: true, groups: [{ lossCount: 3, alert: true }] });
-    expect(daily.groups[0].alertKey).toMatch(/^day:none:/);
+    expect(daily.groups[0].alertKey.startsWith(`day:${accountId}:`)).toBe(true);
     await app.inject({ method: 'PATCH', url: '/me', payload: { lossAlertMode: 'streak' } });
     for (const id of created) await app.inject({ method: 'DELETE', url: `/trades/${id}` });
   });
@@ -875,8 +890,8 @@ describe('MT5 import', () => {
   const utf16 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(report.toString('utf8'), 'utf16le')]);
   let trader: Record<string, string>;
 
-  const importFile = (fields: Record<string, string>, content = utf16, name = 'ReportHistory-12345678.html') => {
-    const body = multipart(fields, { name, content });
+  const importFile = async (fields: Record<string, string>, content = utf16, name = 'ReportHistory-12345678.html') => {
+    const body = multipart({ accountId: await defaultAccount(trader), ...fields }, { name, content });
     return app.inject({ method: 'POST', url: '/trades/import/mt5', payload: body.payload, headers: { ...body.headers, ...trader } });
   };
 
@@ -974,6 +989,68 @@ describe('MT5 import', () => {
       ...multipart({ timezone: 'Mars/Base' }, { name: 'r.html', content: utf16 }),
     });
     expect(noFile.statusCode).toBe(400);
+  });
+});
+
+describe('dashboard stats', () => {
+  it('reports days with counts and discipline, and win/loss/breakeven streaks', async () => {
+    const user = (await post('/educators', { displayName: 'Dashboard trader' })).json();
+    const headers = { 'x-user-id': user.id };
+    await app.inject({ method: 'PATCH', url: '/me', headers, payload: { maxTradesPerDay: 2, lossStreakAlert: 2, timezone: 'UTC' } });
+    // XAUUSD long from 4000, 1 lot: exit 4001 = +10 pips.
+    const gold = (day: string, hour: number, exitPrice: number, extra: object = {}) =>
+      post('/trades', {
+        instrumentId: ids.XAUUSD,
+        direction: 'long',
+        openedAt: `${day}T${String(hour).padStart(2, '0')}:00:00Z`,
+        closedAt: `${day}T${String(hour).padStart(2, '0')}:30:00Z`,
+        entryPrice: 4000,
+        exitPrice,
+        stopLoss: 3995,
+        positionSize: 1,
+        emotionKeys: ['calm'],
+        ...extra,
+      }, headers);
+    // A clean day: two wins.
+    await gold('2025-03-03', 8, 4001);
+    await gold('2025-03-03', 9, 4002);
+    // A messy day: a breakeven, two losses in a row (warning at 2), the third trade over the limit,
+    // one trade without a stop loss and one without emotions.
+    await gold('2025-03-04', 8, 4000, { stopLoss: null });
+    await gold('2025-03-04', 9, 3999, { emotionKeys: [] });
+    await gold('2025-03-04', 10, 3998);
+
+    const stats = (await app.inject({ url: '/trades/stats', headers })).json();
+    expect(stats.summary).toMatchObject({ trades: 5, wins: 2, losses: 2, breakevens: 1 });
+    expect(stats.equityCurve).toMatchObject([
+      { date: '2025-03-03', trades: 2, wins: 2, losses: 0, discipline: { limit: true, stopLoss: true, emotions: true, losses: true } },
+      { date: '2025-03-04', trades: 3, wins: 0, losses: 2, discipline: { limit: false, stopLoss: false, emotions: false, losses: false } },
+    ]);
+    expect(stats.streaks).toEqual({
+      recent: ['win', 'win', 'breakeven', 'loss', 'loss'],
+      maxWin: 2,
+      maxLoss: 2,
+      maxBreakeven: 1,
+      current: { outcome: 'loss', count: 2 },
+    });
+  });
+});
+
+describe('breakeven trades', () => {
+  it('counts results within ±0.1R as neutral', async () => {
+    const user = (await post('/educators', { displayName: 'Breakeven trader' })).json();
+    const headers = { 'x-user-id': user.id };
+    // XAUUSD long 4000, stop 3990 (100 pips = 1R), 1 lot.
+    const gold = (exitPrice: number, hour: number) =>
+      post('/trades', { instrumentId: ids.XAUUSD, direction: 'long', openedAt: `2025-04-01T0${hour}:00:00Z`, closedAt: `2025-04-01T0${hour}:30:00Z`, entryPrice: 4000, exitPrice, stopLoss: 3990, positionSize: 1 }, headers);
+    expect((await gold(4020, 1)).json().trade.outcome).toBe('win');
+    // -3 pips = -0.03R: breakeven, shown with a BE badge.
+    expect((await gold(3999.7, 2)).json().trade).toMatchObject({ outcome: 'breakeven', rMultiple: -0.03 });
+    expect((await gold(3990, 3)).json().trade.outcome).toBe('loss');
+
+    const s = (await app.inject({ url: '/trades/stats', headers })).json().summary;
+    // 1 win and 1 loss; the breakeven counts in neither, so the win rate is 50%.
+    expect(s).toMatchObject({ trades: 3, wins: 1, losses: 1, breakevens: 1, winRate: 50, avgWin: 2000, avgLoss: -1000 });
   });
 });
 
@@ -1094,7 +1171,14 @@ describe('trading accounts', () => {
     await gold('2026-09-02', 3997, { accountId: prop.id }); // −300
     await gold('2026-09-03', 3996, { accountId: prop.id }); // −400
     await gold('2026-09-03', 4002, { accountId: live.id }); // +200
-    await gold('2026-09-04', 4001); // +100, no account
+    // Every trade needs an account.
+    const missing = await gold('2026-09-04', 4001);
+    expect(missing.statusCode).toBe(400);
+    expect(missing.json().issues[0].message).toBe('Wybierz konto, do którego należy transakcja');
+    // A trade left without an account, as after deleting its account (or from before accounts were required).
+    const old = (await as('POST', '/accounts', { name: 'Old', type: 'live', size: 1000 })).json();
+    await gold('2026-09-04', 4001, { accountId: old.id }); // +100
+    await as('DELETE', `/accounts/${old.id}`);
 
     const accounts = (await as('GET', '/accounts')).json();
     expect(accounts.map((a: { name: string; balance: number }) => [a.name, a.balance])).toEqual([
@@ -1133,8 +1217,12 @@ describe('trading accounts', () => {
     const open = (await gold('2026-09-05', null, { accountId: prop.id, stopLoss: 3995, positionSize: 0.5 })).json().trade;
     // 50 pips × 10 × 0.5 = 250 against a 9 800 balance.
     expect(open).toMatchObject({ riskAccount: 250, riskPct: 2.55 });
-    const loose = (await gold('2026-09-05', null, { stopLoss: 3995, positionSize: 0.5 })).json().trade;
-    expect(loose).toMatchObject({ riskAccount: 250, riskPct: null });
+    // Without an account there is no balance to measure against; such a trade must get one when edited.
+    const legacy = (await as('GET', '/trades?account=none')).json().items[0];
+    expect(legacy).toMatchObject({ accountId: null, riskPct: null, pnlPct: null });
+    const edit = await as('PATCH', `/trades/${legacy.id}`, { notes: 'checked' });
+    expect(edit.statusCode).toBe(400);
+    expect(edit.json().error).toMatch(/^Przypisz transakcję do konta/);
   });
 
   it('refuses trades from another market on a prop account', async () => {
@@ -1165,13 +1253,12 @@ describe('trading accounts', () => {
       });
     await loss(30, prop.id);
     await loss(20, prop.id);
-    await loss(10);
+    await loss(10, live.id);
     await as('PATCH', '/me', { lossStreakAlert: 2 });
     const monitor = (await as('GET', '/trades/monitor')).json();
     expect(monitor.groups.map((g: { name: string | null; tradesToday: number; lossCount: number; alert: boolean }) => [g.name, g.tradesToday, g.lossCount, g.alert])).toEqual([
       ['FTMO 10k', 2, 2, true],
-      ['Live', 0, 0, false],
-      [null, 1, 1, false],
+      ['Live', 1, 1, false],
     ]);
     expect(monitor.alert).toBe(true);
     await as('PATCH', '/me', { lossStreakAlert: 3 });
@@ -1195,7 +1282,8 @@ describe('trading accounts', () => {
   it('keeps the trades when an account is deleted', async () => {
     expect((await as('DELETE', `/accounts/${live.id}`)).statusCode).toBe(204);
     expect((await as('GET', '/accounts')).json()).toHaveLength(1);
-    expect((await as('GET', '/trades?account=none')).json().total).toBe(4);
+    // The older trade without an account, plus the two Live trades.
+    expect((await as('GET', '/trades?account=none')).json().total).toBe(3);
     expect((await as('GET', `/trades/stats?account=${live.id}`)).statusCode).toBe(404);
   });
 
@@ -1218,20 +1306,21 @@ describe('daily limit per account', () => {
     const before = (await app.inject({ url: '/me' })).json().settings.maxTradesPerDay;
     await app.inject({ method: 'PATCH', url: '/me', payload: { maxTradesPerDay: 1 } });
     const account = (await post('/accounts', { name: 'Limit test', type: 'live', size: 10_000 })).json();
-    const trade = (openedAt: string, accountId: string | null) =>
+    const other = await defaultAccount();
+    const trade = (openedAt: string, accountId: string) =>
       post('/trades', { instrumentId: ids.XAUUSD, direction: 'long', openedAt, entryPrice: 4000, stopLoss: 3990, positionSize: 0.1, accountId }).then(
         (r) => r.json().trade as { id: string; dayLabel: string; overDailyLimit: boolean },
       );
     const a1 = await trade('2025-11-05T09:00:00Z', account.id);
-    const none1 = await trade('2025-11-05T10:00:00Z', null);
+    const b1 = await trade('2025-11-05T10:00:00Z', other);
     const a2 = await trade('2025-11-05T11:00:00Z', account.id);
     // Numbering stays shared across accounts; the limit does not.
-    expect([a1, none1, a2].map((t) => [t.dayLabel.slice(0, 1), t.overDailyLimit])).toEqual([
+    expect([a1, b1, a2].map((t) => [t.dayLabel.slice(0, 1), t.overDailyLimit])).toEqual([
       ['1', false],
       ['2', false],
       ['3', true],
     ]);
-    for (const t of [a1, none1, a2]) await app.inject({ method: 'DELETE', url: `/trades/${t.id}` });
+    for (const t of [a1, b1, a2]) await app.inject({ method: 'DELETE', url: `/trades/${t.id}` });
     await app.inject({ method: 'DELETE', url: `/accounts/${account.id}` });
     await app.inject({ method: 'PATCH', url: '/me', payload: { maxTradesPerDay: before } });
   });
@@ -1322,8 +1411,14 @@ describe('authentication', () => {
     expect((await newcomer('GET', '/me')).json()).toMatchObject({
       displayName: 'Jan',
       role: 'vip',
+      // A new sign-up starts with the introduction; the admin created before it does not.
+      onboarded: false,
       settings: { language: 'en', timezone: 'Europe/London' },
     });
+    expect((await admin('GET', '/me')).json().onboarded).toBe(true);
+    expect((await newcomer('POST', '/me/onboarding')).json().onboarded).toBe(true);
+    expect((await newcomer('DELETE', '/me/onboarding')).json().onboarded).toBe(false);
+    await newcomer('POST', '/me/onboarding');
     // The newcomer sees only their own journal, and cannot manage invites.
     expect((await newcomer('GET', '/trades')).json().total).toBe(0);
     expect((await newcomer('GET', '/invites')).statusCode).toBe(403);

@@ -120,6 +120,13 @@
       "when": 1791195490016,
       "tag": "0016_favorite_instruments",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791201909500,
+      "tag": "0017_onboarding",
+      "breakpoints": true
     }
   ]
 }

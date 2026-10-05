@@ -189,6 +189,9 @@ function StrategyEditor({ strategy, autoFocusRule }: { strategy: Strategy; autoF
     run({ op: 'order', ids }, { onSettled: () => setOrder(null) });
   };
   const drag = useDragReorder(reorder);
+  const [checked, toggleChecked, clearChecked] = useEntryCheck(strategy.id);
+  const keptCount = rules.filter((r) => checked.has(r.id)).length;
+  const missing = rules.length - keptCount;
   const blurOnEnter = (e: KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && e.currentTarget.blur();
   const full = strategy.rules.length >= MAX_STRATEGY_RULES;
 
@@ -212,9 +215,28 @@ function StrategyEditor({ strategy, autoFocusRule }: { strategy: Strategy; autoF
       </div>
 
       <section className="flex flex-col gap-2.5">
-        <div className="flex flex-col gap-0.5">
-          <h3 className="m-0 text-sm font-bold">{t.rulesTitle}</h3>
-          <span className="text-xs text-dim">{t.rulesHelp}</span>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="flex flex-col gap-0.5">
+            <h3 className="m-0 text-sm font-bold">{t.rulesTitle}</h3>
+            <span className="text-xs text-dim">{t.checkHelp}</span>
+          </div>
+          {rules.length > 0 && (
+            <div className="flex items-center gap-2" aria-live="polite">
+              <span className="font-mono text-sm font-semibold">{t.checkCount(keptCount, rules.length)}</span>
+              <span
+                className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                  missing === 0 ? 'bg-buy-soft text-buy' : keptCount === 0 ? 'bg-chip text-dim' : 'bg-warn-bg text-warn'
+                }`}
+              >
+                {missing === 0 ? t.checkOk : t.checkMissing(missing)}
+              </span>
+              {keptCount > 0 && (
+                <Button size="sm" variant="ghost" onClick={clearChecked}>
+                  {t.checkReset}
+                </Button>
+              )}
+            </div>
+          )}
         </div>
         {strategy.rules.length === 0 && <span className="text-[13px] text-dim">{t.rulesEmpty}</span>}
         <ol ref={drag.listRef} className="m-0 flex list-none flex-col gap-1.5 p-0">
@@ -245,7 +267,6 @@ function StrategyEditor({ strategy, autoFocusRule }: { strategy: Strategy; autoF
                   {[3, 8, 13].flatMap((y) => [<circle key={`a${y}`} cx="3.5" cy={y} r="1.4" />, <circle key={`b${y}`} cx="8.5" cy={y} r="1.4" />])}
                 </svg>
               </button>
-              <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-panel font-mono text-xs font-semibold">{i + 1}</span>
               {editingRule === rule.id ? (
                 <RuleInput
                   initial={rule.label}
@@ -256,7 +277,16 @@ function StrategyEditor({ strategy, autoFocusRule }: { strategy: Strategy; autoF
                   }}
                 />
               ) : (
-                <span className="min-w-0 grow text-sm break-words select-none">{rule.label}</span>
+                <label className="flex min-w-0 grow cursor-pointer items-center gap-3 py-0.5">
+                  <input
+                    type="checkbox"
+                    checked={checked.has(rule.id)}
+                    onChange={() => toggleChecked(rule.id)}
+                    className="size-5 shrink-0 cursor-pointer accent-(--buy)"
+                  />
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-panel font-mono text-[11px] font-semibold text-dim">{i + 1}</span>
+                  <span className={`min-w-0 text-sm break-words select-none ${checked.has(rule.id) ? 'text-ink' : 'text-dim'}`}>{rule.label}</span>
+                </label>
               )}
               {editingRule !== rule.id && (
                 <div className="flex shrink-0 items-center">
@@ -399,4 +429,34 @@ function useDragReorder(onMove: (from: number, to: number) => void) {
   };
 
   return { listRef, handleProps, style, active: drag?.from ?? null };
+}
+
+/**
+ * Entry check: the rules ticked as seen on the chart, kept per strategy in this browser so a reload
+ * does not lose them; "Clear" starts the next setup.
+ */
+function useEntryCheck(strategyId: string): [Set<string>, (ruleId: string) => void, () => void] {
+  const key = `strategy-check:${strategyId}`;
+  const [checked, setChecked] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(key) ?? '[]') as string[]);
+    } catch {
+      return new Set();
+    }
+  });
+  const store = (next: Set<string>) => {
+    setChecked(next);
+    try {
+      localStorage.setItem(key, JSON.stringify([...next]));
+    } catch {
+      // Without storage the ticks last until the page is left.
+    }
+  };
+  const toggle = (ruleId: string) => {
+    const next = new Set(checked);
+    if (next.has(ruleId)) next.delete(ruleId);
+    else next.add(ruleId);
+    store(next);
+  };
+  return [checked, toggle, () => store(new Set())];
 }

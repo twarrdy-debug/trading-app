@@ -1,5 +1,6 @@
 import type { AccountSummary, Instrument, PublicUser, Trade, TradeMutation } from '@trading/api/types';
 import { AUTO_FX_CURRENCIES, computeTradeMetrics, marginQuote, riskQuote, toLocalDate, type CreateTradeInput, type Direction, type TradeSource } from '@trading/shared';
+import { Link } from '@tanstack/react-router';
 import { useEffect, useState, type FormEvent } from 'react';
 import { ApiError } from '../../api/client.ts';
 import {
@@ -208,6 +209,10 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, accou
       setErrors([t.errEducator]);
       return;
     }
+    if (!accountId) {
+      setErrors([t.errAccount]);
+      return;
+    }
 
     try {
       const spreadValue = parseDecimal(spreadText);
@@ -231,7 +236,7 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, accou
         educatorId: source === 'educator' ? educatorId : null,
         signalId: source === 'educator' ? trade?.signalId : null,
         emotionKeys,
-        accountId: accountId || null,
+        accountId,
       };
       const result = await saveTrade.mutateAsync({ id: trade?.id, input });
       for (const file of files) await upload.mutateAsync({ tradeId: result.trade.id, file });
@@ -303,14 +308,25 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, accou
         </div>
       )}
 
-      {accounts.length > 0 && (
+      {accounts.length > 0 ? (
         <Field label={all.accounts.switcher} hint={tradeAccount ? accountKind(all, tradeAccount, account) : undefined}>
           <Select
             value={accountId}
             onChange={chooseAccount}
-            options={[{ value: '', label: all.accounts.none }, ...accounts.map((a) => ({ value: a.id, label: a.name }))]}
+            options={[
+              // Shown until an account is picked (a new trade, or an older trade without one).
+              ...(accountId ? [] : [{ value: '', label: t.chooseAccount }]),
+              ...accounts.map((a) => ({ value: a.id, label: a.name })),
+            ]}
           />
         </Field>
+      ) : (
+        <p role="alert" className="m-0 rounded-(--radius-control) bg-warn-bg p-3 text-[13px]">
+          {t.noAccounts}{' '}
+          <Link to="/ustawienia/$section" params={{ section: 'konta' }} className="font-semibold text-accent-ink">
+            {t.addAccount}
+          </Link>
+        </p>
       )}
 
       <Field label={t.instrument} hint={instrument ? `${instrument.market === 'cfd' ? 'CFD' : 'Futures'} · ${all.units.name[instrument.measureUnit].toLowerCase()}` : undefined}>
@@ -574,7 +590,7 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, accou
         </ul>
       )}
 
-      <Button type="submit" variant="primary" size="lg" disabled={busy}>
+      <Button type="submit" variant="primary" size="lg" disabled={busy || accounts.length === 0}>
         {busy ? t.saving : trade ? t.saveChanges : t.addTrade}
       </Button>
       {trade && (

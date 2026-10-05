@@ -11,6 +11,8 @@ export const toPublicUser = (u: CurrentUser, authenticated = true) => ({
   email: u.email,
   displayName: u.displayName,
   role: u.role,
+  /** False until the first-run introduction is finished; the web app shows it before anything else. */
+  onboarded: u.onboardedAt != null,
   settings: {
     accountCurrency: u.accountCurrency,
     theme: u.theme,
@@ -29,6 +31,18 @@ export const meRoutes: FastifyPluginAsyncZod = async (app) => {
 
   app.patch('/me', { schema: { tags: ['użytkownik'], body: updateSettingsSchema } }, async (req) => {
     const [updated] = await app.db.update(users).set(req.body).where(eq(users.id, req.user.id)).returning();
+    return toPublicUser(updated!, req.authenticated);
+  });
+
+  /** Marks the introduction as finished (or skipped). */
+  app.post('/me/onboarding', { schema: { tags: ['użytkownik'] } }, async (req) => {
+    const [updated] = await app.db.update(users).set({ onboardedAt: new Date() }).where(eq(users.id, req.user.id)).returning();
+    return toPublicUser(updated!, req.authenticated);
+  });
+
+  /** Shows the introduction again on the next page load. */
+  app.delete('/me/onboarding', { schema: { tags: ['użytkownik'] } }, async (req) => {
+    const [updated] = await app.db.update(users).set({ onboardedAt: null }).where(eq(users.id, req.user.id)).returning();
     return toPublicUser(updated!, req.authenticated);
   });
 };

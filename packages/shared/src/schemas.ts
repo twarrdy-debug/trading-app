@@ -35,6 +35,7 @@ export const VALIDATION_KEYS = [
   'validation.leverage',
   'validation.propMarket',
   'validation.propDrawdown',
+  'validation.accountRequired',
 ] as const;
 
 const price = z.number().positive();
@@ -178,8 +179,8 @@ const tradeFields = z.object({
   source: z.enum(TRADE_SOURCES).default('own'),
   educatorId: z.uuid().nullable().optional(),
   signalId: z.uuid().nullable().optional(),
-  /** Trading account the trade belongs to (null = none). */
-  accountId: z.uuid().nullable().optional(),
+  /** Trading account the trade belongs to; required (older trades may still have none). */
+  accountId: z.uuid({ error: 'validation.accountRequired' }),
   emotionKeys: z.array(z.string()).max(20).default([]),
 });
 
@@ -221,8 +222,8 @@ export const tradeStatsQuerySchema = z.object({
  * could not match (e.g. "GER40.cash") to instruments; `commit=false` only previews.
  */
 export const mt5ImportFieldsSchema = z.object({
-  /** Imported trades are assigned to this account. */
-  accountId: z.uuid().optional(),
+  /** Imported trades are assigned to this account (required). */
+  accountId: z.uuid({ error: 'validation.accountRequired' }),
   timezone: z.enum(BROKER_TIMEZONES).default('broker-ny7'),
   symbolMap: z
     .string()

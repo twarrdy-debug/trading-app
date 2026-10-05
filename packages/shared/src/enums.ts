@@ -231,3 +231,14 @@ export const DEFAULT_CHECKLIST_ITEMS: Record<Language, readonly string[]> = {
     'Entry plan and invalidation level',
   ],
 };
+
+/** Result of a closed trade: a gain, a loss, or exactly zero. */
+export const TRADE_OUTCOMES = ['win', 'loss', 'breakeven'] as const;
+export type TradeOutcome = (typeof TRADE_OUTCOMES)[number];
+
+/**
+ * Daily discipline checks (dashboard progress tracker): within the daily trade limit, a stop loss
+ * on every trade, emotions noted on every trade, and the losses warning not reached.
+ */
+export const DISCIPLINE_CHECKS = ['limit', 'stopLoss', 'emotions', 'losses'] as const;
+export type DisciplineCheck = (typeof DISCIPLINE_CHECKS)[number];

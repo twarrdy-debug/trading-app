@@ -7,12 +7,14 @@ import { lossAlertMessage } from '../features/journal/MonitorPanel.tsx';
 import { useT, type Messages } from '../i18n/index.tsx';
 import { useNewsLive, useNewsStream } from '../lib/news-live.ts';
 import { applyTheme, DEFAULT_ACCENT, systemTheme } from '../lib/theme.ts';
+import { Onboarding } from '../features/onboarding/Onboarding.tsx';
 import { SessionClock, ThemeIcon } from './SessionClock.tsx';
 
 export const APP_NAME = '[NAZWA]';
 
 const NAV = [
-  { to: '/', label: 'journal' },
+  { to: '/', label: 'dashboard' },
+  { to: '/dziennik', label: 'journal' },
   { to: '/statystyki', label: 'stats' },
   { to: '/kalkulator', label: 'calculator' },
   { to: '/analiza', label: 'analysis' },
@@ -83,6 +85,11 @@ export function AppShell() {
   useEffect(() => {
     if (!signedOut) return;
     const { pathname, search } = router.state.location;
+    // The bare address shows guests the public page; any other one asks them to sign in.
+    if (pathname === '/') {
+      router.history.replace('/start');
+      return;
+    }
     const next = `${pathname}${search && Object.keys(search).length ? `?${new URLSearchParams(search as Record<string, string>)}` : ''}`;
     router.history.replace(`/logowanie${next !== '/' ? `?next=${encodeURIComponent(next)}` : ''}`);
   }, [signedOut, router]);
@@ -116,6 +123,8 @@ export function AppShell() {
   const shownTheme = theme === 'system' ? systemTheme() : theme;
 
   if (signedOut) return null;
+  // A new user first goes through the introduction (currency, favourites, account, strategy).
+  if (me && !me.onboarded) return <Onboarding user={me} />;
 
   return (
     <div className="flex min-h-full flex-col">
@@ -134,7 +143,7 @@ export function AppShell() {
               <Link
                 key={item.to}
                 to={item.to}
-                className="rounded-[10px] px-3.5 py-2 font-medium text-dim no-underline transition hover:bg-chip hover:text-ink"
+                className="rounded-[10px] px-3 py-2 font-medium whitespace-nowrap text-dim no-underline transition hover:bg-chip hover:text-ink xl:px-3.5"
                 activeProps={{ className: '!bg-chip !font-bold !text-ink' }}
                 activeOptions={{ exact: item.to === '/' }}
               >
@@ -181,8 +190,8 @@ export function AppShell() {
                   <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
                   <circle cx="12" cy="12" r="3" />
                 </svg>
-                {/* Hidden at lg–xl, where the full menu and the clock leave no room for it. */}
-                <span className="lg:hidden xl:inline">{t.nav.settings}</span>
+                {/* Hidden from lg to 2xl, where the full menu and the clock leave no room for it. */}
+                <span className="lg:hidden 2xl:inline">{t.nav.settings}</span>
               </Link>
             </>
           )}
