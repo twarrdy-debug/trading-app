@@ -1,0 +1,25 @@
+# Caddy in the "web" container. Cloudflare Tunnel terminates HTTPS and forwards plain HTTP here.
+# Same routing as the Vite dev server: /api/* to the API without the prefix, /files/* too, and
+# everything else from the built web app (client-side routes fall back to index.html).
+:8080 {
+	# The API, including the live news stream (Caddy flushes text/event-stream right away).
+	handle_path /api/* {
+		reverse_proxy api:3001
+	}
+
+	# Screenshots.
+	handle /files/* {
+		reverse_proxy api:3001
+	}
+
+	handle {
+		root * /srv
+		encode zstd gzip
+		# Hashed assets never change; index.html must always be fresh after an update.
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		header /index.html Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

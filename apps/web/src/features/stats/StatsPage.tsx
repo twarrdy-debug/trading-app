@@ -12,6 +12,7 @@ import { Select } from '../../components/ui/Select.tsx';
 import { Gauge, Stat } from '../../components/ui/Stat.tsx';
 import { useT, type Messages } from '../../i18n/index.tsx';
 import { addDays, currencyLabel, formatAmount, formatNumber, formatPercent } from '../../lib/format.ts';
+import { instrumentOptions } from '../../lib/instruments.ts';
 
 type Range = '7' | '30' | '90' | 'all';
 
@@ -78,7 +79,7 @@ export function StatsPage() {
             aria-label={all.table.instrument}
             value={instrumentId}
             onChange={setInstrumentId}
-            options={[{ value: '', label: t.allInstruments }, ...(instruments ?? []).map((i) => ({ value: i.id, label: i.symbol }))]}
+            options={[{ value: '', label: t.allInstruments }, ...instrumentOptions(instruments ?? [], { label: (i) => i.symbol, favorites: all.instruments.favorites, others: all.instruments.others })]}
           />
         </div>
         <Segmented

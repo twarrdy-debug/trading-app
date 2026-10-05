@@ -1,5 +1,5 @@
 import type { AccountSummary, Instrument, PublicUser, Trade, TradeMutation } from '@trading/api/types';
-import { computeTradeMetrics, marginQuote, riskQuote, toLocalDate, type CreateTradeInput, type Direction, type TradeSource } from '@trading/shared';
+import { AUTO_FX_CURRENCIES, computeTradeMetrics, marginQuote, riskQuote, toLocalDate, type CreateTradeInput, type Direction, type TradeSource } from '@trading/shared';
 import { useEffect, useState, type FormEvent } from 'react';
 import { ApiError } from '../../api/client.ts';
 import {
@@ -9,6 +9,7 @@ import {
   useDeleteTrade,
   useEducators,
   useEmotions,
+  useFxRate,
   useParseSignal,
   useSaveSpread,
   useSaveTrade,
@@ -20,6 +21,7 @@ import { Select } from '../../components/ui/Select.tsx';
 import { accountKind } from '../account/AccountViews.tsx';
 import { useT } from '../../i18n/index.tsx';
 import { formatAmount, formatDate, formatNumber, formatPrice, parseDecimal, toDateTimeLocal, toInputNumber } from '../../lib/format.ts';
+import { instrumentOptions } from '../../lib/instruments.ts';
 
 const priceText = toInputNumber;
 
@@ -118,6 +120,22 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, accou
   const balance = tradeAccount?.balance ?? null;
   const leverage = tradeAccount?.leverage ?? null;
 
+  // With the rate left empty the API applies the ECB rate of the closing day (opening day while open);
+  // the preview fetches the same one, so risk and margin show for USDJPY, USDCHF… without typing it.
+  const autoCurrency = (c: string | undefined) => c != null && (AUTO_FX_CURRENCIES as readonly string[]).includes(c);
+  const fxDay = (() => {
+    const at = closedAt || openedAt;
+    const date = at ? new Date(at) : null;
+    return date && !Number.isNaN(date.getTime()) ? date.toISOString().slice(0, 10) : undefined;
+  })();
+  const autoFx = useFxRate(
+    !sameCurrency && fxRate.trim() === '' && autoCurrency(instrument?.quoteCurrency) && autoCurrency(account) ? instrument?.quoteCurrency : undefined,
+    account,
+    fxDay,
+  );
+  const manualRate = parseDecimal(fxRate);
+  const rate = sameCurrency ? 1 : (manualRate ?? autoFx.data?.rate ?? null);
+
   const preview = (() => {
     const entryPrice = parseDecimal(entry);
     const positionSize = parseDecimal(size);
@@ -129,12 +147,11 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, accou
       stopLoss: parseDecimal(stopLoss),
       takeProfit: parseDecimal(takeProfit),
       positionSize,
-      fxRate: sameCurrency ? 1 : parseDecimal(fxRate),
+      fxRate: rate ?? undefined,
     });
   })();
 
   // Money at risk and CFD margin in the account currency (need the quote → account rate).
-  const rate = sameCurrency ? 1 : (parseDecimal(fxRate) ?? null);
   const entryNum = parseDecimal(entry);
   const sizeNum = parseDecimal(size);
   const riskMoney =
@@ -235,8 +252,6 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, accou
   const sizeLabel = isFutures ? t.contracts : t.lots;
   const currentSize = parseDecimal(size);
   const step = sizeStep(sizeBase ?? currentSize ?? 0, isFutures);
-  const cfd = allowed.filter((i) => i.market === 'cfd');
-  const futures = allowed.filter((i) => i.market === 'futures');
 
   return (
     <form onSubmit={submit} className="card relative flex flex-col gap-4 p-5" aria-label={trade ? t.editAria : t.newTrade}>
@@ -302,10 +317,11 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, accou
         <Select
           value={instrumentId}
           onChange={setInstrumentId}
-          options={[
-            ...cfd.map((i) => ({ value: i.id, label: `${i.symbol} · ${i.name}`, group: 'CFD' })),
-            ...futures.map((i) => ({ value: i.id, label: `${i.symbol} · ${i.name}`, group: 'Futures' })),
-          ]}
+          options={instrumentOptions(allowed, {
+            label: (i) => `${i.symbol} · ${i.name}`,
+            group: (i) => (i.market === 'cfd' ? 'CFD' : 'Futures'),
+            favorites: all.instruments.favorites, others: all.instruments.others,
+          })}
         />
       </Field>
 
@@ -377,7 +393,12 @@ export function TradeForm({ user, instruments, trade, defaultInstrumentId, accou
 
       {instrument && !sameCurrency && (
         <Field label={t.fxRate(`${instrument.quoteCurrency}/${account}`)} hint={t.fxHint}>
-          <Input inputMode="decimal" value={fxRate} onChange={(e) => setFxRate(e.target.value)} placeholder="auto" />
+          <Input
+            inputMode="decimal"
+            value={fxRate}
+            onChange={(e) => setFxRate(e.target.value)}
+            placeholder={autoFx.data ? `auto · ${formatPrice(autoFx.data.rate)}` : 'auto'}
+          />
         </Field>
       )}
 

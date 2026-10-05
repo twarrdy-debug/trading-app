@@ -13,7 +13,7 @@ import type { FxProvider } from '../src/services/fx.ts';
 import { parseFjApiNews, refreshNews, type FeedItem, type NewsSource } from '../src/services/news.ts';
 
 /** Offline stand-in for the ECB feed; counts calls to check caching. */
-const rates: Record<string, number> = { 'USD/EUR': 0.85, 'USD/GBP': 0.75, 'USD/PLN': 3.66 };
+const rates: Record<string, number> = { 'USD/EUR': 0.85, 'USD/GBP': 0.75, 'USD/PLN': 3.66, 'JPY/USD': 0.0064 };
 const fx: FxProvider & { calls: number; down: boolean } = {
   calls: 0,
   down: false,
@@ -71,7 +71,10 @@ const post = (url: string, payload: object, headers: Record<string, string> = {}
 describe('reference data', () => {
   it('seeds instruments, emotions and the admin user', async () => {
     expect(Object.keys(ids).sort()).toEqual(
-      ['ES1', 'GC1', 'MES1', 'MGC1', 'MNQ1', 'MYM1', 'NQ1', 'US100', 'US30', 'US500', 'XAUUSD', 'YM1'],
+      [
+        'AUDUSD', 'ES1', 'EURUSD', 'GBPUSD', 'GC1', 'MES1', 'MGC1', 'MNQ1', 'MYM1', 'NQ1', 'NZDUSD',
+        'US100', 'US30', 'US500', 'USDCAD', 'USDCHF', 'USDJPY', 'XAUUSD', 'YM1',
+      ],
     );
     // Gold futures count in pips like XAUUSD; other futures in ticks.
     const units = Object.fromEntries(
@@ -175,7 +178,8 @@ describe('trading journal', () => {
   });
 
   it('leaves money empty when the account currency differs and no rate is given', async () => {
-    await app.inject({ method: 'PATCH', url: '/me', payload: { accountCurrency: 'chf' } });
+    // AED: a currency the ECB does not publish, so it needs a manual rate.
+    await app.inject({ method: 'PATCH', url: '/me', payload: { accountCurrency: 'aed' } });
     const res = await post('/trades', {
       instrumentId: ids.XAUUSD,
       direction: 'long',
@@ -184,9 +188,9 @@ describe('trading journal', () => {
       exitPrice: 4001,
       positionSize: 1,
     });
-    expect(res.json().trade).toMatchObject({ pnlQuote: 100, pnlAccount: null, accountCurrency: 'CHF' });
+    expect(res.json().trade).toMatchObject({ pnlQuote: 100, pnlAccount: null, accountCurrency: 'AED' });
     expect(res.json().warnings).toEqual([
-      'Brak automatycznego kursu USD/CHF. Wpisz go ręcznie, aby policzyć wynik w walucie konta',
+      'Brak automatycznego kursu USD/AED. Wpisz go ręcznie, aby policzyć wynik w walucie konta',
     ]);
     const withRate = await app.inject({ method: 'PATCH', url: `/trades/${res.json().trade.id}`, payload: { fxRate: 3.7 } });
     expect(withRate.json().trade.pnlAccount).toBe(370);
@@ -338,6 +342,30 @@ describe('CFD, futures, spreads and FX', () => {
     expect(res.json().warnings[0]).toMatch(/Nie udało się pobrać kursu USD\/GBP/);
     await app.inject({ method: 'DELETE', url: `/trades/${res.json().trade.id}` });
     await app.inject({ method: 'PATCH', url: '/me', payload: { accountCurrency: 'USD' } });
+  });
+});
+
+describe('forex majors', () => {
+  it('counts pips and converts the quote currency automatically', async () => {
+    const before = (await app.inject({ url: '/me' })).json().settings.accountCurrency;
+    await app.inject({ method: 'PATCH', url: '/me', payload: { accountCurrency: 'USD' } });
+    const instruments = (await app.inject({ url: '/instruments' })).json() as { symbol: string; currencies: string[]; unitSize: number; unitValue: number; quoteCurrency: string }[];
+    expect(instruments.find((i) => i.symbol === 'USDJPY')).toMatchObject({ unitSize: 0.01, unitValue: 1000, quoteCurrency: 'JPY', currencies: ['USD', 'JPY'] });
+
+    // 0.5 lot EURUSD, 50 pips: 50 × 10 USD × 0.5.
+    const eur = (
+      await post('/trades', { instrumentId: ids.EURUSD, direction: 'long', openedAt: '2025-11-12T09:00:00Z', closedAt: '2025-11-12T11:00:00Z', entryPrice: 1.085, exitPrice: 1.09, stopLoss: 1.083, positionSize: 0.5 })
+    ).json().trade;
+    expect(eur).toMatchObject({ resultUnits: 50, pnlQuote: 250, fxRate: 1, pnlAccount: 250, rMultiple: 2.5 });
+
+    // 1 lot USDJPY short, 50 pips = 50 000 JPY, at the ECB rate of the closing day.
+    const jpy = (
+      await post('/trades', { instrumentId: ids.USDJPY, direction: 'short', openedAt: '2025-11-12T09:00:00Z', closedAt: '2025-11-12T12:00:00Z', entryPrice: 150, exitPrice: 149.5, stopLoss: 150.25, positionSize: 1 })
+    ).json().trade;
+    expect(jpy).toMatchObject({ resultUnits: 50, pnlQuote: 50_000, fxRate: 0.0064, fxRateSource: 'auto', pnlAccount: 320 });
+
+    for (const t of [eur, jpy]) await app.inject({ method: 'DELETE', url: `/trades/${t.id}` });
+    await app.inject({ method: 'PATCH', url: '/me', payload: { accountCurrency: before } });
   });
 });
 
@@ -946,6 +974,83 @@ describe('MT5 import', () => {
       ...multipart({ timezone: 'Mars/Base' }, { name: 'r.html', content: utf16 }),
     });
     expect(noFile.statusCode).toBe(400);
+  });
+});
+
+describe('favourite instruments', () => {
+  it('marks favourites per user', async () => {
+    const user = (await post('/educators', { displayName: 'Favourites trader' })).json();
+    const headers = { 'x-user-id': user.id };
+    const favorites = async (h: Record<string, string> = headers) =>
+      (await app.inject({ url: '/instruments', headers: h })).json<{ symbol: string; favorite: boolean }[]>().filter((i) => i.favorite).map((i) => i.symbol);
+
+    expect(await favorites()).toEqual([]);
+    expect((await app.inject({ method: 'PUT', url: `/instruments/${ids.EURUSD}/favorite`, headers })).json()).toEqual({ instrumentId: ids.EURUSD, favorite: true });
+    await app.inject({ method: 'PUT', url: `/instruments/${ids.XAUUSD}/favorite`, headers });
+    // Adding twice is fine.
+    expect((await app.inject({ method: 'PUT', url: `/instruments/${ids.XAUUSD}/favorite`, headers })).statusCode).toBe(200);
+    expect(await favorites()).toEqual(['EURUSD', 'XAUUSD']);
+    // Other users keep their own list.
+    expect(await favorites({})).toEqual([]);
+
+    await app.inject({ method: 'DELETE', url: `/instruments/${ids.EURUSD}/favorite`, headers });
+    expect(await favorites()).toEqual(['XAUUSD']);
+    expect((await app.inject({ method: 'PUT', url: '/instruments/00000000-0000-4000-8000-000000000000/favorite', headers })).statusCode).toBe(400);
+  });
+});
+
+describe('strategies', () => {
+  let trader: Record<string, string>;
+  const as = (method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', url: string, payload?: object, headers = trader) =>
+    app.inject({ method, url, payload, headers });
+
+  beforeAll(async () => {
+    const user = (await post('/educators', { displayName: 'Strategy trader' })).json();
+    trader = { 'x-user-id': user.id };
+  });
+
+  it('creates a strategy with ordered rules and edits them', async () => {
+    const created = await as('POST', '/strategies', { name: '  London sweep ', rules: ['Sweep of the Asian high', 'FVG on M5'] });
+    expect(created.statusCode).toBe(201);
+    const strategy = created.json();
+    expect(strategy).toMatchObject({ name: 'London sweep', description: null, rules: [{ label: 'Sweep of the Asian high' }, { label: 'FVG on M5' }] });
+    const id = strategy.id as string;
+
+    const added = (await as('POST', `/strategies/${id}/rules`, { label: 'Entry in the kill zone' })).json();
+    expect(added.rules.map((r: { label: string }) => r.label)).toEqual(['Sweep of the Asian high', 'FVG on M5', 'Entry in the kill zone']);
+    const [a, b, c] = added.rules.map((r: { id: string }) => r.id);
+
+    const renamed = (await as('PATCH', `/strategies/${id}/rules/${b}`, { label: 'FVG on M1 or M5' })).json();
+    expect(renamed.rules[1].label).toBe('FVG on M1 or M5');
+
+    const reordered = (await as('PUT', `/strategies/${id}/rules/order`, { ids: [c, a, b] })).json();
+    expect(reordered.rules.map((r: { id: string }) => r.id)).toEqual([c, a, b]);
+    // The order must name every rule once.
+    const partial = await as('PUT', `/strategies/${id}/rules/order`, { ids: [c, a] });
+    expect(partial.statusCode).toBe(400);
+    expect(partial.json().error).toBe('Podaj wszystkie argumenty strategii w nowej kolejności');
+
+    const removed = (await as('DELETE', `/strategies/${id}/rules/${a}`)).json();
+    expect(removed.rules.map((r: { id: string }) => r.id)).toEqual([c, b]);
+
+    expect((await as('PATCH', `/strategies/${id}`, { name: 'London sweep v2', description: 'Only EURUSD and GBPUSD' })).json()).toMatchObject({
+      name: 'London sweep v2',
+      description: 'Only EURUSD and GBPUSD',
+    });
+    expect((await as('POST', '/strategies', { name: ' ' })).statusCode).toBe(400);
+    expect((await as('GET', '/strategies')).json()).toHaveLength(1);
+  });
+
+  it('keeps strategies private and deletes them with their rules', async () => {
+    const [strategy] = (await as('GET', '/strategies')).json();
+    // Another user (the seeded admin) neither sees nor changes it.
+    expect((await app.inject({ url: '/strategies' })).json().some((s: { id: string }) => s.id === strategy.id)).toBe(false);
+    expect((await app.inject({ method: 'PATCH', url: `/strategies/${strategy.id}`, payload: { name: 'x' } })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'POST', url: `/strategies/${strategy.id}/rules`, payload: { label: 'x' } })).statusCode).toBe(404);
+
+    expect((await as('DELETE', `/strategies/${strategy.id}`)).statusCode).toBe(204);
+    expect((await as('GET', '/strategies')).json()).toEqual([]);
+    expect((await as('DELETE', `/strategies/${strategy.id}`)).statusCode).toBe(404);
   });
 });
 

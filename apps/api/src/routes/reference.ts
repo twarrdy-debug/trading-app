@@ -1,18 +1,37 @@
-import { createEducatorSchema, createInstrumentSchema, emotionLabel } from '@trading/shared';
-import { asc, eq } from 'drizzle-orm';
+import { createEducatorSchema, createInstrumentSchema, emotionLabel, idParams } from '@trading/shared';
+import { and, asc, eq } from 'drizzle-orm';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { emotions, instrumentCurrencies, instruments, users } from '../db/schema.ts';
-import { HttpError } from '../errors.ts';
+import { emotions, favoriteInstruments, instrumentCurrencies, instruments, users } from '../db/schema.ts';
+import { badRequest, HttpError } from '../errors.ts';
 import { requireRole } from '../plugins/current-user.ts';
 
 export const referenceRoutes: FastifyPluginAsyncZod = async (app) => {
-  app.get('/instruments', { schema: { tags: ['słowniki'] } }, async () => {
-    const rows = await app.db.query.instruments.findMany({
-      where: (i, { eq }) => eq(i.active, true),
-      with: { currencies: { columns: { currency: true } } },
-      orderBy: (i) => asc(i.symbol),
-    });
-    return rows.map(({ currencies, ...i }) => ({ ...i, currencies: currencies.map((c) => c.currency) }));
+  /** Active instruments; `favorite` marks the acting user's favourites (lists show them first). */
+  app.get('/instruments', { schema: { tags: ['słowniki'] } }, async (req) => {
+    const [rows, favorites] = await Promise.all([
+      app.db.query.instruments.findMany({
+        where: (i, { eq }) => eq(i.active, true),
+        with: { currencies: { columns: { currency: true } } },
+        orderBy: (i) => asc(i.symbol),
+      }),
+      app.db.select({ id: favoriteInstruments.instrumentId }).from(favoriteInstruments).where(eq(favoriteInstruments.userId, req.user.id)),
+    ]);
+    const favoriteIds = new Set(favorites.map((f) => f.id));
+    return rows.map(({ currencies, ...i }) => ({ ...i, currencies: currencies.map((c) => c.currency), favorite: favoriteIds.has(i.id) }));
+  });
+
+  app.put('/instruments/:id/favorite', { schema: { tags: ['słowniki'], params: idParams } }, async (req) => {
+    const [row] = await app.db.select({ id: instruments.id }).from(instruments).where(eq(instruments.id, req.params.id));
+    if (!row) throw badRequest('unknownInstrument');
+    await app.db.insert(favoriteInstruments).values({ userId: req.user.id, instrumentId: row.id }).onConflictDoNothing();
+    return { instrumentId: row.id, favorite: true };
+  });
+
+  app.delete('/instruments/:id/favorite', { schema: { tags: ['słowniki'], params: idParams } }, async (req) => {
+    await app.db
+      .delete(favoriteInstruments)
+      .where(and(eq(favoriteInstruments.userId, req.user.id), eq(favoriteInstruments.instrumentId, req.params.id)));
+    return { instrumentId: req.params.id, favorite: false };
   });
 
   app.post('/instruments', { schema: { tags: ['słowniki'], body: createInstrumentSchema } }, async (req, reply) => {

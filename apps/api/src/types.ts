@@ -7,6 +7,7 @@ import type { listEvents, RefreshResult } from './services/calendar.ts';
 import type { invites } from './db/schema.ts';
 import type { importMt5 } from './services/mt5-import.ts';
 import type { listNews } from './services/news.ts';
+import type { StrategyView } from './services/strategies.ts';
 import type { createTrade, listTrades, tradeStats, tradingMonitor, TradeView } from './services/trades.ts';
 
 /** What a value looks like after JSON serialization (Dates become strings). */
@@ -19,7 +20,8 @@ export type Jsonify<T> = T extends Date
       : T;
 
 export type PublicUser = Jsonify<ReturnType<typeof toPublicUser>>;
-export type Instrument = Jsonify<typeof instruments.$inferSelect & { currencies: string[] }>;
+/** `favorite`: one of the acting user's favourite instruments. */
+export type Instrument = Jsonify<typeof instruments.$inferSelect & { currencies: string[]; favorite: boolean }>;
 export type Trade = Jsonify<TradeView>;
 export type TradeList = Jsonify<Awaited<ReturnType<typeof listTrades>>>;
 export type TradeMutation = Jsonify<Omit<Awaited<ReturnType<typeof createTrade>>, 'fxWarning'>>;
@@ -41,6 +43,8 @@ export interface AuthConfig {
   registration: 'invite' | 'open' | 'closed';
   devBypass: boolean;
 }
+export type Strategy = Jsonify<StrategyView>;
+export type StrategyRule = Strategy['rules'][number];
 export type Mt5Import = Jsonify<Awaited<ReturnType<typeof importMt5>>>;
 export type Mt5ImportRow = Mt5Import['positions'][number];
 

@@ -1,4 +1,4 @@
-import { createContext, useId, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
+import { createContext, useId, type ComponentProps, type ReactNode, type TextareaHTMLAttributes } from 'react';
 
 /** Id of the enclosing field label, so custom controls (Select) can be named by it. */
 export const FieldLabelContext = createContext<string | undefined>(undefined);
@@ -54,7 +54,7 @@ export function Field({ label, hint, help, className = '', children }: FieldProp
   );
 }
 
-export const Input = ({ className = '', ...props }: InputHTMLAttributes<HTMLInputElement>) => (
+export const Input = ({ className = '', ...props }: ComponentProps<'input'>) => (
   <input className={`h-11 ${control} ${className}`} {...props} />
 );
 

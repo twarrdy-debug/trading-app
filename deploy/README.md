@@ -1,5 +1,7 @@
 # Wdrożenie na Proxmox (LXC) z Cloudflare Tunnel
 
+> Wolisz Dockera? Instrukcja dla maszyny wirtualnej z Dockerem jest w [DOCKER.md](DOCKER.md). Poniżej wariant bez Dockera, w jednym kontenerze LXC.
+
 Wszystko działa w jednym kontenerze LXC z Debianem 12:
 
 ```

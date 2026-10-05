@@ -10,6 +10,7 @@ import type {
   Mt5Import,
   NewsResponse,
   PublicUser,
+  Strategy,
   Trade,
   TradeList,
   TradeMutation,
@@ -20,11 +21,13 @@ import type {
 import type {
   BrokerTimezone,
   CreateAccountInput,
+  CreateStrategyInput,
   CreateTradeInput,
   ParsedSignal,
   TradeFilters,
   UpdateAccountInput,
   UpdateSettingsInput,
+  UpdateStrategyInput,
 } from '@trading/shared';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, qs } from './client.ts';
@@ -34,6 +37,19 @@ const STATIC = { staleTime: 5 * 60_000 };
 export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => api<PublicUser>('/me') });
 export const useInstruments = () =>
   useQuery({ queryKey: ['instruments'], queryFn: () => api<Instrument[]>('/instruments'), ...STATIC });
+/** Adds or removes a favourite instrument; the cached list updates at once. */
+export function useToggleFavoriteInstrument() {
+  const client = useQueryClient();
+  const setFavorite = (id: string, favorite: boolean) =>
+    client.setQueryData<Instrument[]>(['instruments'], (list) => list?.map((i) => (i.id === id ? { ...i, favorite } : i)));
+  return useMutation({
+    mutationFn: ({ id, favorite }: { id: string; favorite: boolean }) =>
+      api<{ favorite: boolean }>(`/instruments/${id}/favorite`, { method: favorite ? 'PUT' : 'DELETE' }),
+    onMutate: ({ id, favorite }) => setFavorite(id, favorite),
+    onError: (_, { id, favorite }) => setFavorite(id, !favorite),
+  });
+}
+
 export const useEmotions = () =>
   useQuery({ queryKey: ['emotions'], queryFn: () => api<Emotion[]>('/emotions'), ...STATIC });
 export const useEducators = () =>
@@ -120,6 +136,16 @@ export const useDailySpread = (instrumentId: string | undefined, date: string | 
     queryKey: ['spread', instrumentId, date],
     queryFn: () => api<DailySpread>(`/spreads/${instrumentId}/${date}`),
     enabled: Boolean(instrumentId && date),
+  });
+
+/** ECB rate quote → account currency on a day (only for `AUTO_FX_CURRENCIES`); what the API applies when the rate is left empty. */
+export const useFxRate = (base: string | undefined, quote: string | undefined, date: string | undefined) =>
+  useQuery({
+    queryKey: ['fx-rate', base, quote, date],
+    queryFn: () => api<{ rate: number; rateDate: string }>(`/fx-rate${qs({ base, quote, date })}`),
+    enabled: Boolean(base && quote && date && base !== quote),
+    retry: false,
+    ...STATIC,
   });
 
 export function useSaveSpread() {
@@ -301,5 +327,64 @@ export function useDeleteAccount() {
   return useMutation({
     mutationFn: (id: string) => api<void>(`/accounts/${id}`, { method: 'DELETE' }),
     onSuccess: invalidate,
+  });
+}
+
+// --- Strategies ------------------------------------------------------------------
+
+export const useStrategies = () => useQuery({ queryKey: ['strategies'], queryFn: () => api<Strategy[]>('/strategies') });
+
+/** Puts a strategy returned by the API into the cached list (new ones first). */
+function useStoreStrategy() {
+  const client = useQueryClient();
+  return (strategy: Strategy) =>
+    client.setQueryData<Strategy[]>(['strategies'], (list = []) =>
+      list.some((s) => s.id === strategy.id) ? list.map((s) => (s.id === strategy.id ? strategy : s)) : [strategy, ...list],
+    );
+}
+
+export function useSaveStrategy() {
+  const store = useStoreStrategy();
+  return useMutation({
+    mutationFn: ({ id, input }: { id?: string; input: CreateStrategyInput | UpdateStrategyInput }) =>
+      id
+        ? api<Strategy>(`/strategies/${id}`, { method: 'PATCH', json: input })
+        : api<Strategy>('/strategies', { method: 'POST', json: input }),
+    onSuccess: store,
+  });
+}
+
+export function useDeleteStrategy() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<void>(`/strategies/${id}`, { method: 'DELETE' }),
+    onSuccess: (_, id) => client.setQueryData<Strategy[]>(['strategies'], (list = []) => list.filter((s) => s.id !== id)),
+  });
+}
+
+export type StrategyRuleChange =
+  | { op: 'add'; label: string }
+  | { op: 'edit'; ruleId: string; label: string }
+  | { op: 'delete'; ruleId: string }
+  | { op: 'order'; ids: string[] };
+
+/** Adds, edits, deletes or reorders a strategy's rules; the API answers with the whole strategy. */
+export function useChangeStrategyRules(strategyId: string) {
+  const store = useStoreStrategy();
+  return useMutation({
+    mutationFn: (change: StrategyRuleChange) => {
+      const base = `/strategies/${strategyId}/rules`;
+      switch (change.op) {
+        case 'add':
+          return api<Strategy>(base, { method: 'POST', json: { label: change.label } });
+        case 'edit':
+          return api<Strategy>(`${base}/${change.ruleId}`, { method: 'PATCH', json: { label: change.label } });
+        case 'delete':
+          return api<Strategy>(`${base}/${change.ruleId}`, { method: 'DELETE' });
+        case 'order':
+          return api<Strategy>(`${base}/order`, { method: 'PUT', json: { ids: change.ids } });
+      }
+    },
+    onSuccess: store,
   });
 }

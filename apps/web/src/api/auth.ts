@@ -29,6 +29,9 @@ export const authApi = {
   signOut: () => authCall('/sign-out', {}),
   requestReset: (email: string) => authCall('/request-password-reset', { email, redirectTo: '/nowe-haslo' }),
   resetPassword: (token: string, newPassword: string) => authCall('/reset-password', { token, newPassword }),
+  /** Signed in only; other sessions are revoked, this one gets a fresh cookie. */
+  changePassword: (currentPassword: string, newPassword: string) =>
+    authCall('/change-password', { currentPassword, newPassword, revokeOtherSessions: true }),
 };
 
 export const useAuthConfig = () =>

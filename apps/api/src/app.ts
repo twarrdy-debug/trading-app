@@ -30,6 +30,7 @@ import { meRoutes } from './routes/me.ts';
 import { referenceRoutes } from './routes/reference.ts';
 import { signalRoutes } from './routes/signals.ts';
 import { spreadRoutes } from './routes/spreads.ts';
+import { strategyRoutes } from './routes/strategies.ts';
 import { tradeRoutes } from './routes/trades.ts';
 import { liveQuoteProvider, type QuoteProvider } from './services/basis.ts';
 import { forexFactorySource, type CalendarSource } from './services/calendar.ts';
@@ -124,6 +125,7 @@ export async function buildApp({
   await app.register(newsRoutes);
   await app.register(signalRoutes);
   await app.register(analysisRoutes);
+  await app.register(strategyRoutes);
 
   return app;
 }

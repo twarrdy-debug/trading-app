@@ -6,6 +6,7 @@ import { Field, Input } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
 import { currentLocale, formatAmount, formatNumber, formatPrice, formatUnits } from '../../lib/format.ts';
+import { instrumentOptions } from '../../lib/instruments.ts';
 
 const COLUMNS = 'grid grid-cols-[156px_104px_80px_minmax(128px,1fr)_60px_90px_90px_100px] gap-3 px-5';
 
@@ -30,7 +31,7 @@ export function TradeFilters({
         <Select
           value={value.instrumentId ?? ''}
           onChange={(v) => set({ instrumentId: v || undefined })}
-          options={[{ value: '', label: all.common.all }, ...instruments.map((i) => ({ value: i.id, label: i.symbol }))]}
+          options={[{ value: '', label: all.common.all }, ...instrumentOptions(instruments, { label: (i) => i.symbol, favorites: all.instruments.favorites, others: all.instruments.others })]}
         />
       </Field>
       <Field label={t.direction}>

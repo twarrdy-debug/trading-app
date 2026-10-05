@@ -10,10 +10,7 @@ import { useT } from '../../i18n/index.tsx';
 import { currencyLabel, parseDecimal, toInputNumber } from '../../lib/format.ts';
 import { accountKind } from './AccountViews.tsx';
 
-/**
- * Add, edit and delete trading accounts. Lives inside the settings form, so it uses plain
- * buttons (no nested <form>) and saves each account right away.
- */
+/** Add, edit and delete trading accounts (settings page); each account saves right away. */
 export function AccountsManager({ currency }: { currency: string }) {
   const all = useT();
   const t = all.accounts;
@@ -22,21 +19,7 @@ export function AccountsManager({ currency }: { currency: string }) {
   const [editing, setEditing] = useState<string | null>(null);
 
   return (
-    <section className="flex flex-col gap-3 rounded-(--radius-control) bg-raised p-4" aria-labelledby="accounts-title">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <h3 id="accounts-title" className="m-0 text-sm font-bold">
-            {t.title}
-          </h3>
-          <span className="text-xs text-dim">{t.intro}</span>
-        </div>
-        {editing !== 'new' && (
-          <Button size="sm" onClick={() => setEditing('new')} className="shrink-0 whitespace-nowrap">
-            {t.add}
-          </Button>
-        )}
-      </div>
-
+    <div className="flex flex-col gap-3">
       {accounts.length === 0 && editing !== 'new' && <span className="text-[13px] text-dim">{t.empty}</span>}
 
       <ul className="m-0 flex list-none flex-col gap-2 p-0">
@@ -46,7 +29,7 @@ export function AccountsManager({ currency }: { currency: string }) {
               <AccountForm account={a} currency={currency} onDone={() => setEditing(null)} />
             </li>
           ) : (
-            <li key={a.id} className="flex items-center gap-3 rounded-(--radius-control) bg-panel px-3.5 py-2.5">
+            <li key={a.id} className="flex items-center gap-3 rounded-(--radius-control) bg-raised px-3.5 py-2.5">
               <div className="flex min-w-0 grow flex-col">
                 <span className="truncate text-sm font-semibold">{a.name}</span>
                 <span className="truncate font-mono text-[11px] text-dim">
@@ -73,8 +56,14 @@ export function AccountsManager({ currency }: { currency: string }) {
         )}
       </ul>
 
-      {editing === 'new' && <AccountForm currency={currency} onDone={() => setEditing(null)} />}
-    </section>
+      {editing === 'new' ? (
+        <AccountForm currency={currency} onDone={() => setEditing(null)} />
+      ) : (
+        <Button size="sm" onClick={() => setEditing('new')} className="self-start whitespace-nowrap">
+          {t.add}
+        </Button>
+      )}
+    </div>
   );
 }
 

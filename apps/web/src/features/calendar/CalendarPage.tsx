@@ -20,6 +20,7 @@ import { Panel } from '../../components/ui/Panel.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useLanguage, useT } from '../../i18n/index.tsx';
 import { addDays, currentLocale, formatDate } from '../../lib/format.ts';
+import { instrumentOptions } from '../../lib/instruments.ts';
 
 type View = 'day' | 'week' | 'month';
 
@@ -56,9 +57,20 @@ function loadFilters(): Filters {
   }
 }
 
-/** "XAUUSD, GC1, MGC1, NQ1…" → "Gold, Nasdaq 100…": one chip per market instead of per contract. */
-function markets(symbols: string[], language: Language): string[] {
-  return [...new Set(symbols.map((s) => findPairBySymbol(s)?.pair.label[language] ?? s))];
+/** Forex pairs ("EURUSD"): six letters and not one of the CFD/futures pairs (XAUUSD is gold). */
+const isForexPair = (symbol: string) => /^[A-Z]{6}$/.test(symbol) && !findPairBySymbol(symbol);
+
+/**
+ * "XAUUSD, GC1, MGC1, NQ1…" → "Gold, Nasdaq 100…": one chip per market instead of per contract.
+ * More than two forex pairs (every USD event moves all majors) become one "Forex · 7" chip.
+ */
+function markets(symbols: string[], language: Language): { label: string; title: string }[] {
+  const forex = symbols.filter(isForexPair);
+  const others = [...new Set(symbols.filter((s) => !isForexPair(s)).map((s) => findPairBySymbol(s)?.pair.label[language] ?? s))];
+  const chips = others.map((label) => ({ label, title: symbols.filter((s) => (findPairBySymbol(s)?.pair.label[language] ?? s) === label).join(', ') }));
+  if (forex.length > 2) chips.push({ label: `Forex · ${forex.length}`, title: forex.join(', ') });
+  else chips.push(...forex.map((s) => ({ label: s, title: s })));
+  return chips;
 }
 
 /** Monday = 0 … Sunday = 6. */
@@ -125,8 +137,8 @@ function EventRow({ event, timezone, compact = false }: { event: CalendarEvent; 
         <span className="flex flex-wrap gap-1">
           {compact && <span className="font-mono text-[11px] text-dim">{EVENT_CATEGORY_LABELS[language][event.category]}</span>}
           {markets(event.instruments, language).map((market) => (
-            <span key={market} className="rounded-md bg-chip px-1.5 py-0.5 text-[10px] font-semibold text-dim" title={event.instruments.join(', ')}>
-              {market}
+            <span key={market.label} className="rounded-md bg-chip px-1.5 py-0.5 text-[10px] font-semibold text-dim" title={market.title}>
+              {market.label}
             </span>
           ))}
         </span>
@@ -274,7 +286,7 @@ export function CalendarPage() {
                 onChange={setInstrumentId}
                 options={[
                   { value: '', label: all.common.all },
-                  ...(instruments ?? []).map((i) => ({ value: i.id, label: `${i.symbol} · ${i.currencies.join(', ')}` })),
+                  ...instrumentOptions(instruments ?? [], { label: (i) => `${i.symbol} · ${i.currencies.join(', ')}`, favorites: all.instruments.favorites, others: all.instruments.others }),
                 ]}
               />
             </div>

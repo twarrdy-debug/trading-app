@@ -4,7 +4,6 @@ import { authApi, useResetSession } from '../api/auth.ts';
 import { ApiError } from '../api/client.ts';
 import { useBasis, useMe, useTradingMonitor, useUpdateSettings } from '../api/hooks.ts';
 import { lossAlertMessage } from '../features/journal/MonitorPanel.tsx';
-import { SettingsDialog } from '../features/settings/SettingsDialog.tsx';
 import { useT, type Messages } from '../i18n/index.tsx';
 import { useNewsLive, useNewsStream } from '../lib/news-live.ts';
 import { applyTheme, DEFAULT_ACCENT, systemTheme } from '../lib/theme.ts';
@@ -94,7 +93,6 @@ export function AppShell() {
     await navigate({ to: '/logowanie' });
   };
   const update = useUpdateSettings();
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const basis = useBasis();
   // A changed CFD/futures difference on any market the calculator covers.
   const basisAlert = basis.data?.some((p) => p.alert) ?? false;
@@ -171,19 +169,21 @@ export function AppShell() {
                   </svg>
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => setSettingsOpen(true)}
+              <Link
+                to="/ustawienia"
                 aria-label={t.nav.settings}
-                className="flex size-10 items-center justify-center rounded-[11px] text-dim transition hover:bg-chip hover:text-ink"
+                title={t.nav.settings}
+                className="flex h-10 items-center gap-2 rounded-[11px] px-2.5 text-sm font-medium text-dim no-underline transition hover:bg-chip hover:text-ink"
+                activeProps={{ className: '!bg-chip !font-bold !text-ink' }}
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden>
-                  {/* Sliders, so it does not look like the sun of the theme switch next to it. */}
-                  <path d="M4 7h9M17 7h3M4 17h3M11 17h9" strokeLinecap="round" />
-                  <circle cx="15" cy="7" r="2" />
-                  <circle cx="9" cy="17" r="2" />
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  {/* Classic cog (Lucide "settings", ISC). */}
+                  <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                  <circle cx="12" cy="12" r="3" />
                 </svg>
-              </button>
+                {/* Hidden at lg–xl, where the full menu and the clock leave no room for it. */}
+                <span className="lg:hidden xl:inline">{t.nav.settings}</span>
+              </Link>
             </>
           )}
         </header>
@@ -204,7 +204,6 @@ export function AppShell() {
       </div>
       <LossStreakBanner />
       <Outlet />
-      {me && settingsOpen && <SettingsDialog user={me} onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

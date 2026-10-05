@@ -8,6 +8,7 @@ import { Field } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
 import { currencyLabel, formatAmount, formatDateTime, formatNumber } from '../../lib/format.ts';
+import { instrumentOptions } from '../../lib/instruments.ts';
 
 const TIMEZONE_KEY = 'mt5-timezone';
 const SYMBOL_MAP_KEY = 'mt5-symbol-map';
@@ -219,7 +220,7 @@ export function Mt5ImportDialog({
                         value={symbolMap[symbol] ?? ''}
                         onChange={(v) => assign(symbol, v)}
                         disabled={run.isPending}
-                        options={[{ value: '', label: t.skip }, ...instruments.map((i) => ({ value: i.id, label: `${i.symbol} · ${i.name}` }))]}
+                        options={[{ value: '', label: t.skip }, ...instrumentOptions(instruments, { label: (i) => `${i.symbol} · ${i.name}`, favorites: all.instruments.favorites, others: all.instruments.others })]}
                       />
                     </Field>
                   ))}
