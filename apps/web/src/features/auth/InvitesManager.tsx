@@ -8,6 +8,8 @@ import { useT } from '../../i18n/index.tsx';
 import { formatDateTime } from '../../lib/format.ts';
 
 type InviteRole = 'user' | 'vip' | 'educator';
+const VALIDITY = { d14: 14, d30: 30, d90: 90, d365: 365, never: null } as const;
+type Validity = keyof typeof VALIDITY;
 
 /** Admin: create invitation codes and copy their registration links (settings page). */
 export function InvitesManager({ timezone }: { timezone: string }) {
@@ -17,6 +19,9 @@ export function InvitesManager({ timezone }: { timezone: string }) {
   const remove = useDeleteInvite();
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<InviteRole>('user');
+  const [code, setCode] = useState('');
+  const [multiUse, setMultiUse] = useState(false);
+  const [validity, setValidity] = useState<Validity>('d14');
   const [copied, setCopied] = useState<string | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   /** What happened to the last invite: e-mailed to an address, or its link copied. */
@@ -37,10 +42,12 @@ export function InvitesManager({ timezone }: { timezone: string }) {
     setErrors([]);
     setNotice(null);
     create.mutate(
-      { email: email.trim() || undefined, role },
+      { email: email.trim() || undefined, role, code: code.trim() || undefined, multiUse, expiresInDays: VALIDITY[validity] },
       {
         onSuccess: (invite) => {
           setEmail('');
+          setCode('');
+          setMultiUse(false);
           void copy(invite.code);
           setNotice(invite.email ? (invite.emailed ? t.emailed(invite.email) : t.emailFailed(invite.email)) : t.linkCopied);
         },
@@ -54,6 +61,21 @@ export function InvitesManager({ timezone }: { timezone: string }) {
       <Field label={t.email} help={t.emailHint}>
         <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="font-sans" />
       </Field>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label={t.code} help={t.codeHint}>
+          <Input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={32} placeholder="DIXIGROUP26" className="font-mono" />
+        </Field>
+        <Field label={t.validity}>
+          <Select value={validity} onChange={setValidity} options={(Object.keys(VALIDITY) as Validity[]).map((v) => ({ value: v, label: t.validityOptions[v] }))} />
+        </Field>
+      </div>
+      <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+        <input type="checkbox" checked={multiUse} onChange={(e) => setMultiUse(e.target.checked)} className="mt-0.5 size-4 accent-(--accent)" />
+        <span className="flex flex-col">
+          <span className="font-semibold">{t.multiUse}</span>
+          <span className="text-xs text-dim">{t.multiUseHint}</span>
+        </span>
+      </label>
       <div className="flex flex-wrap items-end gap-3">
         <Field label={t.role} className="w-44">
           <Select
@@ -74,14 +96,15 @@ export function InvitesManager({ timezone }: { timezone: string }) {
         <ul className="m-0 flex list-none flex-col gap-2 p-0">
           {invites.map((invite) => {
             const expired = invite.expiresAt != null && new Date(invite.expiresAt).getTime() < Date.now();
-            const status = invite.usedBy ? t.used : expired ? t.expired : invite.expiresAt ? t.expires(formatDateTime(invite.expiresAt, timezone)) : '';
-            const usable = !invite.usedBy && !expired;
+            const used = !invite.multiUse && invite.usedBy != null;
+            const status = used ? t.used : expired ? t.expired : invite.expiresAt ? t.expires(formatDateTime(invite.expiresAt, timezone)) : t.noExpiry;
+            const usable = !used && !expired;
             return (
               <li key={invite.id} className="flex items-center gap-3 rounded-(--radius-control) bg-raised px-3.5 py-2.5">
                 <div className="flex min-w-0 grow flex-col">
                   <span className={`font-mono text-sm font-semibold ${usable ? '' : 'text-dim line-through'}`}>{invite.code}</span>
                   <span className="truncate text-[11px] text-dim">
-                    {[t.roles[invite.role], invite.email, status].filter(Boolean).join(' · ')}
+                    {[t.roles[invite.role], invite.multiUse && `${t.group}, ${t.uses(invite.useCount)}`, invite.email, status].filter(Boolean).join(' · ')}
                   </span>
                 </div>
                 {usable && (

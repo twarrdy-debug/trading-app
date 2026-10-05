@@ -36,6 +36,7 @@ export const VALIDATION_KEYS = [
   'validation.propMarket',
   'validation.propDrawdown',
   'validation.accountRequired',
+  'validation.inviteCode',
 ] as const;
 
 const price = z.number().positive();
@@ -93,7 +94,17 @@ export const createInviteSchema = z.object({
   /** Only this address can use it; any address when omitted. */
   email: z.email().optional(),
   role: z.enum(['user', 'vip', 'educator']).default('user'),
-  expiresInDays: z.number().int().min(1).max(90).default(14),
+  /** Days until it expires; null = never. */
+  expiresInDays: z.number().int().min(1).max(365).nullable().default(14),
+  /** Own code (letters, digits, dashes; stored upper-case); a random one when omitted. */
+  code: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9-]{4,32}$/, 'validation.inviteCode')
+    .transform((c) => c.toUpperCase())
+    .optional(),
+  /** Usable by any number of people (a group code) instead of once. */
+  multiUse: z.boolean().default(false),
 });
 
 export type CreateInviteInput = z.infer<typeof createInviteSchema>;

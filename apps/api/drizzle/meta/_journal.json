@@ -127,6 +127,13 @@
       "when": 1791201909500,
       "tag": "0017_onboarding",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791215432337,
+      "tag": "0018_multi_use_invites",
+      "breakpoints": true
     }
   ]
 }

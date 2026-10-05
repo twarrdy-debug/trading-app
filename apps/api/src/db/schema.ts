@@ -172,7 +172,12 @@ export const invites = pgTable('invites', {
   role: roleKey('role').notNull().default('user'),
   expiresAt: timestamp('expires_at', { withTimezone: true }),
   usedBy: uuid('used_by').references(() => users.id, { onDelete: 'set null' }),
+  /** Single-use: when it was used. Multi-use: the latest sign-up with it. */
   usedAt: timestamp('used_at', { withTimezone: true }),
+  /** A shared code (e.g. for a group): any number of sign-ups until it expires or is deleted. */
+  multiUse: boolean('multi_use').notNull().default(false),
+  /** Sign-ups with this code. */
+  useCount: integer('use_count').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

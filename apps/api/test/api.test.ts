@@ -1452,6 +1452,31 @@ describe('authentication', () => {
     expect(await authDb.db.select({ email: users.email }).from(users).where(eq(users.role, 'admin'))).toEqual([{ email: 'owner@example.com' }]);
   });
 
+  it('lets a whole group sign up with one shared code', async () => {
+    const admin = browser();
+    await admin('POST', '/auth/sign-in/email', { email: 'owner@example.com', password: 'owner-password-1' });
+    const group = await admin('POST', '/invites', { code: 'dixigroup26', multiUse: true, expiresInDays: null, role: 'user' });
+    expect(group.statusCode).toBe(201);
+    expect(group.json()).toMatchObject({ code: 'DIXIGROUP26', multiUse: true, expiresAt: null, useCount: 0 });
+    // Codes are unique, and must look like codes.
+    expect((await admin('POST', '/invites', { code: 'DIXIGROUP26' })).statusCode).toBe(409);
+    expect((await admin('POST', '/invites', { code: 'a b' })).statusCode).toBe(400);
+
+    for (const name of ['Adam', 'Basia']) {
+      const user = browser();
+      const res = await user('POST', '/auth/sign-up/email', { name, email: `${name.toLowerCase()}@group.example`, password: 'group-password-1', inviteCode: 'Dixigroup26' });
+      expect(res.statusCode).toBe(200);
+      expect((await user('GET', '/me')).json()).toMatchObject({ displayName: name, role: 'user', onboarded: false });
+    }
+    const stored = (await admin('GET', '/invites')).json().find((i: { code: string }) => i.code === 'DIXIGROUP26');
+    expect(stored).toMatchObject({ useCount: 2, usedBy: null });
+
+    // Deleting the code closes it.
+    await admin('DELETE', `/invites/${stored.id}`);
+    const late = await browser()('POST', '/auth/sign-up/email', { name: 'Cezary', email: 'cezary@group.example', password: 'group-password-1', inviteCode: 'DIXIGROUP26' });
+    expect(late.json().code).toBe('INVALID_INVITE');
+  });
+
   it('resets a forgotten password with the e-mailed link', async () => {
     const user = browser();
     expect((await user('POST', '/auth/request-password-reset', { email: 'jan@example.com', redirectTo: '/nowe-haslo' })).statusCode).toBe(200);
