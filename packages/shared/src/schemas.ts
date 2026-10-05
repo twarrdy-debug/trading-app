@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   ACCENT_COLORS,
   ACCOUNT_TYPES,
+  ROLE_KEYS,
   ASSET_CLASSES,
   DRAWDOWN_TYPES,
   LEVERAGE_OPTIONS,
@@ -160,6 +161,29 @@ export const createInstrumentSchema = z.object({
   quoteCurrency: currency,
   currencies: z.array(currency).max(5).default([]),
 });
+
+/** Admin: edit an instrument. Symbol and market stay fixed (trades and aliases point at them). */
+export const updateInstrumentSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    assetClass: z.enum(ASSET_CLASSES),
+    measureUnit: z.enum(MEASURE_UNITS),
+    unitSize: z.number().positive(),
+    unitValue: z.number().positive(),
+    quoteCurrency: currency,
+    currencies: z.array(currency).max(5),
+    /** Hidden from every list when false; existing trades keep it. */
+    active: z.boolean(),
+  })
+  .partial();
+
+/** Admin: change a user's role or block the account. */
+export const adminUpdateUserSchema = z
+  .object({
+    role: z.enum(ROLE_KEYS),
+    disabled: z.boolean(),
+  })
+  .partial();
 
 export const createEducatorSchema = z.object({
   displayName: z.string().trim().min(1).max(80),
@@ -400,6 +424,8 @@ export type NewsQuery = z.infer<typeof newsQuerySchema>;
 
 export type UpdateSettingsInput = z.infer<typeof updateSettingsSchema>;
 export type CreateInstrumentInput = z.infer<typeof createInstrumentSchema>;
+export type UpdateInstrumentInput = z.infer<typeof updateInstrumentSchema>;
+export type AdminUpdateUserInput = z.infer<typeof adminUpdateUserSchema>;
 export type CreateTradeInput = z.infer<typeof createTradeSchema>;
 export type CreateStrategyInput = z.input<typeof createStrategySchema>;
 export type UpdateStrategyInput = z.infer<typeof updateStrategySchema>;

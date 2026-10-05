@@ -1131,6 +1131,64 @@ describe('strategies', () => {
   });
 });
 
+describe('admin panel', () => {
+  it('is for admins only and manages users', async () => {
+    const me = (await app.inject({ url: '/me' })).json();
+    const user = (await post('/educators', { displayName: 'Panel user', email: 'panel@example.com' })).json();
+    const headers = { 'x-user-id': user.id };
+    await app.inject({ method: 'PATCH', url: `/admin/users/${user.id}`, payload: { role: 'user' } });
+    expect((await app.inject({ url: '/admin/users', headers })).statusCode).toBe(403);
+    expect((await app.inject({ url: '/admin/stats', headers })).statusCode).toBe(403);
+
+    // The user's data shows in the list.
+    await post('/trades', { instrumentId: ids.XAUUSD, direction: 'long', openedAt: '2025-06-02T08:00:00Z', entryPrice: 4000, positionSize: 0.1 }, headers);
+    const listed = (await app.inject({ url: '/admin/users' })).json().find((u: { id: string }) => u.id === user.id);
+    expect(listed).toMatchObject({ email: 'panel@example.com', role: 'user', trades: 1, accounts: 1, disabledAt: null, canSignIn: false });
+
+    // Promote, block (no API access), unblock.
+    expect((await app.inject({ method: 'PATCH', url: `/admin/users/${user.id}`, payload: { role: 'vip' } })).json().role).toBe('vip');
+    expect((await app.inject({ method: 'PATCH', url: `/admin/users/${user.id}`, payload: { disabled: true } })).json().disabledAt).not.toBeNull();
+    const blocked = await app.inject({ url: '/me', headers });
+    expect(blocked.statusCode).toBe(403);
+    expect(blocked.json().error).toBe('Konto jest zablokowane. Skontaktuj się z administratorem.');
+    await app.inject({ method: 'PATCH', url: `/admin/users/${user.id}`, payload: { disabled: false } });
+    expect((await app.inject({ url: '/me', headers })).statusCode).toBe(200);
+
+    // Not on yourself.
+    const self = await app.inject({ method: 'PATCH', url: `/admin/users/${me.id}`, payload: { disabled: true } });
+    expect(self.statusCode).toBe(400);
+    expect((await app.inject({ method: 'DELETE', url: `/admin/users/${me.id}` })).statusCode).toBe(400);
+
+    // Deleting removes the account with its trades and accounts.
+    expect((await app.inject({ method: 'DELETE', url: `/admin/users/${user.id}` })).json()).toMatchObject({ deleted: true });
+    expect((await app.inject({ url: '/admin/users' })).json().some((u: { id: string }) => u.id === user.id)).toBe(false);
+    expect((await app.inject({ url: '/me', headers })).statusCode).toBe(401);
+  });
+
+  it('reports statistics and system status', async () => {
+    const stats = (await app.inject({ url: '/admin/stats' })).json();
+    expect(stats.users.total).toBeGreaterThan(1);
+    expect(stats.users.byRole.some((r: { role: string }) => r.role === 'admin')).toBe(true);
+    expect(stats.trades.total).toBeGreaterThan(0);
+    expect(Array.isArray(stats.signupsPerWeek)).toBe(true);
+
+    const system = (await app.inject({ url: '/admin/system' })).json();
+    expect(system.database.migrations).toBeGreaterThan(15);
+    expect(system.mail).toMatchObject({ configured: false });
+    expect(system.basis.pairs).toHaveLength(4);
+  });
+
+  it('edits instruments and hides inactive ones', async () => {
+    const before = (await app.inject({ url: '/admin/instruments' })).json().find((i: { symbol: string }) => i.symbol === 'NZDUSD');
+    expect(before).toMatchObject({ active: true, currencies: ['NZD', 'USD'] });
+    const edited = await app.inject({ method: 'PATCH', url: `/admin/instruments/${before.id}`, payload: { name: 'Kiwi', active: false, currencies: ['NZD'] } });
+    expect(edited.json()).toMatchObject({ name: 'Kiwi', active: false, currencies: ['NZD'] });
+    expect((await app.inject({ url: '/instruments' })).json().some((i: { symbol: string }) => i.symbol === 'NZDUSD')).toBe(false);
+    await app.inject({ method: 'PATCH', url: `/admin/instruments/${before.id}`, payload: { name: before.name, active: true, currencies: ['NZD', 'USD'] } });
+    expect((await app.inject({ url: '/instruments' })).json().some((i: { symbol: string }) => i.symbol === 'NZDUSD')).toBe(true);
+  });
+});
+
 describe('trading accounts', () => {
   let trader: Record<string, string>;
   let prop: { id: string };

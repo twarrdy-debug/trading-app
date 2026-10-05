@@ -46,6 +46,7 @@ export const currentUserPlugin = fp(async (app) => {
     }
 
     if (!user) throw new HttpError(401, session || app.env.AUTH_DEV_BYPASS ? 'unknownUser' : 'unauthorized');
+    if (user.disabledAt) throw new HttpError(403, 'accountDisabled');
     req.user = user;
   });
 });

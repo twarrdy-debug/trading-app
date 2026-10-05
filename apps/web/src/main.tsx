@@ -11,6 +11,7 @@ import { NewsPage } from './features/news/NewsPage.tsx';
 import { SettingsPage } from './features/settings/SettingsPage.tsx';
 import { StatsPage } from './features/stats/StatsPage.tsx';
 import { I18nProvider } from './i18n/index.tsx';
+import { AdminPage } from './features/admin/AdminPage.tsx';
 import { AnalysisPage } from './features/analysis/AnalysisPage.tsx';
 import { DashboardPage } from './features/dashboard/DashboardPage.tsx';
 import { LandingPage } from './features/landing/LandingPage.tsx';
@@ -37,6 +38,8 @@ const routeTree = rootRoute.addChildren([
     createRoute({ getParentRoute: () => appRoute, path: '/kalendarz', component: CalendarPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/news', component: NewsPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/ustawienia', component: SettingsPage }),
+    createRoute({ getParentRoute: () => appRoute, path: '/admin', component: AdminPage }),
+    createRoute({ getParentRoute: () => appRoute, path: '/admin/$section', component: AdminPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/ustawienia/$section', component: SettingsPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/sygnaly', component: () => <ComingSoon module="signals" /> }),
   ]),

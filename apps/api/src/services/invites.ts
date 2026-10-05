@@ -77,6 +77,7 @@ export async function finishSignUp(db: DB, userId: string, body: Record<string, 
         .set(invite.multiUse ? { useCount: sql`${invites.useCount} + 1`, usedAt: new Date() } : { usedBy: userId, usedAt: new Date(), useCount: 1 })
         .where(eq(invites.id, invite.id));
       patch.role = invite.role;
+      patch.signupCode = invite.code;
     }
   }
   if (Object.keys(patch).length > 0) await db.update(users).set(patch).where(eq(users.id, userId));

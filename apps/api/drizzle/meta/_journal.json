@@ -134,6 +134,13 @@
       "when": 1791215432337,
       "tag": "0018_multi_use_invites",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791216234401,
+      "tag": "0019_admin_users",
+      "breakpoints": true
     }
   ]
 }
