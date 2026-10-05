@@ -26,7 +26,7 @@ export function DashboardCard({ title, info, actions, children, className = '' }
   );
 }
 
-export function CardLink({ to, children }: { to: '/dziennik' | '/statystyki'; children: ReactNode }) {
+export function CardLink({ to, children }: { to: '/transakcje' | '/statystyki'; children: ReactNode }) {
   return (
     <Link to={to} className="flex items-center gap-1.5 rounded-[9px] px-2 py-1 text-[13px] font-semibold text-dim no-underline hover:bg-chip hover:text-ink">
       {children}
@@ -45,7 +45,7 @@ export function RecentTrades({ trades, currency, timezone }: { trades: Trade[]; 
   const t = useT().dashboard;
   const when = new Intl.DateTimeFormat(currentLocale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: timezone });
   return (
-    <DashboardCard title={t.recentTrades} info={t.info.recentTrades} actions={<CardLink to="/dziennik">{t.viewAll}</CardLink>}>
+    <DashboardCard title={t.recentTrades} info={t.info.recentTrades} actions={<CardLink to="/transakcje">{t.viewAll}</CardLink>}>
       {trades.length === 0 ? (
         <p className="m-0 p-5 text-sm text-dim">{t.noTrades}</p>
       ) : (

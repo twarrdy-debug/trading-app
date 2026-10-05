@@ -1,5 +1,10 @@
 import {
+  averageExitPrice,
+  closesPosition,
   computeTradeMetrics,
+  tradeSession,
+  type PartResult,
+  type TradePartInput,
   emotionLabel,
   riskQuote,
   formatDayLabel,
@@ -23,7 +28,10 @@ import {
   instruments,
   newsItems,
   signals,
+  strategies,
+  strategyRules,
   tradeEmotions,
+  tradeExits,
   trades,
   tradeScreenshots,
   users,
@@ -125,18 +133,121 @@ async function resolveSpread(db: DB, user: CurrentUser, instrumentId: string, tr
   return row?.spreadUnits ?? null;
 }
 
+/** A part with its close price worked out (null while open). */
+interface ResolvedPart {
+  kind: PartResult;
+  takeProfit: number | null;
+  stopLoss: number | null;
+  price: number | null;
+  size: number;
+  closedAt: Date | null;
+}
+
+/** Planned take profits: the list, or `takeProfit` alone (older clients and imports). */
+const targetsOf = (d: Pick<TradeDraft, 'takeProfits' | 'takeProfit'>) =>
+  d.takeProfits?.length ? d.takeProfits : d.takeProfit != null ? [d.takeProfit] : [];
+
+/** What a single legacy exit price was: the take profit, the stop, breakeven or something else. */
+function inferKind(d: { exitPrice: number; entryPrice: number; stopLoss?: number | null }, targets: readonly number[]): PartResult {
+  if (targets.includes(d.exitPrice)) return 'tp';
+  if (d.stopLoss != null && d.exitPrice === d.stopLoss) return 'sl';
+  if (d.exitPrice === d.entryPrice) return 'be';
+  return 'manual';
+}
+
+/**
+ * The parts of a trade with close prices filled in. `parts` wins; without it a legacy `exitPrice`
+ * (older clients, MT5 import) is one part closing everything. A part's stop defaults to the
+ * previous part's (the first one to the trade's). Throws when a closed part cannot be priced, when
+ * futures are split into fractions, or when the parts exceed the position.
+ */
+function resolveParts(instrument: Instrument, draft: TradeDraft, parts: TradePartInput[] | null): ResolvedPart[] {
+  const targets = targetsOf(draft);
+  const list: TradePartInput[] =
+    parts ??
+    (draft.exitPrice != null
+      ? [
+          {
+            size: draft.positionSize,
+            takeProfit: targets[0] ?? null,
+            stopLoss: draft.stopLoss ?? null,
+            result: inferKind({ ...draft, exitPrice: draft.exitPrice }, targets),
+            price: draft.exitPrice,
+            closedAt: draft.closedAt ?? null,
+          },
+        ]
+      : []);
+  let previousStop = draft.stopLoss ?? null;
+  const resolved = list.map((p, i): ResolvedPart => {
+    const stopLoss = p.stopLoss === undefined ? previousStop : p.stopLoss;
+    previousStop = stopLoss ?? previousStop;
+    const takeProfit = p.takeProfit ?? null;
+    let price: number | null = null;
+    if (p.result === 'tp') {
+      price = takeProfit;
+      if (price == null) throw badRequest('partNoTarget', { n: i + 1 });
+    } else if (p.result === 'sl') {
+      price = stopLoss;
+      if (price == null) throw badRequest('partNoStop', { n: i + 1 });
+    } else if (p.result === 'be') price = draft.entryPrice;
+    else if (p.result === 'manual') {
+      price = p.price ?? null;
+      if (price == null) throw badRequest('partNoPrice', { n: i + 1 });
+    }
+    if (instrument.market === 'futures' && !Number.isInteger(p.size)) throw badRequest('futuresWholeContracts', { symbol: instrument.symbol });
+    return { kind: p.result, takeProfit, stopLoss, price, size: p.size, closedAt: price != null && p.closedAt ? new Date(p.closedAt) : null };
+  });
+  const total = resolved.reduce((sum, p) => sum + p.size, 0);
+  if (total > draft.positionSize + 1e-6) throw badRequest('partsTooLarge', { size: draft.positionSize });
+  return resolved;
+}
+
+/**
+ * Exit price and close time follow the parts: set (average price, last close) once every part is
+ * closed and they cover the whole position, empty while anything is still open.
+ */
+function closeState(draft: TradeDraft, parts: ResolvedPart[]): Pick<TradeDraft, 'exitPrice' | 'closedAt'> {
+  const closed = parts.filter((p): p is ResolvedPart & { price: number } => p.price != null);
+  if (closed.length === 0 || closed.length < parts.length || !closesPosition(closed, draft.positionSize)) return { exitPrice: null, closedAt: null };
+  const times = closed.map((p) => p.closedAt?.getTime()).filter((t): t is number => t != null);
+  const closedAt = times.length ? new Date(Math.max(...times)).toISOString() : (draft.closedAt ?? new Date().toISOString());
+  return { exitPrice: averageExitPrice(closed), closedAt };
+}
+
+/**
+ * With parts, the trade's own levels come from them: the stop of the first part (the initial risk)
+ * and the take profits of all parts (TP1 = the first part's).
+ */
+function partLevels(draft: TradeDraft, parts: ResolvedPart[]): Pick<TradeDraft, 'stopLoss' | 'takeProfits'> {
+  if (parts.length === 0) return { stopLoss: draft.stopLoss, takeProfits: draft.takeProfits };
+  return {
+    stopLoss: parts[0]!.stopLoss ?? draft.stopLoss ?? null,
+    takeProfits: parts.map((p) => p.takeProfit).filter((tp): tp is number => tp != null),
+  };
+}
+
+/** The strategy must be the user's; ticked rules are kept only when they belong to it. */
+async function resolveStrategy(db: DB, user: CurrentUser, strategyId: string | null | undefined, checked: string[] | undefined) {
+  if (!strategyId) return { strategyId: null, checkedRuleIds: [] as string[] };
+  const [strategy] = await db.select({ id: strategies.id }).from(strategies).where(and(eq(strategies.id, strategyId), eq(strategies.userId, user.id)));
+  if (!strategy) throw notFound('strategyNotFound');
+  const rules = await db.select({ id: strategyRules.id }).from(strategyRules).where(eq(strategyRules.strategyId, strategyId));
+  const ids = new Set(rules.map((r) => r.id));
+  return { strategyId, checkedRuleIds: [...new Set(checked ?? [])].filter((id) => ids.has(id)) };
+}
+
 /** Computes every stored derived column from the user-entered fields. */
 async function deriveColumns(
   ctx: TradeContext,
   user: CurrentUser,
   instrument: Instrument,
   draft: TradeDraft,
-  { manualRate, spread }: { manualRate: number | null; spread: number | null | undefined },
+  { manualRate, spread, parts }: { manualRate: number | null; spread: number | null | undefined; parts: ResolvedPart[] },
 ) {
   const tradeDate = toLocalDate(new Date(draft.openedAt), user.timezone);
   const { warning, ...fx } = await resolveFx(ctx, user, instrument, draft, manualRate);
   const spreadUnits = await resolveSpread(ctx.db, user, instrument.id, tradeDate, spread);
-  const metrics = computeTradeMetrics(instrument, { ...draft, fxRate: fx.fxRate, spreadUnits });
+  const metrics = computeTradeMetrics(instrument, { ...draft, fxRate: fx.fxRate, spreadUnits, takeProfits: targetsOf(draft), parts: parts.length ? parts : null });
   return {
     columns: { ...metrics, ...fx, spreadUnits, tradeDate, accountCurrency: user.accountCurrency },
     warning,
@@ -152,7 +263,8 @@ function toRow(draft: TradeDraft) {
     entryPrice: draft.entryPrice,
     exitPrice: draft.exitPrice ?? null,
     stopLoss: draft.stopLoss ?? null,
-    takeProfit: draft.takeProfit ?? null,
+    takeProfit: targetsOf(draft)[0] ?? null,
+    takeProfits: [...targetsOf(draft)],
     positionSize: draft.positionSize,
     fees: draft.fees ?? null,
     notes: draft.notes ?? null,
@@ -161,32 +273,38 @@ function toRow(draft: TradeDraft) {
 }
 
 const collectWarnings = (user: CurrentUser, d: TradeDraft, fxWarning: string | null) => [
-  ...validatePriceSides(d.direction, d.entryPrice, d.stopLoss, d.takeProfit == null ? [] : [d.takeProfit], user.language),
+  ...validatePriceSides(d.direction, d.entryPrice, d.stopLoss, [...targetsOf(d)], user.language),
   ...(fxWarning ? [fxWarning] : []),
 ];
 
 /** `externalId` marks a trade imported from a platform (see services/mt5-import.ts). */
 export async function createTrade(ctx: TradeContext, user: CurrentUser, input: CreateTradeInput, { externalId }: { externalId?: string } = {}) {
   const { db } = ctx;
-  const { emotionKeys, ...draft } = input;
+  const { emotionKeys, parts: partInput, checkedRuleIds, ...input2 } = input;
+  const draft: TradeDraft = { ...input2 };
   const instrument = await loadInstrument(db, draft.instrumentId);
   assertPositionSize(instrument, draft.positionSize);
   await assertAccount(db, user, draft.accountId, instrument);
   const source = await resolveSource(db, draft);
   await assertEmotionKeys(db, emotionKeys);
+  const strategy = await resolveStrategy(db, user, draft.strategyId, checkedRuleIds);
+  const parts = resolveParts(instrument, draft, partInput ?? null);
+  Object.assign(draft, closeState(draft, parts), partLevels(draft, parts));
   const { columns, warning } = await deriveColumns(ctx, user, instrument, draft, {
     manualRate: draft.fxRate ?? null,
     spread: draft.spread,
+    parts,
   });
 
   const id = await db.transaction(async (tx) => {
     const [row] = await tx
       .insert(trades)
-      .values({ ...toRow(draft), ...columns, ...source, userId: user.id, externalId: externalId ?? null })
+      .values({ ...toRow(draft), ...columns, ...source, ...strategy, userId: user.id, externalId: externalId ?? null })
       .returning({ id: trades.id });
     if (emotionKeys.length > 0) {
       await tx.insert(tradeEmotions).values(emotionKeys.map((emotionKey) => ({ tradeId: row!.id, emotionKey })));
     }
+    if (parts.length > 0) await tx.insert(tradeExits).values(parts.map((p, i) => ({ ...p, tradeId: row!.id, sortOrder: i })));
     return row!.id;
   });
   return { trade: await getTrade(db, user, id), warnings: collectWarnings(user, draft, warning), fxWarning: warning };
@@ -197,7 +315,7 @@ export async function updateTrade(ctx: TradeContext, user: CurrentUser, id: stri
   const [existing] = await db.select().from(trades).where(and(eq(trades.id, id), eq(trades.userId, user.id)));
   if (!existing) throw notFound('tradeNotFound');
 
-  const { emotionKeys, ...fields } = patch;
+  const { emotionKeys, parts: partPatch, checkedRuleIds, ...fields } = patch;
   const draft: TradeDraft = {
     instrumentId: existing.instrumentId,
     direction: existing.direction,
@@ -214,8 +332,12 @@ export async function updateTrade(ctx: TradeContext, user: CurrentUser, id: stri
     educatorId: existing.educatorId,
     signalId: existing.signalId,
     accountId: existing.accountId,
+    takeProfits: existing.takeProfits,
+    strategyId: existing.strategyId,
     ...fields,
   };
+  // A new TP1 alone (older clients) replaces the list.
+  if ('takeProfit' in fields && !('takeProfits' in fields)) draft.takeProfits = fields.takeProfit != null ? [fields.takeProfit] : [];
   if (fields.source === 'own') Object.assign(draft, { educatorId: null, signalId: null });
 
   const instrument = await loadInstrument(db, draft.instrumentId);
@@ -223,19 +345,40 @@ export async function updateTrade(ctx: TradeContext, user: CurrentUser, id: stri
   await assertAccount(db, user, draft.accountId, instrument);
   const source = await resolveSource(db, draft);
   if (emotionKeys) await assertEmotionKeys(db, emotionKeys);
+  const strategy = await resolveStrategy(db, user, draft.strategyId, 'strategyId' in fields || checkedRuleIds ? checkedRuleIds : existing.checkedRuleIds);
+  // Parts: the new list, a new single exit price (older clients), or the stored parts re-priced
+  // against the current entry (a breakeven part follows a corrected entry).
+  const storedParts = await db.select().from(tradeExits).where(eq(tradeExits.tradeId, id)).orderBy(tradeExits.sortOrder);
+  const partInput: TradePartInput[] | null =
+    partPatch ??
+    ('exitPrice' in fields || 'closedAt' in fields || storedParts.length === 0
+      ? null
+      : storedParts.map((p) => ({
+          size: p.size,
+          takeProfit: p.takeProfit,
+          stopLoss: p.stopLoss,
+          result: p.kind,
+          ...(p.kind === 'manual' && p.price != null ? { price: p.price } : {}),
+          closedAt: p.closedAt?.toISOString() ?? null,
+        })));
+  const parts = resolveParts(instrument, draft, partInput);
+  Object.assign(draft, closeState(draft, parts), partLevels(draft, parts));
   // A manually entered rate is kept until replaced; sending fxRate: null switches back to automatic.
   const manualRate =
     'fxRate' in fields ? (fields.fxRate ?? null) : existing.fxRateSource === 'manual' ? existing.fxRate : null;
   const { columns, warning } = await deriveColumns(ctx, user, instrument, draft, {
     manualRate,
     spread: 'spread' in fields ? fields.spread : existing.spreadUnits,
+    parts,
   });
 
   await db.transaction(async (tx) => {
     await tx
       .update(trades)
-      .set({ ...toRow(draft), ...columns, ...source })
+      .set({ ...toRow(draft), ...columns, ...source, ...strategy })
       .where(eq(trades.id, id));
+    await tx.delete(tradeExits).where(eq(tradeExits.tradeId, id));
+    if (parts.length > 0) await tx.insert(tradeExits).values(parts.map((p, i) => ({ ...p, tradeId: id, sortOrder: i })));
     if (emotionKeys) {
       await tx.delete(tradeEmotions).where(eq(tradeEmotions.tradeId, id));
       if (emotionKeys.length > 0) {
@@ -326,12 +469,18 @@ async function importantNewsDuring(db: DB, rows: NumberedRow[]) {
 
 async function decorate(db: DB, user: CurrentUser, rows: NumberedRow[]) {
   const ids = rows.map((r) => r.id);
-  const [emotionRows, screenshotRows] = ids.length
+  const strategyIds = [...new Set(rows.map((r) => r.strategyId).filter((id): id is string => id != null))];
+  const [emotionRows, screenshotRows, exitRows, strategyRows, ruleCounts] = ids.length
     ? await Promise.all([
         db.select().from(tradeEmotions).where(inArray(tradeEmotions.tradeId, ids)),
         db.select().from(tradeScreenshots).where(inArray(tradeScreenshots.tradeId, ids)),
+        db.select().from(tradeExits).where(inArray(tradeExits.tradeId, ids)).orderBy(tradeExits.sortOrder),
+        strategyIds.length ? db.select({ id: strategies.id, name: strategies.name }).from(strategies).where(inArray(strategies.id, strategyIds)) : [],
+        strategyIds.length
+          ? db.select({ strategyId: strategyRules.strategyId, n: sql<number>`count(*)`.mapWith(Number) }).from(strategyRules).where(inArray(strategyRules.strategyId, strategyIds)).groupBy(strategyRules.strategyId)
+          : [],
       ])
-    : [[], []];
+    : [[], [], [], [], []];
   const accounts = await listAccounts(db, user);
   const accountRows = await accountTradeRows(db, user, accounts.map((a) => a.id));
   const redNews = await importantNewsDuring(db, rows);
@@ -342,8 +491,37 @@ async function decorate(db: DB, user: CurrentUser, rows: NumberedRow[]) {
     // Balance of the trade's account when it was opened.
     const account = accounts.find((a) => a.id === t.accountId);
     const balance = account ? balanceAt(account, accountRows.get(account.id) ?? [], t.openedAt.getTime()) : null;
+    const takeProfits = t.takeProfits.length ? t.takeProfits : t.takeProfit != null ? [t.takeProfit] : [];
+    const own = exitRows.filter((e) => e.tradeId === t.id);
+    // Trades saved before parts: the whole position is one part (closed at its exit price, or open).
+    const parts = own.length
+      ? own.map(({ id, kind, takeProfit, stopLoss, price, size, closedAt }) => ({ id, result: kind, takeProfit, stopLoss, price, size, closedAt }))
+      : [
+          {
+            id: null,
+            result: t.exitPrice != null ? inferKind({ ...t, exitPrice: t.exitPrice }, takeProfits) : ('open' as PartResult),
+            takeProfit: takeProfits[0] ?? null,
+            stopLoss: t.stopLoss,
+            price: t.exitPrice,
+            size: t.positionSize,
+            closedAt: t.closedAt,
+          },
+        ];
+    const closedSize = Math.round(parts.filter((p) => p.price != null).reduce((sum, p) => sum + p.size, 0) * 10_000) / 10_000;
+    const strategy = strategyRows.find((r) => r.id === t.strategyId) ?? null;
     return {
     ...t,
+    takeProfits,
+    /** The position in parts (one part when it was not split), in order. */
+    parts,
+    closedSize,
+    /** Part of the position closed, the rest still open (stats count the trade once fully closed). */
+    partial: t.exitPrice == null && closedSize > 0,
+    /** Session at the opening time (Asia, London, overlap, New York, off). */
+    session: tradeSession(t.openedAt),
+    strategy,
+    /** Rules ticked against the strategy's rules (null without a strategy). */
+    ruleCheck: strategy ? { checked: t.checkedRuleIds.length, total: ruleCounts.find((r) => r.strategyId === strategy.id)?.n ?? 0 } : null,
     /** Money at risk to the stop loss, in the account currency. */
     riskAccount,
     /** The same as % of its account's balance when the trade was opened (null without an account). */

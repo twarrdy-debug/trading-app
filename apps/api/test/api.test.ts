@@ -1131,6 +1131,78 @@ describe('strategies', () => {
   });
 });
 
+describe('partial closes and several take profits', () => {
+  // XAUUSD long 4000, stop 3990 (100 pips = 1R), 1 lot in total (1 pip = $10 per lot).
+  const base = () => ({ instrumentId: ids.XAUUSD, direction: 'long', openedAt: '2025-06-02T09:00:00Z', entryPrice: 4000, stopLoss: 3990, positionSize: 1 });
+
+  it('splits a position into parts with their own take profits; pips add up', async () => {
+    const half = (
+      await post('/trades', {
+        ...base(),
+        parts: [
+          { size: 0.5, takeProfit: 4010, stopLoss: 3990, result: 'tp', closedAt: '2025-06-02T10:00:00Z' },
+          // No stop given: it copies the previous part's.
+          { size: 0.5, takeProfit: 4020, result: 'open' },
+        ],
+      })
+    ).json().trade;
+    expect(half).toMatchObject({ partial: true, exitPrice: null, closedAt: null, closedSize: 0.5, takeProfit: 4010, takeProfits: [4010, 4020], session: 'london' });
+    // Realised: 100 pips on half a lot = $500 = 0.5R of the whole position ($1000).
+    expect(half).toMatchObject({ resultUnits: 100, pnlAccount: 500, rMultiple: 0.5, plannedRR: 1.5 });
+    expect(half.parts).toMatchObject([
+      { result: 'tp', price: 4010, size: 0.5 },
+      { result: 'open', price: null, stopLoss: 3990, takeProfit: 4020 },
+    ]);
+
+    const both = await app.inject({
+      method: 'PATCH',
+      url: `/trades/${half.id}`,
+      payload: {
+        parts: [
+          { size: 0.5, takeProfit: 4010, stopLoss: 3990, result: 'tp', closedAt: '2025-06-02T10:00:00Z' },
+          { size: 0.5, takeProfit: 4020, result: 'tp', closedAt: '2025-06-02T12:00:00Z' },
+        ],
+      },
+    });
+    // 100 + 200 pips; money per part size: $500 + $1000.
+    expect(both.json().trade).toMatchObject({ partial: false, exitPrice: 4015, closedAt: '2025-06-02T12:00:00.000Z', resultUnits: 300, pnlAccount: 1500, rMultiple: 1.5 });
+
+    // The second part's stop moved to breakeven and was hit.
+    const moved = await app.inject({
+      method: 'PATCH',
+      url: `/trades/${half.id}`,
+      payload: { parts: [{ size: 0.5, takeProfit: 4010, stopLoss: 3990, result: 'tp' }, { size: 0.5, takeProfit: 4020, stopLoss: 4000, result: 'sl' }] },
+    });
+    expect(moved.json().trade).toMatchObject({ resultUnits: 100, pnlAccount: 500, stopLoss: 3990 });
+  });
+
+  it('rejects parts it cannot price or that exceed the position', async () => {
+    expect((await post('/trades', { ...base(), parts: [{ size: 1, result: 'tp' }] })).json().error).toMatch(/Część 1.*take profitu/);
+    expect((await post('/trades', { ...base(), parts: [{ size: 1, result: 'manual' }] })).statusCode).toBe(400);
+    const tooMuch = await post('/trades', { ...base(), parts: [{ size: 0.6, result: 'open' }, { size: 0.6, result: 'open' }] });
+    expect(tooMuch.json().error).toMatch(/większe niż cała pozycja/);
+    const futures = await post('/trades', { instrumentId: ids.MGC1, direction: 'long', openedAt: '2025-06-02T09:00:00Z', entryPrice: 4000, stopLoss: 3990, positionSize: 2, parts: [{ size: 0.5, result: 'sl' }] });
+    expect(futures.statusCode).toBe(400);
+  });
+
+  it('names the session of the opening time', async () => {
+    const at = async (openedAt: string) => (await post('/trades', { ...base(), openedAt })).json().trade.session;
+    expect(await at('2025-06-02T14:00:00Z')).toBe('overlap'); // London 15:00, New York 10:00
+    expect(await at('2025-06-02T18:00:00Z')).toBe('newyork');
+    expect(await at('2025-06-03T02:00:00Z')).toBe('asia'); // Tokyo 11:00
+    expect(await at('2025-06-07T12:00:00Z')).toBe('off'); // Saturday
+  });
+
+  it('links a strategy and counts the rules ticked at entry', async () => {
+    const strategy = (await post('/strategies', { name: 'Sweep', rules: ['Sweep', 'CHoCH', 'FVG'] })).json();
+    const [r1, r2] = strategy.rules.map((r: { id: string }) => r.id);
+    const trade = (await post('/trades', { ...base(), strategyId: strategy.id, checkedRuleIds: [r1, r2, '00000000-0000-4000-8000-000000000000'] })).json().trade;
+    expect(trade).toMatchObject({ strategy: { id: strategy.id, name: 'Sweep' }, ruleCheck: { checked: 2, total: 3 } });
+    const other = (await post('/educators', { displayName: 'Strategy outsider' })).json();
+    expect((await post('/trades', { ...base(), strategyId: strategy.id }, { 'x-user-id': other.id })).statusCode).toBe(404);
+  });
+});
+
 describe('admin panel', () => {
   it('is for admins only and manages users', async () => {
     const me = (await app.inject({ url: '/me' })).json();

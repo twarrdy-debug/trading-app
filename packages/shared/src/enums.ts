@@ -242,3 +242,14 @@ export type TradeOutcome = (typeof TRADE_OUTCOMES)[number];
  */
 export const DISCIPLINE_CHECKS = ['limit', 'stopLoss', 'emotions', 'losses'] as const;
 export type DisciplineCheck = (typeof DISCIPLINE_CHECKS)[number];
+
+/**
+ * How one part of a position ended: at its take profit, at its stop loss, at breakeven (the entry
+ * price), at any other price (`manual`), or not yet (`open`).
+ */
+export const PART_RESULTS = ['tp', 'sl', 'be', 'manual', 'open'] as const;
+export type PartResult = (typeof PART_RESULTS)[number];
+
+/** The market session a trade was opened in, from its opening time (`tradeSession()`). */
+export const TRADE_SESSIONS = ['asia', 'london', 'overlap', 'newyork', 'off'] as const;
+export type TradeSession = (typeof TRADE_SESSIONS)[number];

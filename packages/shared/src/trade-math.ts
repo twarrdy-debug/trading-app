@@ -21,7 +21,29 @@ export interface TradeInput {
   fxRate?: number | null;
   /** Spread paid on the trade, in pips/points. Informational: fill prices already include it. */
   spreadUnits?: number | null;
+  /** Planned TP1..TPn of a trade without parts; the planned RR is their average. */
+  takeProfits?: readonly number[] | null;
+  /**
+   * The position in parts: size, the part's take profit and its close price (null while open).
+   * Pips add up across the closed parts, money follows each part's size, and R is that money
+   * against the risk of the whole position (entry to `stopLoss`). Without parts, `exitPrice`
+   * closes the whole position.
+   */
+  parts?: readonly { size: number; price: number | null; takeProfit?: number | null }[] | null;
 }
+
+/** Sizes are stored with 4 decimals; anything this close to the position counts as all of it. */
+const SIZE_EPSILON = 1e-6;
+
+/** Whether the exits close the whole position. */
+export const closesPosition = (exits: readonly { size: number }[], positionSize: number) =>
+  exits.reduce((sum, e) => sum + e.size, 0) >= positionSize - SIZE_EPSILON;
+
+/** Size-weighted average exit price. */
+export const averageExitPrice = (exits: readonly { price: number; size: number }[]) => {
+  const size = exits.reduce((sum, e) => sum + e.size, 0);
+  return size > 0 ? round(exits.reduce((sum, e) => sum + e.price * e.size, 0) / size, 6) : null;
+};
 
 export interface TradeMetrics {
   /** Result in pips/ticks/points; null while the trade is open. */
@@ -53,19 +75,41 @@ export function priceToUnits(spec: InstrumentSpec, direction: Direction, from: n
 }
 
 export function computeTradeMetrics(spec: InstrumentSpec, trade: TradeInput): TradeMetrics {
-  const hasExit = trade.exitPrice != null;
-  const resultUnits = hasExit ? priceToUnits(spec, trade.direction, trade.entryPrice, trade.exitPrice!) : null;
-  const pnlQuote = resultUnits == null ? null : round(resultUnits * spec.unitValue * trade.positionSize, 2);
+  const parts = trade.parts?.length ? trade.parts : null;
+  const pips = (price: number) => ((price - trade.entryPrice) * directionSign(trade.direction)) / spec.unitSize;
+  let resultUnits: number | null;
+  let pnlQuote: number | null;
+  if (parts) {
+    const closed = parts.filter((p): p is typeof p & { price: number } => p.price != null);
+    resultUnits = closed.length ? round(closed.reduce((sum, p) => sum + pips(p.price), 0), 2) : null;
+    pnlQuote = closed.length ? round(closed.reduce((sum, p) => sum + pips(p.price) * spec.unitValue * p.size, 0), 2) : null;
+  } else {
+    resultUnits = trade.exitPrice != null ? priceToUnits(spec, trade.direction, trade.entryPrice, trade.exitPrice) : null;
+    pnlQuote = resultUnits == null ? null : round(resultUnits * spec.unitValue * trade.positionSize, 2);
+  }
   const pnlAccount =
     pnlQuote == null || trade.fxRate == null ? null : round(pnlQuote * trade.fxRate - (trade.fees ?? 0), 2);
 
   const riskUnits =
     trade.stopLoss == null ? null : round(Math.abs(trade.entryPrice - trade.stopLoss) / spec.unitSize, 2);
-  const rMultiple = resultUnits == null || !riskUnits ? null : round(resultUnits / riskUnits, 2);
-  const plannedRR =
-    trade.takeProfit == null || trade.stopLoss == null || trade.entryPrice === trade.stopLoss
+  // With parts R is money against the whole position's risk (pips add up, so they cannot be divided).
+  const riskMoney = riskUnits ? riskUnits * spec.unitValue * trade.positionSize : null;
+  const rMultiple = parts
+    ? pnlQuote == null || !riskMoney
       ? null
-      : round(Math.abs(trade.takeProfit - trade.entryPrice) / Math.abs(trade.entryPrice - trade.stopLoss), 2);
+      : round(pnlQuote / riskMoney, 2)
+    : resultUnits == null || !riskUnits
+      ? null
+      : round(resultUnits / riskUnits, 2);
+  const targets = trade.takeProfits?.length ? trade.takeProfits : trade.takeProfit != null ? [trade.takeProfit] : [];
+  const partTargets = parts?.filter((p): p is typeof p & { takeProfit: number } => p.takeProfit != null) ?? [];
+  const plannedRR = parts
+    ? partTargets.length === 0 || !riskMoney
+      ? null
+      : round(partTargets.reduce((sum, p) => sum + Math.abs(pips(p.takeProfit)) * spec.unitValue * p.size, 0) / riskMoney, 2)
+    : targets.length === 0 || trade.stopLoss == null || trade.entryPrice === trade.stopLoss
+      ? null
+      : round(targets.reduce((sum, tp) => sum + Math.abs(tp - trade.entryPrice), 0) / targets.length / Math.abs(trade.entryPrice - trade.stopLoss), 2);
 
   const spreadCost =
     trade.spreadUnits == null || trade.fxRate == null
@@ -175,4 +219,16 @@ export function exitReason(trade: {
   if (takeProfit != null && beyond(takeProfit, true)) return 'tp';
   if (stopLoss != null && beyond(stopLoss, false)) return 'sl';
   return null;
+}
+
+/**
+ * Position size that risks `riskQuote` (quote currency) between entry and stop, rounded down to
+ * `step` (0.01 lot for CFD, 1 contract for futures). Null without a stop or when even one step
+ * risks more.
+ */
+export function sizeForRisk(spec: InstrumentSpec, entryPrice: number, stopLoss: number | null | undefined, riskQuote: number, step: number): number | null {
+  if (stopLoss == null || stopLoss === entryPrice || riskQuote <= 0) return null;
+  const perUnitSize = (Math.abs(entryPrice - stopLoss) / spec.unitSize) * spec.unitValue;
+  const size = Math.floor(riskQuote / perUnitSize / step + 1e-9) * step;
+  return size >= step ? round(size, 4) : null;
 }
