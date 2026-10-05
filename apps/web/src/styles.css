@@ -3,8 +3,7 @@
 @import '@fontsource/manrope/500.css';
 @import '@fontsource/manrope/600.css';
 @import '@fontsource/manrope/700.css';
-@import '@fontsource/dm-mono/400.css';
-@import '@fontsource/dm-mono/500.css';
+@import '@fontsource/manrope/800.css';
 
 /*
  * Design tokens – direction "Chmura" (cloud): white cards with a soft shadow on a cool grey
@@ -39,6 +38,8 @@
   --sell-soft: #fce8ea;
   --on-side: #ffffff;
   --warn-bg: #fff4de;
+  /* Between good and bad (e.g. a profit factor of 1–1.5). */
+  --warn: #c47a00;
   /* Headlines FinancialJuice marks red (their #b80101), so they read the same as in FJ. */
   --breaking: #b80101;
   --on-breaking: #ffffff;
@@ -64,6 +65,7 @@
   --sell-soft: rgb(255 107 119 / 0.14);
   --on-side: #0e1116;
   --warn-bg: #2a2210;
+  --warn: #f0a530;
   --breaking: #b80101;
   --on-breaking: #ffffff;
   --accent-ink: var(--accent);
@@ -86,13 +88,15 @@
   --color-sell-soft: var(--sell-soft);
   --color-on-side: var(--on-side);
   --color-warn-bg: var(--warn-bg);
+  --color-warn: var(--warn);
   --color-breaking: var(--breaking);
   --color-on-breaking: var(--on-breaking);
   --color-accent: var(--accent);
   --color-accent-ink: var(--accent-ink);
   --color-on-accent: var(--on-accent);
   --font-sans: 'Manrope', ui-sans-serif, sans-serif;
-  --font-mono: 'DM Mono', ui-monospace, monospace;
+  /* Numbers (amounts, prices, R, percentages): Manrope with tabular figures, chosen 2026-10-05 over DM Mono. */
+  --font-mono: 'Manrope', ui-sans-serif, sans-serif;
 }
 
 /* White card with a soft shadow: panels, tiles, dialogs, the header bar. */
@@ -152,6 +156,12 @@
 
   button {
     cursor: pointer;
+  }
+
+  /* Numbers line up in columns (tabular figures) and sit a touch tighter than text. */
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
   }
 
   button:disabled {

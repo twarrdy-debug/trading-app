@@ -5,11 +5,14 @@ import {
   formatDayLabel,
   newsAffectsInstrument,
   toLocalDate,
+  tradeOutcome,
   validatePriceSides,
   type AssetClass,
   type CreateTradeInput,
+  type DisciplineCheck,
   type FxRateSource,
   type TradeFilters,
+  type TradeOutcome,
 } from '@trading/shared';
 import { and, desc, eq, getTableColumns, gte, inArray, isNotNull, isNull, lte, sql, type SQL } from 'drizzle-orm';
 import type { DB } from '../db/client.ts';
@@ -39,7 +42,8 @@ export interface TradeContext {
 type Instrument = typeof instruments.$inferSelect;
 
 /** Merged create/update input, before derived fields are computed. */
-type TradeDraft = Omit<CreateTradeInput, 'emotionKeys'>;
+/** Older trades may have no account; assertAccount rejects saving one without. */
+type TradeDraft = Omit<CreateTradeInput, 'emotionKeys' | 'accountId'> & { accountId: string | null };
 
 async function loadInstrument(db: DB, id: string): Promise<Instrument> {
   const [instrument] = await db.select().from(instruments).where(eq(instruments.id, id));
@@ -54,9 +58,12 @@ function assertPositionSize(instrument: Instrument, size: number) {
   }
 }
 
-/** The account must be the user's, and a prop account's market must match the instrument. */
+/**
+ * Every trade needs an account (older trades without one must get one when edited); it must be the
+ * user's, and a prop account's market must match the instrument.
+ */
 async function assertAccount(db: DB, user: CurrentUser, accountId: string | null | undefined, instrument: Instrument) {
-  if (!accountId) return;
+  if (!accountId) throw badRequest('accountRequired');
   const account = await getAccount(db, user, accountId);
   if (account.market && account.market !== instrument.market) {
     throw badRequest('accountMarketMismatch', {
@@ -345,6 +352,10 @@ async function decorate(db: DB, user: CurrentUser, rows: NumberedRow[]) {
     /** Over the daily limit within the trade's account (the limit applies to each account). */
     overDailyLimit: user.maxTradesPerDay != null && t.accountDayIndex > user.maxTradesPerDay,
     status: t.exitPrice == null ? ('open' as const) : ('closed' as const),
+    /** Win, loss or breakeven (±BREAKEVEN_R); null while open. */
+    outcome: tradeOutcome(t),
+    /** Result as % of its account's balance when the trade was opened (null without an account). */
+    pnlPct: t.pnlAccount != null && balance != null && balance > 0 ? round2((t.pnlAccount / balance) * 100) : null,
     instrument: { id: t.instrumentId, symbol: instrumentSymbol, measureUnit, market },
     emotionKeys: emotionRows.filter((e) => e.tradeId === t.id).map((e) => e.emotionKey),
     /** Red headlines about the trade's instrument while it was open (closed trades only). */
@@ -426,7 +437,7 @@ export async function tradingMonitor(db: DB, user: CurrentUser) {
     selectNumbered(db, user.id).where(eq(trades.tradeDate, today)).orderBy(trades.openedAt),
     listAccounts(db, user),
   ]);
-  const isLoss = (t: (typeof rows)[number]) => (t.resultUnits ?? 0) < 0;
+  const isLoss = (t: (typeof rows)[number]) => tradeOutcome(t) === 'loss';
 
   const group = (accountId: string | null, name: string | null) => {
     const own = rows.filter((t) => t.accountId === accountId);
@@ -486,10 +497,45 @@ const summarize = (b: Bucket) => ({
   trades: b.trades,
   wins: b.wins,
   losses: b.losses,
-  winRate: b.trades ? round2((b.wins / b.trades) * 100) : null,
+  /** Wins among wins and losses: breakevens are neutral. */
+  winRate: b.wins + b.losses ? round2((b.wins / (b.wins + b.losses)) * 100) : null,
   avgR: b.rCount ? round2(b.rSum / b.rCount) : null,
   pnl: round2(b.pnl),
 });
+
+interface DayDetail {
+  trades: number;
+  wins: number;
+  losses: number;
+  overLimit: boolean;
+  missingStop: boolean;
+  missingEmotions: boolean;
+  /** Losses counted per account for the losses warning (in a row, or all of the day). */
+  lossRun: Map<string, number>;
+  lossAlert: boolean;
+}
+
+const emptyDay = (): DayDetail => ({
+  trades: 0,
+  wins: 0,
+  losses: 0,
+  overLimit: false,
+  missingStop: false,
+  missingEmotions: false,
+  lossRun: new Map(),
+  lossAlert: false,
+});
+
+/** Win/loss/breakeven runs over trades in order; `recent` are the last 30 outcomes, oldest first. */
+function streakStats(outcomes: TradeOutcome[]) {
+  const max: Record<TradeOutcome, number> = { win: 0, loss: 0, breakeven: 0 };
+  let current = null as { outcome: TradeOutcome; count: number } | null;
+  for (const outcome of outcomes) {
+    current = current?.outcome === outcome ? { outcome, count: current.count + 1 } : { outcome, count: 1 };
+    max[outcome] = Math.max(max[outcome], current.count);
+  }
+  return { recent: outcomes.slice(-30), maxWin: max.win, maxLoss: max.loss, maxBreakeven: max.breakeven, current };
+}
 
 /** Stats over closed trades. Money totals are in the user's current account currency. */
 export async function tradeStats(db: DB, user: CurrentUser, filters: Pick<TradeFilters, 'account' | 'instrumentId' | 'dateFrom' | 'dateTo'>) {
@@ -503,12 +549,17 @@ export async function tradeStats(db: DB, user: CurrentUser, filters: Pick<TradeF
 
   const all = emptyBucket();
   const byDay = new Map<string, number>();
+  const dayDetails = new Map<string, DayDetail>();
+  const outcomes: TradeOutcome[] = [];
   const byInstrument = new Map<string, Bucket>();
   const bySource = new Map<string, Bucket>();
   const byEmotion = new Map<string, Bucket>();
   const byDayIndex = new Map<string, Bucket>();
   let grossWin = 0;
   let grossLoss = 0;
+  // Money of winning and losing trades (breakevens left out), for the averages.
+  let winSum = 0;
+  let lossSum = 0;
   let plannedSum = 0;
   let plannedCount = 0;
   let missingFx = 0;
@@ -535,9 +586,10 @@ export async function tradeStats(db: DB, user: CurrentUser, filters: Pick<TradeF
   };
 
   for (const t of rows) {
-    const units = t.resultUnits ?? 0;
-    const win = units > 0;
-    const loss = units < 0;
+    // Closed trades always have a result; breakeven (±BREAKEVEN_R) is neither a win nor a loss.
+    const outcome = tradeOutcome(t) ?? 'breakeven';
+    const win = outcome === 'win';
+    const loss = outcome === 'loss';
     const inCurrency = t.pnlAccount != null && t.accountCurrency === user.accountCurrency;
     if (!inCurrency) missingFx++;
     const pnl = inCurrency ? t.pnlAccount! : 0;
@@ -545,6 +597,8 @@ export async function tradeStats(db: DB, user: CurrentUser, filters: Pick<TradeF
     addTo(all, win, loss, pnl, t.rMultiple);
     if (pnl > 0) grossWin += pnl;
     if (pnl < 0) grossLoss -= pnl;
+    if (win) winSum += pnl;
+    if (loss) lossSum += pnl;
     if (t.plannedRR != null) {
       plannedSum += t.plannedRR;
       plannedCount++;
@@ -556,6 +610,19 @@ export async function tradeStats(db: DB, user: CurrentUser, filters: Pick<TradeF
     periodDrawdown = Math.max(periodDrawdown, runningPeak - running);
 
     byDay.set(t.tradeDate, (byDay.get(t.tradeDate) ?? 0) + pnl);
+    outcomes.push(outcome);
+    if (!dayDetails.has(t.tradeDate)) dayDetails.set(t.tradeDate, emptyDay());
+    const day = dayDetails.get(t.tradeDate)!;
+    day.trades++;
+    if (win) day.wins++;
+    if (loss) day.losses++;
+    if (user.maxTradesPerDay != null && t.accountDayIndex > user.maxTradesPerDay) day.overLimit = true;
+    if (t.stopLoss == null) day.missingStop = true;
+    if (!emotionRows.some((e) => e.tradeId === t.id)) day.missingEmotions = true;
+    const key = t.accountId ?? 'none';
+    const counted = loss ? (day.lossRun.get(key) ?? 0) + 1 : user.lossAlertMode === 'day' ? (day.lossRun.get(key) ?? 0) : 0;
+    day.lossRun.set(key, counted);
+    if (counted >= user.lossStreakAlert) day.lossAlert = true;
     add(byInstrument, t.instrumentSymbol, win, loss, pnl, t.rMultiple);
     const educator = educatorRows.find((e) => e.id === t.educatorId)?.name;
     const sourceLabel =
@@ -570,7 +637,24 @@ export async function tradeStats(db: DB, user: CurrentUser, filters: Pick<TradeF
   let cumulative = 0;
   const equityCurve = [...byDay.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, pnl]) => ({ date, pnl: round2(pnl), cumulative: round2((cumulative += pnl)) }));
+    .map(([date, pnl]) => {
+      const day = dayDetails.get(date)!;
+      return {
+        date,
+        pnl: round2(pnl),
+        cumulative: round2((cumulative += pnl)),
+        trades: day.trades,
+        wins: day.wins,
+        losses: day.losses,
+        /** The day's discipline checks (true = kept): see DISCIPLINE_CHECKS in @trading/shared. */
+        discipline: {
+          limit: !day.overLimit,
+          stopLoss: !day.missingStop,
+          emotions: !day.missingEmotions,
+          losses: !day.lossAlert,
+        } satisfies Record<DisciplineCheck, boolean>,
+      };
+    });
 
   const entries = (map: Map<string, Bucket>) => [...map.entries()].map(([key, b]) => ({ key, ...summarize(b) }));
   const accounts = await listAccounts(db, user);
@@ -591,10 +675,12 @@ export async function tradeStats(db: DB, user: CurrentUser, filters: Pick<TradeF
     summary: {
       ...summarize(all),
       avgPlannedRR: plannedCount ? round2(plannedSum / plannedCount) : null,
-      avgWin: all.wins ? round2(grossWin / all.wins) : null,
-      avgLoss: all.losses ? round2(-grossLoss / all.losses) : null,
+      avgWin: all.wins ? round2(winSum / all.wins) : null,
+      avgLoss: all.losses ? round2(lossSum / all.losses) : null,
       profitFactor: grossLoss ? round2(grossWin / grossLoss) : null,
       maxLossStreak,
+      /** Closed trades within ±BREAKEVEN_R of zero (neither wins nor losses). */
+      breakevens: all.trades - all.wins - all.losses,
       /** Largest fall from a peak of the cumulative result in the period (money, positive). */
       maxDrawdown: round2(periodDrawdown),
       /** The same against the account size, when there is an account profile. */
@@ -604,7 +690,9 @@ export async function tradeStats(db: DB, user: CurrentUser, filters: Pick<TradeF
       /** Closed trades left out of money totals (no FX rate, or another account currency). */
       tradesWithoutPnl: missingFx,
     },
+    /** Days with closed trades: result, cumulative result, counts and discipline checks. */
     equityCurve,
+    streaks: streakStats(outcomes),
     /** The selected account's balance after each day of the curve, for charting against the account. */
     balanceCurve,
     byInstrument: entries(byInstrument),

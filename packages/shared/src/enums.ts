@@ -28,8 +28,14 @@ export type AssetClass = (typeof ASSET_CLASSES)[number];
 export const FX_RATE_SOURCES = ['auto', 'manual'] as const;
 export type FxRateSource = (typeof FX_RATE_SOURCES)[number];
 
-/** Currencies with automatic exchange rates (ECB via Frankfurter). Others need a manual rate. */
-export const AUTO_FX_CURRENCIES = ['EUR', 'USD', 'GBP', 'PLN'] as const;
+/**
+ * Currencies with automatic exchange rates (ECB via Frankfurter). Others need a manual rate.
+ * JPY, CHF, CAD, AUD and NZD are the quote currencies of the forex majors.
+ */
+export const AUTO_FX_CURRENCIES = ['EUR', 'USD', 'GBP', 'PLN', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD'] as const;
+
+/** Account currencies offered as one-click choices in the settings (any 3-letter code can be typed). */
+export const ACCOUNT_CURRENCY_CHOICES = ['USD', 'EUR', 'GBP', 'PLN'] as const;
 
 export const TRADE_SOURCES = ['own', 'educator'] as const;
 export type TradeSource = (typeof TRADE_SOURCES)[number];
@@ -225,3 +231,14 @@ export const DEFAULT_CHECKLIST_ITEMS: Record<Language, readonly string[]> = {
     'Entry plan and invalidation level',
   ],
 };
+
+/** Result of a closed trade: a gain, a loss, or exactly zero. */
+export const TRADE_OUTCOMES = ['win', 'loss', 'breakeven'] as const;
+export type TradeOutcome = (typeof TRADE_OUTCOMES)[number];
+
+/**
+ * Daily discipline checks (dashboard progress tracker): within the daily trade limit, a stop loss
+ * on every trade, emotions noted on every trade, and the losses warning not reached.
+ */
+export const DISCIPLINE_CHECKS = ['limit', 'stopLoss', 'emotions', 'losses'] as const;
+export type DisciplineCheck = (typeof DISCIPLINE_CHECKS)[number];

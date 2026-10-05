@@ -35,6 +35,7 @@ export const VALIDATION_KEYS = [
   'validation.leverage',
   'validation.propMarket',
   'validation.propDrawdown',
+  'validation.accountRequired',
 ] as const;
 
 const price = z.number().positive();
@@ -178,8 +179,8 @@ const tradeFields = z.object({
   source: z.enum(TRADE_SOURCES).default('own'),
   educatorId: z.uuid().nullable().optional(),
   signalId: z.uuid().nullable().optional(),
-  /** Trading account the trade belongs to (null = none). */
-  accountId: z.uuid().nullable().optional(),
+  /** Trading account the trade belongs to; required (older trades may still have none). */
+  accountId: z.uuid({ error: 'validation.accountRequired' }),
   emotionKeys: z.array(z.string()).max(20).default([]),
 });
 
@@ -221,8 +222,8 @@ export const tradeStatsQuerySchema = z.object({
  * could not match (e.g. "GER40.cash") to instruments; `commit=false` only previews.
  */
 export const mt5ImportFieldsSchema = z.object({
-  /** Imported trades are assigned to this account. */
-  accountId: z.uuid().optional(),
+  /** Imported trades are assigned to this account (required). */
+  accountId: z.uuid({ error: 'validation.accountRequired' }),
   timezone: z.enum(BROKER_TIMEZONES).default('broker-ny7'),
   symbolMap: z
     .string()
@@ -292,6 +293,25 @@ export const levelFiltersSchema = z.object({
   date: isoDate.optional(),
   timeframe: z.enum(TIMEFRAMES).optional(),
 });
+
+// --- Strategies ----------------------------------------------------------------
+
+export const MAX_STRATEGY_RULES = 30;
+const strategyName = z.string().trim().min(1).max(80);
+const ruleLabel = z.string().trim().min(1).max(200);
+
+export const createStrategySchema = z.object({
+  name: strategyName,
+  description: z.string().trim().max(2000).nullish(),
+  /** Initial rules, in order. */
+  rules: z.array(ruleLabel).max(MAX_STRATEGY_RULES).default([]),
+});
+export const updateStrategySchema = z.object({ name: strategyName, description: z.string().trim().max(2000).nullable() }).partial();
+export const addStrategyRuleSchema = z.object({ label: ruleLabel });
+export const updateStrategyRuleSchema = z.object({ label: ruleLabel });
+/** The strategy's rule ids in their new order (all of them). */
+export const reorderStrategyRulesSchema = z.object({ ids: z.array(z.uuid()).max(MAX_STRATEGY_RULES) });
+export const strategyRuleParams = z.object({ id: z.uuid(), ruleId: z.uuid() });
 
 export const checklistParams = z.object({ instrumentId: z.uuid(), date: isoDate });
 
@@ -370,6 +390,8 @@ export type NewsQuery = z.infer<typeof newsQuerySchema>;
 export type UpdateSettingsInput = z.infer<typeof updateSettingsSchema>;
 export type CreateInstrumentInput = z.infer<typeof createInstrumentSchema>;
 export type CreateTradeInput = z.infer<typeof createTradeSchema>;
+export type CreateStrategyInput = z.input<typeof createStrategySchema>;
+export type UpdateStrategyInput = z.infer<typeof updateStrategySchema>;
 export type CreateAccountInput = z.infer<typeof createAccountSchema>;
 export type UpdateAccountInput = z.infer<typeof updateAccountSchema>;
 export type UpdateTradeInput = z.infer<typeof updateTradeSchema>;

@@ -8,8 +8,12 @@ import { CalculatorPage } from './features/calculator/CalculatorPage.tsx';
 import { CalendarPage } from './features/calendar/CalendarPage.tsx';
 import { JournalPage } from './features/journal/JournalPage.tsx';
 import { NewsPage } from './features/news/NewsPage.tsx';
+import { SettingsPage } from './features/settings/SettingsPage.tsx';
 import { StatsPage } from './features/stats/StatsPage.tsx';
 import { I18nProvider } from './i18n/index.tsx';
+import { AnalysisPage } from './features/analysis/AnalysisPage.tsx';
+import { DashboardPage } from './features/dashboard/DashboardPage.tsx';
+import { LandingPage } from './features/landing/LandingPage.tsx';
 import { AppShell, ComingSoon } from './layout/AppShell.tsx';
 import './styles.css';
 
@@ -19,17 +23,21 @@ const rootRoute = createRootRoute();
 const appRoute = createRoute({ getParentRoute: () => rootRoute, id: 'app', component: AppShell });
 
 const routeTree = rootRoute.addChildren([
+  createRoute({ getParentRoute: () => rootRoute, path: '/start', component: LandingPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/logowanie', component: LoginPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/rejestracja', component: RegisterPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/reset-hasla', component: ForgotPasswordPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/nowe-haslo', component: ResetPasswordPage }),
   appRoute.addChildren([
-    createRoute({ getParentRoute: () => appRoute, path: '/', component: JournalPage }),
+    createRoute({ getParentRoute: () => appRoute, path: '/', component: DashboardPage }),
+    createRoute({ getParentRoute: () => appRoute, path: '/dziennik', component: JournalPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/statystyki', component: StatsPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/kalkulator', component: CalculatorPage }),
-    createRoute({ getParentRoute: () => appRoute, path: '/analiza', component: () => <ComingSoon module="analysis" /> }),
+    createRoute({ getParentRoute: () => appRoute, path: '/analiza', component: AnalysisPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/kalendarz', component: CalendarPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/news', component: NewsPage }),
+    createRoute({ getParentRoute: () => appRoute, path: '/ustawienia', component: SettingsPage }),
+    createRoute({ getParentRoute: () => appRoute, path: '/ustawienia/$section', component: SettingsPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/sygnaly', component: () => <ComingSoon module="signals" /> }),
   ]),
 ]);

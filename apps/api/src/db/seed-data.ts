@@ -4,7 +4,7 @@ import type { DB } from './client.ts';
 import { emotions, instrumentCurrencies, instruments, roles, users } from './schema.ts';
 
 /**
- * Default instruments (all quoted in USD).
+ * Default instruments.
  * CFD: 1 lot of XAUUSD = 100 oz (1 pip = 0.10 move = 10 USD). Index CFDs use points with
  * 1 USD per point per lot, which differs between brokers; admins can adjust via the API.
  * Futures: CME E-mini and Micro contracts, continuous symbols as on TradingView (NQ1!).
@@ -21,6 +21,25 @@ const cfd = (symbol: string, name: string, extra: Partial<CreateInstrumentInput>
   currencies: ['USD'],
   ...extra,
 });
+
+/**
+ * Forex major: 1 lot = 100 000 units of the base currency, 1 pip = 0.0001 (0.01 for JPY pairs), so a
+ * pip is worth 10 units of the quote currency per lot (1000 JPY). Both currencies move it in the
+ * calendar and the news.
+ */
+const forex = (symbol: string, name: string): CreateInstrumentInput => {
+  const base = symbol.slice(0, 3);
+  const quote = symbol.slice(3);
+  const pip = quote === 'JPY' ? 0.01 : 0.0001;
+  return cfd(symbol, name, {
+    assetClass: 'forex',
+    measureUnit: 'pip',
+    unitSize: pip,
+    unitValue: Math.round(pip * 100_000),
+    quoteCurrency: quote,
+    currencies: [base, quote],
+  });
+};
 
 // Gold futures count in pips like XAUUSD (their 0.10 tick is the gold pip); the others in ticks.
 const future = (symbol: string, name: string, assetClass: 'index' | 'metal', unitSize: number, unitValue: number): CreateInstrumentInput => ({
@@ -48,6 +67,13 @@ export const DEFAULT_INSTRUMENTS: CreateInstrumentInput[] = [
   future('MYM1', 'Dow Jones Micro', 'index', 1, 0.5),
   future('GC1', 'Gold (COMEX)', 'metal', 0.1, 10),
   future('MGC1', 'Gold Micro (COMEX)', 'metal', 0.1, 1),
+  forex('EURUSD', 'Euro / US Dollar'),
+  forex('GBPUSD', 'British Pound / US Dollar'),
+  forex('USDJPY', 'US Dollar / Japanese Yen'),
+  forex('USDCHF', 'US Dollar / Swiss Franc'),
+  forex('AUDUSD', 'Australian Dollar / US Dollar'),
+  forex('USDCAD', 'US Dollar / Canadian Dollar'),
+  forex('NZDUSD', 'New Zealand Dollar / US Dollar'),
 ];
 
 const RENAMED_INSTRUMENTS = [

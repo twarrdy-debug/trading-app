@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Gold (XAU): three bars on a warm disc, drawn for this app in the circular style of the flags. -->
+  <circle cx="256" cy="256" r="256" fill="#f6c84c"/>
+  <path fill="#d99a1e" d="M256 512a256 256 0 0 0 256-256H0a256 256 0 0 0 256 256Z" opacity=".35"/>
+  <g stroke="#a86b08" stroke-width="10" stroke-linejoin="round">
+    <path fill="#ffe28a" d="M118 330h120l-18-62h-84z"/>
+    <path fill="#ffe28a" d="M274 330h120l-18-62h-84z"/>
+    <path fill="#fff0b8" d="M196 254h120l-18-62h-84z"/>
+  </g>
+</svg>

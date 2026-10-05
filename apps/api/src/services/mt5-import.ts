@@ -44,7 +44,7 @@ export async function importMt5(ctx: TradeContext, user: CurrentUser, bytes: Uin
   if (report.positions.length === 0) throw badRequest('mt5NoPositions');
 
   const list = await ctx.db.select().from(instruments).where(eq(instruments.active, true));
-  const account = fields.accountId ? await getAccount(ctx.db, user, fields.accountId) : null;
+  const account = await getAccount(ctx.db, user, fields.accountId);
   const prefix = report.account ? `mt5:${report.account}:` : 'mt5:';
   const externalIds = report.positions.map((p) => prefix + p.position);
   const existing = new Set(
@@ -125,7 +125,7 @@ export async function importMt5(ctx: TradeContext, user: CurrentUser, bytes: Uin
           }).trim(),
           source: 'own',
           emotionKeys: [],
-          accountId: account?.id ?? null,
+          accountId: account.id,
         },
         { externalId: row.externalId },
       );

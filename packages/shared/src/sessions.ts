@@ -6,10 +6,10 @@ import { toLocalDate, zonedTimeToUtc } from './dates.ts';
  * (Sydney's Monday morning is Sunday evening in Europe, as on the real market).
  */
 export const MARKET_SESSIONS = [
-  { key: 'sydney', zone: 'Australia/Sydney', open: '07:00', close: '16:00' },
-  { key: 'tokyo', zone: 'Asia/Tokyo', open: '09:00', close: '18:00' },
-  { key: 'london', zone: 'Europe/London', open: '08:00', close: '17:00' },
-  { key: 'newyork', zone: 'America/New_York', open: '08:00', close: '17:00' },
+  { key: 'sydney', zone: 'Australia/Sydney', open: '07:00', close: '16:00', currency: 'AUD' },
+  { key: 'tokyo', zone: 'Asia/Tokyo', open: '09:00', close: '18:00', currency: 'JPY' },
+  { key: 'london', zone: 'Europe/London', open: '08:00', close: '17:00', currency: 'GBP' },
+  { key: 'newyork', zone: 'America/New_York', open: '08:00', close: '17:00', currency: 'USD' },
 ] as const;
 
 export type SessionKey = (typeof MARKET_SESSIONS)[number]['key'];
@@ -17,10 +17,15 @@ export type SessionKey = (typeof MARKET_SESSIONS)[number]['key'];
 export interface SessionWindow {
   start: Date;
   end: Date;
+  /** The session's own local date (YYYY-MM-DD in its city), to match bank holidays. */
+  date?: string;
 }
 
 export interface SessionState {
   key: SessionKey;
+  /** The city's time zone and currency (its bank holidays in the calendar). */
+  zone: string;
+  currency: string;
   open: boolean;
   /** The window open now, or else the next one. */
   current: SessionWindow;
@@ -40,10 +45,17 @@ function windows(session: (typeof MARKET_SESSIONS)[number], around: Date, daysBa
   for (let d = -daysBack; d <= daysForward; d++) {
     const date = addDays(localToday, d);
     if (isWeekend(date)) continue;
-    result.push({ start: zonedTimeToUtc(`${date}T${session.open}:00`, session.zone), end: zonedTimeToUtc(`${date}T${session.close}:00`, session.zone) });
+    result.push({
+      start: zonedTimeToUtc(`${date}T${session.open}:00`, session.zone),
+      end: zonedTimeToUtc(`${date}T${session.close}:00`, session.zone),
+      date,
+    });
   }
   return result;
 }
+
+/** Calendar events that close a session's city for the day (not daylight saving shifts). */
+export const isBankHoliday = (event: { impact: string; title: string }) => event.impact === 'holiday' && !/daylight saving/i.test(event.title);
 
 /** The day (00:00 to the next 00:00) of `now` in the user's time zone. */
 export function localDayBounds(now: Date, timeZone: string): SessionWindow {
@@ -61,6 +73,8 @@ export function marketSessions(now: Date, timeZone: string): SessionState[] {
     const next = all.find((w) => w.start > now)!;
     return {
       key: session.key,
+      zone: session.zone,
+      currency: session.currency,
       open: Boolean(openWindow),
       current: openWindow ?? next,
       today: all.filter((w) => w.end > day.start && w.start < day.end),

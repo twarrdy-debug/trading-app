@@ -1,4 +1,4 @@
-import type { Direction, Language, MeasureUnit } from './enums.ts';
+import type { Direction, Language, MeasureUnit, TradeOutcome } from './enums.ts';
 
 export interface InstrumentSpec {
   measureUnit: MeasureUnit;
@@ -138,4 +138,41 @@ export function validatePriceSides(
     if ((tp - entry) * sign <= 0) warnings.push(m.tp(i + 1, direction === 'long'));
   });
   return warnings;
+}
+
+/** Results within this many R of zero count as breakeven: neither a win nor a loss. */
+export const BREAKEVEN_R = 0.1;
+
+/**
+ * Win, loss or breakeven of a closed trade (null while open). Breakeven is a result within
+ * ±BREAKEVEN_R; without a stop loss (no R) only a result of exactly zero.
+ */
+export function tradeOutcome(trade: { resultUnits?: number | null; rMultiple?: number | null }): TradeOutcome | null {
+  if (trade.resultUnits == null) return null;
+  if (trade.rMultiple != null && Math.abs(trade.rMultiple) <= BREAKEVEN_R) return 'breakeven';
+  return trade.resultUnits > 0 ? 'win' : trade.resultUnits < 0 ? 'loss' : 'breakeven';
+}
+
+export type ExitReason = 'tp' | 'sl' | 'be';
+
+/**
+ * How a closed trade ended, for badges: breakeven (BE, see tradeOutcome), at or beyond the take
+ * profit (TP), or at or beyond the stop loss (SL). Null for other manual exits and open trades.
+ */
+export function exitReason(trade: {
+  direction: 'long' | 'short';
+  exitPrice: number | null;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+  resultUnits?: number | null;
+  rMultiple?: number | null;
+}): ExitReason | null {
+  const { direction, exitPrice, stopLoss, takeProfit } = trade;
+  if (exitPrice == null) return null;
+  if (tradeOutcome(trade) === 'breakeven') return 'be';
+  const beyond = (level: number, favourable: boolean) =>
+    (direction === 'long') === favourable ? exitPrice >= level : exitPrice <= level;
+  if (takeProfit != null && beyond(takeProfit, true)) return 'tp';
+  if (stopLoss != null && beyond(stopLoss, false)) return 'sl';
+  return null;
 }

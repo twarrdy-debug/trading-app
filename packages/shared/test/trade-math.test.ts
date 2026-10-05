@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeTradeMetrics, detectDirection, formatDayLabel, marginQuote, notionalQuote, riskQuote, parseSignal, toLocalDate, type InstrumentSpec } from '../src/index.ts';
+import { computeTradeMetrics, detectDirection, exitReason, tradeOutcome, formatDayLabel, marginQuote, notionalQuote, riskQuote, parseSignal, toLocalDate, type InstrumentSpec } from '../src/index.ts';
 
 const XAUUSD: InstrumentSpec = { measureUnit: 'pip', unitSize: 0.1, unitValue: 10 };
 const NQ: InstrumentSpec = { measureUnit: 'tick', unitSize: 0.25, unitValue: 5 };
@@ -132,5 +132,38 @@ describe('risk and margin', () => {
     expect(notionalQuote(XAUUSD, 4400, 1)).toBe(440_000);
     expect(marginQuote(XAUUSD, 4400, 0.1, 100)).toBe(440);
     expect(marginQuote({ measureUnit: 'point', unitSize: 1, unitValue: 1 }, 19842, 1, 20)).toBe(992.1);
+  });
+});
+
+describe('exitReason', () => {
+  const long = { direction: 'long' as const, stopLoss: 4390, takeProfit: 4420 };
+  const short = { direction: 'short' as const, stopLoss: 4410, takeProfit: 4380 };
+
+  it('reads TP and SL on both sides', () => {
+    expect(exitReason({ ...long, exitPrice: 4420 })).toBe('tp');
+    expect(exitReason({ ...long, exitPrice: 4385 })).toBe('sl');
+    expect(exitReason({ ...short, exitPrice: 4375 })).toBe('tp');
+    expect(exitReason({ ...short, exitPrice: 4410 })).toBe('sl');
+  });
+
+  it('marks a zero result as breakeven and leaves manual exits and open trades unmarked', () => {
+    expect(exitReason({ ...long, exitPrice: 4400, resultUnits: 0 })).toBe('be');
+    expect(exitReason({ ...long, exitPrice: 4405, resultUnits: 50 })).toBeNull();
+    expect(exitReason({ ...long, exitPrice: null })).toBeNull();
+  });
+});
+
+describe('tradeOutcome', () => {
+  it('treats results within ±0.1R as breakeven', () => {
+    expect(tradeOutcome({ resultUnits: -3, rMultiple: -0.03 })).toBe('breakeven');
+    expect(tradeOutcome({ resultUnits: 10, rMultiple: 0.1 })).toBe('breakeven');
+    expect(tradeOutcome({ resultUnits: 11, rMultiple: 0.11 })).toBe('win');
+    expect(tradeOutcome({ resultUnits: -100, rMultiple: -1 })).toBe('loss');
+  });
+
+  it('needs exactly zero without a stop loss, and is null while open', () => {
+    expect(tradeOutcome({ resultUnits: 0, rMultiple: null })).toBe('breakeven');
+    expect(tradeOutcome({ resultUnits: 2, rMultiple: null })).toBe('win');
+    expect(tradeOutcome({ resultUnits: null })).toBeNull();
   });
 });

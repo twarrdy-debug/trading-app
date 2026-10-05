@@ -49,7 +49,8 @@ export async function findUsableInvite(db: DB, code: unknown, email: unknown) {
  * time zone the browser sent, when valid.
  */
 export async function finishSignUp(db: DB, userId: string, body: Record<string, unknown>, inviteMode: boolean) {
-  const patch: Partial<typeof users.$inferInsert> = {};
+  // A new sign-up starts with the introduction.
+  const patch: Partial<typeof users.$inferInsert> = { onboardedAt: null };
   if (typeof body.language === 'string' && (LANGUAGES as readonly string[]).includes(body.language)) {
     patch.language = body.language as (typeof LANGUAGES)[number];
   }

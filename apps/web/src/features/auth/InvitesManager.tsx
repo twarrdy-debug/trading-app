@@ -9,7 +9,7 @@ import { formatDateTime } from '../../lib/format.ts';
 
 type InviteRole = 'user' | 'vip' | 'educator';
 
-/** Admin: create invitation codes and copy their registration links. Plain buttons: it sits inside the settings form. */
+/** Admin: create invitation codes and copy their registration links (settings page). */
 export function InvitesManager({ timezone }: { timezone: string }) {
   const t = useT().invites;
   const { data: invites = [] } = useInvites(true);
@@ -50,13 +50,7 @@ export function InvitesManager({ timezone }: { timezone: string }) {
   };
 
   return (
-    <section className="flex flex-col gap-3 rounded-(--radius-control) bg-raised p-4" aria-labelledby="invites-title">
-      <div className="flex flex-col gap-1">
-        <h3 id="invites-title" className="m-0 text-sm font-bold">
-          {t.title}
-        </h3>
-        <span className="text-xs text-dim">{t.intro}</span>
-      </div>
+    <div className="flex flex-col gap-3">
       <Field label={t.email} help={t.emailHint}>
         <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="font-sans" />
       </Field>
@@ -83,7 +77,7 @@ export function InvitesManager({ timezone }: { timezone: string }) {
             const status = invite.usedBy ? t.used : expired ? t.expired : invite.expiresAt ? t.expires(formatDateTime(invite.expiresAt, timezone)) : '';
             const usable = !invite.usedBy && !expired;
             return (
-              <li key={invite.id} className="flex items-center gap-3 rounded-(--radius-control) bg-panel px-3.5 py-2.5">
+              <li key={invite.id} className="flex items-center gap-3 rounded-(--radius-control) bg-raised px-3.5 py-2.5">
                 <div className="flex min-w-0 grow flex-col">
                   <span className={`font-mono text-sm font-semibold ${usable ? '' : 'text-dim line-through'}`}>{invite.code}</span>
                   <span className="truncate text-[11px] text-dim">
@@ -103,6 +97,6 @@ export function InvitesManager({ timezone }: { timezone: string }) {
           })}
         </ul>
       )}
-    </section>
+    </div>
   );
 }

@@ -106,6 +106,27 @@
       "when": 1790772533063,
       "tag": "0014_accent_orange_or_mono",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1791194876445,
+      "tag": "0015_strategies",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791195490016,
+      "tag": "0016_favorite_instruments",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791201909500,
+      "tag": "0017_onboarding",
+      "breakpoints": true
     }
   ]
 }

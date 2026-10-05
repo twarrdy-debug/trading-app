@@ -1,6 +1,6 @@
 import { scaleLinear, scaleTime } from 'd3-scale';
-import { area, line } from 'd3-shape';
-import { useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
+import { area, curveMonotoneX, line } from 'd3-shape';
+import { useId, useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
 import { useT } from '../../i18n/index.tsx';
 import { formatAmount, formatNumber, formatShortDate } from '../../lib/format.ts';
 
@@ -49,14 +49,19 @@ export function EquityChart({
   height = 230,
   balance,
   levels = [],
+  polarity = false,
 }: {
   data: EquityPoint[];
   currency: string;
   height?: number;
   balance?: BalanceCurve | null;
   levels?: ChartLevel[];
+  /** Smooth line, green above the baseline and red below it, with a dashed baseline (dashboard). */
+  polarity?: boolean;
 }) {
   const t = useT().chart;
+  // useId contains characters that are not valid in url(#…).
+  const clipId = `eq${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   const [ref, width] = useWidth();
   const [hover, setHover] = useState<number | null>(null);
 
@@ -91,12 +96,26 @@ export function EquityChart({
   const innerH = height - MARGIN.top - MARGIN.bottom;
   const x = scaleTime().domain([dates[0]!, dates.at(-1)!]).range([0, innerW]);
 
-  const lineD = line<number>().x((_, i) => x(dates[i]!)).y((v) => y(v))(values) ?? '';
-  const areaD =
-    area<number>()
-      .x((_, i) => x(dates[i]!))
-      .y0(y(base))
-      .y1((v) => y(v))(values) ?? '';
+  const lineGen = line<number>().x((_, i) => x(dates[i]!)).y((v) => y(v));
+  const areaGen = area<number>()
+    .x((_, i) => x(dates[i]!))
+    .y0(y(base))
+    .y1((v) => y(v));
+  if (polarity) {
+    lineGen.curve(curveMonotoneX);
+    areaGen.curve(curveMonotoneX);
+  }
+  const lineD = lineGen(values) ?? '';
+  const areaD = areaGen(values) ?? '';
+  const baseY = y(base);
+  // With polarity the parts above and below the baseline are drawn separately, clipped at it.
+  const parts = polarity
+    ? [
+        { key: 'up', color: 'var(--buy)', clip: { y: -MARGIN.top, height: baseY + MARGIN.top } },
+        { key: 'down', color: 'var(--sell)', clip: { y: baseY, height: innerH - baseY + MARGIN.bottom } },
+      ]
+    : [{ key: 'all', color: 'var(--accent-ink)', clip: null }];
+  const lastColor = polarity ? (values.at(-1)! < base ? 'var(--sell)' : 'var(--buy)') : 'var(--accent-ink)';
 
   const onMove = (e: PointerEvent<SVGRectElement>) => {
     const box = e.currentTarget.getBoundingClientRect();
@@ -124,9 +143,9 @@ export function EquityChart({
                   x2={innerW}
                   y1={y(v)}
                   y2={y(v)}
-                  stroke={v === base ? 'var(--line)' : 'var(--grid)'}
+                  stroke={v === base ? (polarity ? 'var(--dim)' : 'var(--line)') : 'var(--grid)'}
                   strokeWidth={1}
-                  strokeDasharray={v === base ? undefined : '3 4'}
+                  strokeDasharray={v === base ? (polarity ? '4 4' : undefined) : '3 4'}
                 />
                 <text x={-10} y={y(v)} dy="0.32em" textAnchor="end" className="fill-dim font-mono text-[11px]">
                   {tickLabel(v)}
@@ -138,7 +157,22 @@ export function EquityChart({
                 {formatShortDate(d.toISOString().slice(0, 10))}
               </text>
             ))}
-            <path d={areaD} fill="var(--accent)" fillOpacity={0.16} />
+            {parts.map((part) =>
+              part.clip ? (
+                <clipPath key={part.key} id={`${clipId}-${part.key}`}>
+                  <rect x={-1} width={innerW + 2} y={part.clip.y} height={Math.max(0, part.clip.height)} />
+                </clipPath>
+              ) : null,
+            )}
+            {parts.map((part) => (
+              <path
+                key={part.key}
+                d={areaD}
+                fill={polarity ? part.color : 'var(--accent)'}
+                fillOpacity={polarity ? 0.12 : 0.16}
+                clipPath={part.clip ? `url(#${clipId}-${part.key})` : undefined}
+              />
+            ))}
             {levels.map((level) => (
               <g key={level.label}>
                 <line x1={0} x2={innerW} y1={y(level.value)} y2={y(level.value)} stroke={TONE[level.tone]} strokeWidth={1.2} strokeDasharray="6 4" />
@@ -147,12 +181,30 @@ export function EquityChart({
                 </text>
               </g>
             ))}
-            <path d={lineD} fill="none" stroke="var(--accent-ink)" strokeWidth={2.4} strokeLinejoin="round" strokeLinecap="round" />
-            <circle cx={x(dates[last]!)} cy={y(values[last]!)} r={4} fill="var(--accent-ink)" stroke="var(--panel)" strokeWidth={2} />
+            {parts.map((part) => (
+              <path
+                key={part.key}
+                d={lineD}
+                fill="none"
+                stroke={part.color}
+                strokeWidth={2.4}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                clipPath={part.clip ? `url(#${clipId}-${part.key})` : undefined}
+              />
+            ))}
+            <circle cx={x(dates[last]!)} cy={y(values[last]!)} r={4} fill={lastColor} stroke="var(--panel)" strokeWidth={2} />
             {active != null && (
               <>
                 <line x1={x(dates[active]!)} x2={x(dates[active]!)} y1={0} y2={innerH} stroke="var(--line)" strokeWidth={1} />
-                <circle cx={x(dates[active]!)} cy={y(values[active]!)} r={5} fill="var(--accent-ink)" stroke="var(--panel)" strokeWidth={2} />
+                <circle
+                  cx={x(dates[active]!)}
+                  cy={y(values[active]!)}
+                  r={5}
+                  fill={polarity ? (values[active]! < base ? 'var(--sell)' : 'var(--buy)') : 'var(--accent-ink)'}
+                  stroke="var(--panel)"
+                  strokeWidth={2}
+                />
               </>
             )}
             <rect width={innerW} height={innerH} fill="transparent" onPointerMove={onMove} onPointerLeave={() => setHover(null)} />

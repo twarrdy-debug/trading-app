@@ -97,6 +97,11 @@ export const users = pgTable('users', {
   lossAlertMode: lossAlertMode('loss_alert_mode').notNull().default('streak'),
   /** Words that highlight a news headline and raise an alert. */
   newsKeywords: text('news_keywords').array().notNull().default([]),
+  /**
+   * When the user finished the first-run introduction (currency, favourites, account, strategy).
+   * Null until then; existing users and users created outside sign-up count as done.
+   */
+  onboardedAt: timestamp('onboarded_at', { withTimezone: true }).defaultNow(),
   /** Better Auth: set once the address is confirmed (sign-up by invite counts as confirmed later). */
   emailVerified: boolean('email_verified').notNull().default(false),
   image: text('image'),
@@ -463,6 +468,54 @@ export const checklistItems = pgTable('checklist_items', {
   checked: boolean('checked').notNull().default(false),
   sortOrder: smallint('sort_order').notNull().default(0),
 });
+
+// --- Favourite instruments --------------------------------------------------
+
+/** Instruments a user trades most; every instrument list in the app shows them first. */
+export const favoriteInstruments = pgTable(
+  'favorite_instruments',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    instrumentId: uuid('instrument_id')
+      .notNull()
+      .references(() => instruments.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.instrumentId] })],
+);
+
+// --- Strategies ----------------------------------------------------------------
+
+/** A user's trading strategy: a name and the rules (strategy_rules) a chart must show for a valid entry. */
+export const strategies = pgTable(
+  'strategies',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    ...timestamps,
+  },
+  (t) => [index('strategies_user_idx').on(t.userId)],
+);
+
+/** One condition of a strategy ("sweep of the Asian high", "FVG on M5"), in the user's order. */
+export const strategyRules = pgTable(
+  'strategy_rules',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    strategyId: uuid('strategy_id')
+      .notNull()
+      .references(() => strategies.id, { onDelete: 'cascade' }),
+    label: text('label').notNull(),
+    sortOrder: smallint('sort_order').notNull().default(0),
+  },
+  (t) => [index('strategy_rules_strategy_idx').on(t.strategyId)],
+);
 
 /** Price history imported from CSV (TradingView/MT5), used for swing and equal high/low detection. */
 export const ohlcCandles = pgTable(
