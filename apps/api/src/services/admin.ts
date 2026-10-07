@@ -6,6 +6,7 @@ import { and, asc, count, desc, eq, gte, isNotNull, max, sql } from 'drizzle-orm
 import type { DB } from '../db/client.ts';
 import {
   authSessions,
+  authTwoFactors,
   economicEvents,
   instrumentCurrencies,
   instruments,
@@ -59,6 +60,7 @@ export async function listUsers(db: DB) {
       onboardedAt: users.onboardedAt,
       disabledAt: users.disabledAt,
       signupCode: users.signupCode,
+      twoFactorEnabled: users.twoFactorEnabled,
       trades: sql<number>`coalesce(${tradeCounts.n}, 0)`.mapWith(Number),
       lastTradeAt: tradeCounts.lastTradeAt,
       accounts: sql<number>`coalesce(${accountCounts.n}, 0)`.mapWith(Number),
@@ -109,6 +111,21 @@ export async function updateUser(db: DB, admin: CurrentUser, id: string, patch: 
 }
 
 /** Signs the user out on every device. */
+/**
+ * Turns off two-factor sign-in for a user who lost both the authenticator and the backup codes; they
+ * sign in with the password alone and can set it up again. Their sessions are ended as well.
+ */
+export async function resetTwoFactor(db: DB, admin: CurrentUser, id: string) {
+  if (id === admin.id) throw new HttpError(400, 'adminSelf');
+  await getUser(db, id);
+  await db.transaction(async (tx) => {
+    await tx.delete(authTwoFactors).where(eq(authTwoFactors.userId, id));
+    await tx.update(users).set({ twoFactorEnabled: false }).where(eq(users.id, id));
+    await tx.delete(authSessions).where(eq(authSessions.userId, id));
+  });
+  return { reset: true };
+}
+
 export async function revokeSessions(db: DB, id: string) {
   await getUser(db, id);
   const removed = await db.delete(authSessions).where(eq(authSessions.userId, id)).returning({ id: authSessions.id });

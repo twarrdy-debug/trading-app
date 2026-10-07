@@ -2,12 +2,32 @@
 # Same routing as the Vite dev server: /api/* goes to the API without the prefix, /files/* too,
 # and everything else is the built web app (client-side routes fall back to index.html).
 :8080 {
+	# A visitor who came over plain http (Cloudflare tells us in Cf-Visitor) goes to https first,
+	# so passwords and session cookies never travel unencrypted.
+	@plainHttp header Cf-Visitor *"scheme":"http"*
+	redir @plainHttp https://{host}{uri} 308
+
+	# Security headers on every response, the API included.
+	header {
+		# Only our own scripts, no inline ones (the theme script is /theme-init.js); styles may be
+		# inline because components set style attributes; screenshots preview as blob: URLs.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self'; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
+		Strict-Transport-Security "max-age=31536000"
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		-Server
+		-X-Powered-By
+	}
+
 	# The API: sessions, data, the live news stream (Caddy flushes text/event-stream right away).
 	handle_path /api/* {
 		reverse_proxy 127.0.0.1:3001
 	}
 
-	# Screenshots.
+	# Screenshots (the API only serves them to their owner).
 	handle /files/* {
 		reverse_proxy 127.0.0.1:3001
 	}

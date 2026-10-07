@@ -208,10 +208,13 @@ interface LinkedEvent {
   impact: (typeof economicEvents.$inferSelect)['impact'];
 }
 
+/** Only web links reach the client: the feed is outside data, and a `javascript:` link would run in the app. */
+const webLink = (url: string | null) => (url && /^https?:\/\//i.test(url) ? url : null);
+
 const toView = (row: NewsRow, event: LinkedEvent | null) => ({
   id: row.id,
   title: row.title,
-  url: row.url,
+  url: webLink(row.url),
   speaker: row.speaker,
   sourceName: row.sourceName,
   category: row.category,

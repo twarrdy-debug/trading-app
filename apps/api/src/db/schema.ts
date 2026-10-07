@@ -113,6 +113,8 @@ export const users = pgTable('users', {
   /** Better Auth: set once the address is confirmed (sign-up by invite counts as confirmed later). */
   emailVerified: boolean('email_verified').notNull().default(false),
   image: text('image'),
+  /** Better Auth two-factor plugin: sign-in also asks for a code from an authenticator app. */
+  twoFactorEnabled: boolean('two_factor_enabled').notNull().default(false),
   ...timestamps,
 });
 
@@ -167,6 +169,27 @@ export const authVerifications = pgTable(
     ...timestamps,
   },
   (t) => [index('auth_verifications_identifier_idx').on(t.identifier)],
+);
+
+/**
+ * Better Auth two-factor plugin: the authenticator (TOTP) secret and the backup codes, both stored
+ * encrypted with AUTH_SECRET. `verified` stays false until the first code confirms the setup.
+ */
+export const authTwoFactors = pgTable(
+  'auth_two_factors',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    secret: text('secret').notNull(),
+    backupCodes: text('backup_codes').notNull(),
+    verified: boolean('verified').notNull().default(true),
+    failedVerificationCount: integer('failed_verification_count').notNull().default(0),
+    lockedUntil: timestamp('locked_until', { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [index('auth_two_factors_user_idx').on(t.userId), index('auth_two_factors_secret_idx').on(t.secret)],
 );
 
 /** Invitations for invite-only registration (REGISTRATION=invite). */

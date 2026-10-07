@@ -13,6 +13,8 @@ export const toPublicUser = (u: CurrentUser, authenticated = true) => ({
   role: u.role,
   /** False until the first-run introduction is finished; the web app shows it before anything else. */
   onboarded: u.onboardedAt != null,
+  /** Two-factor sign-in (authenticator app) is on. */
+  twoFactorEnabled: u.twoFactorEnabled,
   settings: {
     accountCurrency: u.accountCurrency,
     theme: u.theme,

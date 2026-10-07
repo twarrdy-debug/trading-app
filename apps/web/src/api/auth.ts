@@ -22,8 +22,24 @@ async function authCall<T = unknown>(path: string, body: object): Promise<T> {
   return data as T;
 }
 
+/** The password was right, but the account has two-factor sign-in: a code is needed next. */
+export interface SignInResult {
+  twoFactorRedirect?: boolean;
+}
+
 export const authApi = {
-  signIn: (email: string, password: string) => authCall('/sign-in/email', { email, password }),
+  signIn: (email: string, password: string) => authCall<SignInResult>('/sign-in/email', { email, password }),
+  /**
+   * Second step of signing in, with a code from the authenticator app or a backup code. With
+   * `trustDevice` this browser skips the code for 30 days.
+   */
+  verifyTotp: (code: string, trustDevice: boolean) => authCall('/two-factor/verify-totp', { code, trustDevice }),
+  verifyBackupCode: (code: string, trustDevice: boolean) => authCall('/two-factor/verify-backup-code', { code, trustDevice }),
+  /** Starts the setup: the authenticator link (for the QR code) and the backup codes. On after the first code. */
+  enableTwoFactor: (password: string) => authCall<{ totpURI: string; backupCodes: string[] }>('/two-factor/enable', { password }),
+  disableTwoFactor: (password: string) => authCall('/two-factor/disable', { password }),
+  /** New backup codes; the old ones stop working. */
+  newBackupCodes: (password: string) => authCall<{ backupCodes: string[] }>('/two-factor/generate-backup-codes', { password }),
   signUp: (input: { name: string; email: string; password: string; inviteCode?: string; language: string; timezone: string }) =>
     authCall('/sign-up/email', input),
   signOut: () => authCall('/sign-out', {}),

@@ -422,10 +422,10 @@ export function useAdminUpdateUser() {
   });
 }
 
-export type AdminUserAction = 'revoke' | 'reset' | 'delete';
-export type AdminActionResult = { revoked?: number; sent?: boolean; emailConfigured?: boolean; deleted?: boolean };
+export type AdminUserAction = 'revoke' | 'reset' | 'twoFactor' | 'delete';
+export type AdminActionResult = { revoked?: number; sent?: boolean; emailConfigured?: boolean; deleted?: boolean; reset?: boolean };
 
-/** Sign out everywhere, e-mail a password reset link, or delete the account. */
+/** Sign out everywhere, e-mail a password reset link, turn off two-step sign-in, or delete the account. */
 export function useAdminUserAction() {
   const client = useQueryClient();
   return useMutation({
@@ -434,7 +434,9 @@ export function useAdminUserAction() {
         ? api<{ revoked: number }>(`/admin/users/${id}/sessions/revoke`, { method: 'POST' })
         : action === 'reset'
           ? api<{ sent: boolean; emailConfigured: boolean }>(`/admin/users/${id}/password-reset`, { method: 'POST' })
-          : api<{ deleted: boolean }>(`/admin/users/${id}`, { method: 'DELETE' }),
+          : action === 'twoFactor'
+            ? api<{ reset: boolean }>(`/admin/users/${id}/two-factor/reset`, { method: 'POST' })
+            : api<{ deleted: boolean }>(`/admin/users/${id}`, { method: 'DELETE' }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['admin'] }),
   });
 }

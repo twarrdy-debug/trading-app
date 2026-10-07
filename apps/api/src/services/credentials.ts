@@ -1,3 +1,4 @@
+import { passwordProblems } from '@trading/shared';
 import { hashPassword } from 'better-auth/crypto';
 import { and, eq } from 'drizzle-orm';
 import type { DB } from '../db/client.ts';
@@ -8,7 +9,10 @@ import { authAccounts, users } from '../db/schema.ts';
  * seeded admin that owns the data created before login existed. Optionally changes the e-mail.
  */
 export async function setLogin(db: DB, { user, email, password }: { user: string; email?: string; password: string }) {
-  if (password.length < 8) throw new Error('The password needs at least 8 characters');
+  const problems = passwordProblems(password);
+  if (problems.length > 0) {
+    throw new Error(`The password is too weak (${problems.join(', ')}): use 10+ characters with a lowercase and an uppercase letter and a special character`);
+  }
   const [row] = await db.select().from(users).where(eq(users.email, user.toLowerCase()));
   if (!row) throw new Error(`No user with the e-mail ${user}`);
   const login = (email ?? user).toLowerCase();

@@ -155,6 +155,13 @@
       "when": 1791235546683,
       "tag": "0021_trade_parts",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1791375494897,
+      "tag": "0022_two_factor",
+      "breakpoints": true
     }
   ]
 }

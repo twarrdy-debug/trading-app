@@ -5,6 +5,7 @@ import { strToU8, zipSync } from 'fflate';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp, type App } from '../src/app.ts';
 import { createDatabase, type Database } from '../src/db/client.ts';
+import { authTwoFactors } from '../src/db/schema.ts';
 import { seed } from '../src/db/seed-data.ts';
 import { loadEnv } from '../src/env.ts';
 import type { QuoteProvider, QuoteSource } from '../src/services/basis.ts';
@@ -237,6 +238,23 @@ describe('trading journal', () => {
     expect(upload.statusCode).toBe(201);
     const shot = upload.json();
     expect((await app.inject({ url: shot.url })).statusCode).toBe(200);
+    // Only the owner of the trade sees the file.
+    const stranger = (await post('/educators', { displayName: 'Stranger', email: 'stranger@example.com' })).json();
+    expect((await app.inject({ url: shot.url, headers: { 'x-user-id': stranger.id } })).statusCode).toBe(404);
+    expect((await app.inject({ url: '/files/..%2F..%2Fpackage.json' })).statusCode).toBe(404);
+
+    // The declared type is not trusted: an HTML page sent as image/png is refused.
+    const fake = await app.inject({
+      method: 'POST',
+      url: `/trades/${ids.goldTrade}/screenshots`,
+      payload: Buffer.concat([
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="chart.png"\r\nContent-Type: image/png\r\n\r\n`),
+        Buffer.from('<html><script>alert(1)</script></html>'),
+        Buffer.from(`\r\n--${boundary}--\r\n`),
+      ]),
+      headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+    });
+    expect(fake.statusCode).toBe(400);
 
     const del = await app.inject({ method: 'DELETE', url: `/trades/${ids.goldTrade}/screenshots/${shot.id}` });
     expect(del.statusCode).toBe(204);
@@ -1211,6 +1229,9 @@ describe('admin panel', () => {
     await app.inject({ method: 'PATCH', url: `/admin/users/${user.id}`, payload: { role: 'user' } });
     expect((await app.inject({ url: '/admin/users', headers })).statusCode).toBe(403);
     expect((await app.inject({ url: '/admin/stats', headers })).statusCode).toBe(403);
+    // A percent-encoded path reaches the same route and must not skip the check.
+    expect((await app.inject({ url: '/%61dmin/users', headers })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'PATCH', url: `/%61dmin/users/${me.id}`, payload: { role: 'user' }, headers })).statusCode).toBe(403);
 
     // The user's data shows in the list.
     await post('/trades', { instrumentId: ids.XAUUSD, direction: 'long', openedAt: '2025-06-02T08:00:00Z', entryPrice: 4000, positionSize: 0.1 }, headers);
@@ -1490,6 +1511,13 @@ describe('authentication', () => {
     };
   }
 
+  /** A fresh session cookie of the admin (signed in by an earlier test). */
+  async function ownerCookie() {
+    const res = await authApp.inject({ method: 'POST', url: '/auth/sign-in/email', headers: { origin }, payload: { email: 'owner@example.com', password: 'Owner-password-1!' } });
+    const set = res.headers['set-cookie'];
+    return (Array.isArray(set) ? set : [set!]).map((c) => c.split(';')[0]).join('; ');
+  }
+
   beforeAll(async () => {
     const env = loadEnv({ NODE_ENV: 'test', DATABASE_URL: 'memory://', UPLOAD_DIR: uploadDir, AUTH_DEV_BYPASS: 'false', REGISTRATION: 'invite' });
     authDb = createDatabase(env.DATABASE_URL);
@@ -1512,12 +1540,12 @@ describe('authentication', () => {
 
   it('lets the seeded admin sign in after a login is set, and invite a user', async () => {
     const { setLogin } = await import('../src/services/credentials.ts');
-    await setLogin(authDb.db, { user: 'admin@trading.local', email: 'owner@example.com', password: 'owner-password-1' });
+    await setLogin(authDb.db, { user: 'admin@trading.local', email: 'owner@example.com', password: 'Owner-password-1!' });
 
     const admin = browser();
     const bad = await admin('POST', '/auth/sign-in/email', { email: 'owner@example.com', password: 'wrong-password' });
     expect(bad.statusCode).toBe(401);
-    expect((await admin('POST', '/auth/sign-in/email', { email: 'owner@example.com', password: 'owner-password-1' })).statusCode).toBe(200);
+    expect((await admin('POST', '/auth/sign-in/email', { email: 'owner@example.com', password: 'Owner-password-1!' })).statusCode).toBe(200);
     const me = (await admin('GET', '/me')).json();
     expect(me).toMatchObject({ email: 'owner@example.com', role: 'admin', authenticated: true });
 
@@ -1525,14 +1553,14 @@ describe('authentication', () => {
     expect(invite.code).toMatch(/^[A-Z2-9]{10}$/);
 
     const newcomer = browser();
-    const without = await newcomer('POST', '/auth/sign-up/email', { name: 'Jan', email: 'jan@example.com', password: 'jan-password-1' });
+    const without = await newcomer('POST', '/auth/sign-up/email', { name: 'Jan', email: 'jan@example.com', password: 'Jan-password-1!' });
     expect(without.statusCode).toBe(400);
     expect(without.json().code).toBe('INVALID_INVITE');
 
     const signUp = await newcomer('POST', '/auth/sign-up/email', {
       name: 'Jan',
       email: 'jan@example.com',
-      password: 'jan-password-1',
+      password: 'Jan-password-1!',
       inviteCode: invite.code.toLowerCase(),
       language: 'en',
       timezone: 'Europe/London',
@@ -1554,7 +1582,7 @@ describe('authentication', () => {
     expect((await newcomer('GET', '/invites')).statusCode).toBe(403);
 
     // An invite works once.
-    const again = await browser()('POST', '/auth/sign-up/email', { name: 'Ola', email: 'ola@example.com', password: 'ola-password-1', inviteCode: invite.code });
+    const again = await browser()('POST', '/auth/sign-up/email', { name: 'Ola', email: 'ola@example.com', password: 'Ola-password-1!', inviteCode: invite.code });
     expect(again.json().code).toBe('INVALID_INVITE');
     expect((await admin('GET', '/invites')).json()[0]).toMatchObject({ code: invite.code, usedBy: expect.any(String) });
 
@@ -1564,7 +1592,7 @@ describe('authentication', () => {
 
   it('e-mails invitations bound to an address, and seeds no second admin', async () => {
     const admin = browser();
-    await admin('POST', '/auth/sign-in/email', { email: 'owner@example.com', password: 'owner-password-1' });
+    await admin('POST', '/auth/sign-in/email', { email: 'owner@example.com', password: 'Owner-password-1!' });
     const invite = (await admin('POST', '/invites', { email: 'Ewa@Example.com', role: 'user' })).json();
     expect(invite).toMatchObject({ email: 'ewa@example.com', emailed: true });
     const mail = sent.at(-1)!;
@@ -1584,7 +1612,7 @@ describe('authentication', () => {
 
   it('lets a whole group sign up with one shared code', async () => {
     const admin = browser();
-    await admin('POST', '/auth/sign-in/email', { email: 'owner@example.com', password: 'owner-password-1' });
+    await admin('POST', '/auth/sign-in/email', { email: 'owner@example.com', password: 'Owner-password-1!' });
     const group = await admin('POST', '/invites', { code: 'dixigroup26', multiUse: true, expiresInDays: null, role: 'user' });
     expect(group.statusCode).toBe(201);
     expect(group.json()).toMatchObject({ code: 'DIXIGROUP26', multiUse: true, expiresAt: null, useCount: 0 });
@@ -1594,7 +1622,7 @@ describe('authentication', () => {
 
     for (const name of ['Adam', 'Basia']) {
       const user = browser();
-      const res = await user('POST', '/auth/sign-up/email', { name, email: `${name.toLowerCase()}@group.example`, password: 'group-password-1', inviteCode: 'Dixigroup26' });
+      const res = await user('POST', '/auth/sign-up/email', { name, email: `${name.toLowerCase()}@group.example`, password: 'Group-password-1!', inviteCode: 'Dixigroup26' });
       expect(res.statusCode).toBe(200);
       expect((await user('GET', '/me')).json()).toMatchObject({ displayName: name, role: 'user', onboarded: false });
     }
@@ -1603,7 +1631,7 @@ describe('authentication', () => {
 
     // Deleting the code closes it.
     await admin('DELETE', `/invites/${stored.id}`);
-    const late = await browser()('POST', '/auth/sign-up/email', { name: 'Cezary', email: 'cezary@group.example', password: 'group-password-1', inviteCode: 'DIXIGROUP26' });
+    const late = await browser()('POST', '/auth/sign-up/email', { name: 'Cezary', email: 'cezary@group.example', password: 'Group-password-1!', inviteCode: 'DIXIGROUP26' });
     expect(late.json().code).toBe('INVALID_INVITE');
   });
 
@@ -1614,8 +1642,91 @@ describe('authentication', () => {
     expect(mail).toMatchObject({ to: 'jan@example.com', subject: 'Password reset' });
     const token = decodeURIComponent(mail.text.match(/token=([^\s]+)/)![1]!);
 
-    expect((await user('POST', '/auth/reset-password', { token, newPassword: 'jan-new-password' })).statusCode).toBe(200);
-    expect((await user('POST', '/auth/sign-in/email', { email: 'jan@example.com', password: 'jan-password-1' })).statusCode).toBe(401);
-    expect((await user('POST', '/auth/sign-in/email', { email: 'jan@example.com', password: 'jan-new-password' })).statusCode).toBe(200);
+    expect((await user('POST', '/auth/reset-password', { token, newPassword: 'Jan-new-password!' })).statusCode).toBe(200);
+    expect((await user('POST', '/auth/sign-in/email', { email: 'jan@example.com', password: 'Jan-password-1!' })).statusCode).toBe(401);
+    expect((await user('POST', '/auth/sign-in/email', { email: 'jan@example.com', password: 'Jan-new-password!' })).statusCode).toBe(200);
+  });
+
+  it('refuses weak passwords everywhere a password is set', async () => {
+    const user = browser();
+    const { code } = (await authApp.inject({ method: 'POST', url: '/invites', headers: { cookie: await ownerCookie() }, payload: {} })).json();
+    for (const weak of ['Short-1!', 'no-upper-case-1!', 'NO-LOWER-CASE-1!', 'NoSpecialChar1']) {
+      const res = await user('POST', '/auth/sign-up/email', { name: 'Weak', email: 'weak@example.com', password: weak, inviteCode: code });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().code).toBe('PASSWORD_TOO_WEAK');
+    }
+    expect((await user('POST', '/auth/sign-up/email', { name: 'Strong', email: 'weak@example.com', password: 'Zażółć gęślą!', inviteCode: code })).statusCode).toBe(200);
+    const change = await user('POST', '/auth/change-password', { currentPassword: 'Zażółć gęślą!', newPassword: 'weakweakweak' });
+    expect(change.json().code).toBe('PASSWORD_TOO_WEAK');
+    const { setLogin } = await import('../src/services/credentials.ts');
+    await expect(setLogin(authDb.db, { user: 'weak@example.com', password: 'password12' })).rejects.toThrow(/too weak/);
+  });
+
+  it('signs in with a second factor once it is turned on', async () => {
+    const { createOTP } = await import('@better-auth/utils/otp');
+    const { base32 } = await import('@better-auth/utils/base32');
+    const user = browser();
+    const { code } = (await authApp.inject({ method: 'POST', url: '/invites', headers: { cookie: await ownerCookie() }, payload: {} })).json();
+    const password = 'Second-factor-1!';
+    await user('POST', '/auth/sign-up/email', { name: 'Tfa', email: 'tfa@example.com', password, inviteCode: code });
+
+    // Turning it on needs the password and returns the authenticator link and backup codes.
+    expect((await user('POST', '/auth/two-factor/enable', { password: 'wrong-Password-1!' })).statusCode).toBe(400);
+    const enabled = (await user('POST', '/auth/two-factor/enable', { password })).json();
+    expect(enabled.totpURI).toMatch(/^otpauth:\/\/totp\//);
+    expect(enabled.backupCodes).toHaveLength(10);
+    // Not on until the first code confirms the setup.
+    expect((await user('GET', '/me')).json().twoFactorEnabled).toBe(false);
+    const secret = new TextDecoder().decode(base32.decode(new URL(enabled.totpURI).searchParams.get('secret')!));
+    const totp = () => createOTP(secret).totp();
+    expect((await user('POST', '/auth/two-factor/verify-totp', { code: await totp() })).statusCode).toBe(200);
+    expect((await user('GET', '/me')).json().twoFactorEnabled).toBe(true);
+    // Stored encrypted, never as given to the user.
+    const [row] = await authDb.db.select().from(authTwoFactors);
+    expect(row!.backupCodes).not.toContain(enabled.backupCodes[0]);
+
+    // The password alone no longer opens a session.
+    const phone = browser();
+    const first = await phone('POST', '/auth/sign-in/email', { email: 'tfa@example.com', password });
+    expect(first.json()).toMatchObject({ twoFactorRedirect: true });
+    expect((await phone('GET', '/me')).statusCode).toBe(401);
+    expect((await phone('POST', '/auth/two-factor/verify-totp', { code: '000000' })).statusCode).toBe(401);
+    expect((await phone('POST', '/auth/two-factor/verify-totp', { code: await totp() })).statusCode).toBe(200);
+    expect((await phone('GET', '/me')).statusCode).toBe(200);
+
+    // A backup code works once instead of the app.
+    const lost = browser();
+    await lost('POST', '/auth/sign-in/email', { email: 'tfa@example.com', password });
+    expect((await lost('POST', '/auth/two-factor/verify-backup-code', { code: enabled.backupCodes[0] })).statusCode).toBe(200);
+    expect((await lost('GET', '/me')).statusCode).toBe(200);
+    const again = browser();
+    await again('POST', '/auth/sign-in/email', { email: 'tfa@example.com', password });
+    expect((await again('POST', '/auth/two-factor/verify-backup-code', { code: enabled.backupCodes[0] })).statusCode).toBe(401);
+
+    // An admin can turn it off for someone who lost both.
+    const me = (await phone('GET', '/me')).json();
+    const reset = await authApp.inject({ method: 'POST', url: `/admin/users/${me.id}/two-factor/reset`, headers: { cookie: await ownerCookie() } });
+    expect(reset.statusCode).toBe(200);
+    expect((await phone('GET', '/me')).statusCode).toBe(401);
+    const plain = browser();
+    expect((await plain('POST', '/auth/sign-in/email', { email: 'tfa@example.com', password })).json().twoFactorRedirect).toBeUndefined();
+    expect((await plain('GET', '/me')).json().twoFactorEnabled).toBe(false);
+  });
+});
+
+describe('request limits', () => {
+  it('refuses floods per client and lowers the limit on costly routes', async () => {
+    const limited = await buildApp({ db: database.db, env: loadEnv({ NODE_ENV: 'test', DATABASE_URL: 'memory://', UPLOAD_DIR: uploadDir }), fx, quotes, calendar, news, logger: false, rateLimits: true });
+    try {
+      const refresh = (ip: string) => limited.inject({ method: 'POST', url: '/basis/refresh', headers: { 'cf-connecting-ip': ip } });
+      for (let i = 0; i < 3; i++) expect((await refresh('203.0.113.1')).statusCode).toBe(200);
+      const refused = await refresh('203.0.113.1');
+      expect(refused.statusCode).toBe(429);
+      expect(refused.json().error).toMatch(/Za dużo zapytań/);
+      // Another visitor has its own limit.
+      expect((await refresh('203.0.113.2')).statusCode).toBe(200);
+    } finally {
+      await limited.close();
+    }
   });
 });

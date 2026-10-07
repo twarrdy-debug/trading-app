@@ -39,6 +39,7 @@ export function AdminUsers({ me }: { me: PublicUser }) {
   };
   const run = (u: AdminUser, kind: AdminUserAction) => {
     if (kind === 'delete' && !window.confirm(t.confirmDelete(u.displayName, u.trades))) return;
+    if (kind === 'twoFactor' && !window.confirm(t.confirmTwoFactor(u.displayName))) return;
     action.mutate(
       { id: u.id, action: kind },
       {
@@ -51,7 +52,9 @@ export function AdminUsers({ me }: { me: PublicUser }) {
                   ? res.emailConfigured
                     ? t.done.reset(u.email ?? '')
                     : t.done.resetLog
-                  : t.done.delete(u.displayName),
+                  : kind === 'twoFactor'
+                    ? t.done.twoFactor(u.displayName)
+                    : t.done.delete(u.displayName),
             tone: 'ok',
           }),
         onError: fail,
@@ -127,7 +130,14 @@ export function AdminUsers({ me }: { me: PublicUser }) {
                     </td>
                     <td className="px-4 py-3 text-xs text-dim">{t.usage(u.trades, u.accounts, u.strategies)}</td>
                     <td className="px-4 py-3">
-                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold whitespace-nowrap ${statusTone}`}>{t.status[status]}</span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold whitespace-nowrap ${statusTone}`}>{t.status[status]}</span>
+                        {u.twoFactorEnabled && (
+                          <span title={t.twoFactorOn} className="rounded-full bg-chip px-2 py-1 text-[11px] font-bold text-dim">
+                            {t.twoFactorBadge}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       {!self && (
@@ -137,6 +147,7 @@ export function AdminUsers({ me }: { me: PublicUser }) {
                           items={[
                             { key: 'revoke', label: t.actions.revoke, disabled: u.activeSessions === 0, onSelect: () => run(u, 'revoke') },
                             { key: 'reset', label: t.actions.reset, disabled: !u.email, onSelect: () => run(u, 'reset') },
+                            { key: 'twoFactor', label: t.actions.twoFactor, disabled: !u.twoFactorEnabled, onSelect: () => run(u, 'twoFactor') },
                             { key: 'block', label: u.disabledAt ? t.actions.unblock : t.actions.block, onSelect: () => toggleBlock(u) },
                             { key: 'delete', label: t.actions.delete, danger: true, onSelect: () => run(u, 'delete') },
                           ]}

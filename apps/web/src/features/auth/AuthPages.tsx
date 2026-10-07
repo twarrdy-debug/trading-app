@@ -1,9 +1,10 @@
 import { LANGUAGES } from '@trading/shared';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useId, useState, type FormEvent, type ReactNode } from 'react';
 import { AuthError, authApi, useAuthConfig, useResetSession } from '../../api/auth.ts';
 import { Button } from '../../components/ui/Button.tsx';
 import { Field, Input } from '../../components/ui/Field.tsx';
+import { isStrongPassword, PasswordRules } from '../../components/ui/PasswordRules.tsx';
 import { useLanguage, useSetLanguage, useT } from '../../i18n/index.tsx';
 import { APP_NAME } from '../../layout/AppShell.tsx';
 
@@ -84,21 +85,44 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  /** The password was right and the account has 2FA: the code step is shown. */
+  const [secondStep, setSecondStep] = useState(false);
+
+  const finish = async () => {
+    await resetSession();
+    await navigate({ to: safeNext(query().get('next')) });
+  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setErrors([]);
     try {
-      await authApi.signIn(email.trim(), password);
-      await resetSession();
-      await navigate({ to: safeNext(query().get('next')) });
+      const result = await authApi.signIn(email.trim(), password);
+      if (result.twoFactorRedirect) {
+        setPassword('');
+        setSecondStep(true);
+      } else {
+        await finish();
+      }
     } catch (err) {
       setErrors([errorText(err)]);
     } finally {
       setBusy(false);
     }
   };
+
+  if (secondStep) {
+    return (
+      <SecondFactor
+        onDone={finish}
+        onRestart={() => {
+          setSecondStep(false);
+          setErrors([]);
+        }}
+      />
+    );
+  }
 
   return (
     <AuthLayout
@@ -137,6 +161,88 @@ export function LoginPage() {
   );
 }
 
+/** Second step of signing in: a code from the authenticator app, or a backup code. */
+function SecondFactor({ onDone, onRestart }: { onDone: () => Promise<void>; onRestart: () => void }) {
+  const t = useT().auth;
+  const errorText = useErrorText();
+  const [backup, setBackup] = useState(false);
+  const [code, setCode] = useState('');
+  const [trust, setTrust] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setErrors([]);
+    try {
+      if (backup) await authApi.verifyBackupCode(code.trim(), trust);
+      else await authApi.verifyTotp(code.replace(/\s/g, ''), trust);
+      await onDone();
+    } catch (err) {
+      const text = errorText(err);
+      // The pending sign-in expired or was locked: start again from the password.
+      if (err instanceof AuthError && ['INVALID_TWO_FACTOR_COOKIE', 'TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE'].includes(err.code)) onRestart();
+      setErrors([text]);
+      setCode('');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AuthLayout
+      title={t.tfaTitle}
+      footer={
+        <button type="button" onClick={onRestart} className={linkClass}>
+          {t.backToSignIn}
+        </button>
+      }
+    >
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <p className="m-0 text-sm text-dim">{backup ? t.tfaBackupIntro : t.tfaIntro}</p>
+        <Field label={backup ? t.backupCode : t.tfaCode}>
+          {backup ? (
+            <Input key="backup" autoComplete="off" autoFocus value={code} onChange={(e) => setCode(e.target.value)} required maxLength={24} spellCheck={false} />
+          ) : (
+            <Input
+              key="totp"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              autoFocus
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              required
+              pattern="\d{6}"
+              className="text-center text-xl tracking-[0.4em]"
+            />
+          )}
+        </Field>
+        <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+          <input type="checkbox" checked={trust} onChange={(e) => setTrust(e.target.checked)} className="mt-0.5 size-4 accent-(--accent)" />
+          <span>{t.trustDevice}</span>
+        </label>
+        <Errors lines={errors} />
+        <Button type="submit" variant="primary" size="lg" disabled={busy || (!backup && code.length !== 6)}>
+          {busy ? t.verifying : t.verify}
+        </Button>
+        <button
+          type="button"
+          onClick={() => {
+            setBackup(!backup);
+            setCode('');
+            setErrors([]);
+          }}
+          className={`${linkClass} self-center text-[13px]`}
+        >
+          {backup ? t.useApp : t.useBackup}
+        </button>
+        {backup && <p className="m-0 text-center text-xs text-dim">{t.lostBoth}</p>}
+      </form>
+    </AuthLayout>
+  );
+}
+
 export function RegisterPage() {
   const t = useT().auth;
   const language = useLanguage();
@@ -150,9 +256,11 @@ export function RegisterPage() {
   const [inviteCode, setInviteCode] = useState(() => query().get('kod') ?? '');
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const rulesId = useId();
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!isStrongPassword(password)) return setErrors([t.weakPassword]);
     setBusy(true);
     setErrors([]);
     try {
@@ -204,9 +312,10 @@ export function RegisterPage() {
         <Field label={t.email}>
           <Input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="font-sans" />
         </Field>
-        <Field label={t.password} hint={t.passwordHint}>
-          <Input type="password" autoComplete="new-password" minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <Field label={t.password}>
+          <Input type="password" autoComplete="new-password" aria-describedby={rulesId} value={password} onChange={(e) => setPassword(e.target.value)} required maxLength={128} />
         </Field>
+        <PasswordRules password={password} id={rulesId} />
         <Errors lines={errors} />
         <Button type="submit" variant="primary" size="lg" disabled={busy}>
           {busy ? t.signingUp : t.signUp}
@@ -275,9 +384,11 @@ export function ResetPasswordPage() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const rulesId = useId();
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!isStrongPassword(password)) return setErrors([t.weakPassword]);
     setBusy(true);
     setErrors([]);
     try {
@@ -307,9 +418,10 @@ export function ResetPasswordPage() {
         </p>
       ) : (
         <form onSubmit={submit} className="flex flex-col gap-4">
-          <Field label={t.newPassword} hint={t.passwordHint}>
-            <Input type="password" autoComplete="new-password" minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <Field label={t.newPassword}>
+            <Input type="password" autoComplete="new-password" aria-describedby={rulesId} value={password} onChange={(e) => setPassword(e.target.value)} required maxLength={128} />
           </Field>
+          <PasswordRules password={password} id={rulesId} />
           <Errors lines={errors} />
           <Button type="submit" variant="primary" size="lg" disabled={busy}>
             {t.savePassword}

@@ -20,6 +20,10 @@
   --radius: 18px;
   --radius-control: 12px;
   --radius-chip: 10px;
+
+  /* QR codes stay dark on light in both themes: phone cameras read that most reliably. */
+  --qr-paper: #ffffff;
+  --qr-ink: #000000;
 }
 
 :root[data-theme='light'] {

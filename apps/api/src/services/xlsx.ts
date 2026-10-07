@@ -18,12 +18,24 @@ function columnIndex(ref: string): number {
 }
 
 /**
+ * Most the read parts may take once unpacked. An MT5 report of years of trades is a few MB; a tiny
+ * archive that unpacks to gigabytes (a "zip bomb") would otherwise exhaust the server's memory.
+ */
+export const MAX_UNPACKED_BYTES = 64 * 1024 * 1024;
+
+/**
  * Cell texts of every worksheet in an .xlsx file, row by row, with empty cells kept in place.
  * Enough for reading exported reports; formulas and styles are ignored.
  */
 export function xlsxRows(bytes: Uint8Array): string[][] {
+  let unpacked = 0;
   const files = unzipSync(bytes, {
-    filter: (f) => f.name === 'xl/sharedStrings.xml' || /^xl\/worksheets\/sheet\d+\.xml$/.test(f.name),
+    filter: (f) => {
+      const wanted = f.name === 'xl/sharedStrings.xml' || /^xl\/worksheets\/sheet\d+\.xml$/.test(f.name);
+      // fflate unpacks each file into a buffer of its declared size, so the declared sizes bound the memory.
+      if (wanted && (unpacked += f.originalSize) > MAX_UNPACKED_BYTES) throw new Error('xlsx too large when unpacked');
+      return wanted;
+    },
   });
   const sharedXml = files['xl/sharedStrings.xml'];
   const shared = sharedXml ? [...strFromU8(sharedXml).matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g)].map((m) => runsText(m[1]!)) : [];

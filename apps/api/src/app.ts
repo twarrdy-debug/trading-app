@@ -2,10 +2,11 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
+import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
-import Fastify from 'fastify';
+import Fastify, { type FastifyRequest } from 'fastify';
 import {
   hasZodFastifySchemaValidationErrors,
   jsonSchemaTransform,
@@ -50,6 +51,7 @@ export async function buildApp({
   news = financialJuiceSource,
   mailer,
   logger = true,
+  rateLimits = env.NODE_ENV !== 'test',
 }: {
   db: DB;
   env: Env;
@@ -60,6 +62,8 @@ export async function buildApp({
   /** Defaults to SMTP_URL, or to writing e-mails to the log when it is not set. */
   mailer?: Mailer;
   logger?: boolean;
+  /** Request limits per client (off in tests unless a test turns them on). */
+  rateLimits?: boolean;
 }) {
   const app = Fastify({ logger }).withTypeProvider<ZodTypeProvider>();
   app.setValidatorCompiler(validatorCompiler);
@@ -101,9 +105,22 @@ export async function buildApp({
       .send({ error: status >= 500 ? t(language, 'serverError') : (error as Error).message });
   });
 
+  // Before everything else, so floods are refused before any database work. Per client IP: behind
+  // Cloudflare that is CF-Connecting-IP (Caddy and the tunnel would otherwise be the only client).
+  // Routes that cost more (outside requests, e-mails, file parsing) set a lower `config.rateLimit`.
+  if (rateLimits) {
+    await app.register(rateLimit, {
+      max: 300,
+      timeWindow: '1 minute',
+      keyGenerator: (req) => clientIp(req),
+      errorResponseBuilder: () => new HttpError(429, 'tooManyRequests'),
+    });
+  }
+
   await app.register(cors, { origin: env.CORS_ORIGIN.split(','), methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], credentials: true });
   await app.register(multipart, { limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 } });
-  await app.register(fastifyStatic, { root: uploadDir, prefix: '/files/', index: false });
+  // Screenshots are served by GET /files/:key (routes/trades.ts) to their owner only.
+  await app.register(fastifyStatic, { root: uploadDir, serve: false });
 
   await app.register(swagger, {
     openapi: { info: { title: 'Trading App API', version: '0.1.0' } },
@@ -130,6 +147,12 @@ export async function buildApp({
   await app.register(adminRoutes);
 
   return app;
+}
+
+/** The visitor's address: Cloudflare's header when the request came through the tunnel. */
+export function clientIp(req: FastifyRequest) {
+  const forwarded = req.headers['cf-connecting-ip'];
+  return typeof forwarded === 'string' && forwarded !== '' ? forwarded : req.ip;
 }
 
 export type App = Awaited<ReturnType<typeof buildApp>>;
