@@ -6,6 +6,7 @@ import {
   ROLE_KEYS,
   ASSET_CLASSES,
   DRAWDOWN_TYPES,
+  PART_RESULTS,
   LEVERAGE_OPTIONS,
   LOSS_ALERT_MODES,
   BIASES,
@@ -192,6 +193,23 @@ export const createEducatorSchema = z.object({
 
 // --- Trades ------------------------------------------------------------------
 
+export const MAX_TAKE_PROFITS = 5;
+export const MAX_PARTS = 10;
+
+/**
+ * One part of a position: its size, its own take profit and stop loss, and how it ended. `price`
+ * is needed only for `manual`; `tp` closes at the part's take profit, `sl` at its stop loss, `be` at
+ * the entry; `open` is not closed yet.
+ */
+export const tradePartSchema = z.object({
+  size: z.number().positive(),
+  takeProfit: price.nullable().optional(),
+  stopLoss: price.nullable().optional(),
+  result: z.enum(PART_RESULTS),
+  price: price.optional(),
+  closedAt: isoDateTime.nullable().optional(),
+});
+
 const tradeFields = z.object({
   instrumentId: z.uuid(),
   direction: z.enum(DIRECTIONS),
@@ -217,6 +235,17 @@ const tradeFields = z.object({
   /** Trading account the trade belongs to; required (older trades may still have none). */
   accountId: z.uuid({ error: 'validation.accountRequired' }),
   emotionKeys: z.array(z.string()).max(20).default([]),
+  /** Planned take profits TP1..TPn; `takeProfit` alone (older clients) means TP1 only. */
+  takeProfits: z.array(price).max(MAX_TAKE_PROFITS).optional(),
+  /**
+   * The position in parts (a single part when it is not closed in parts). Their sizes may not add
+   * up to more than the position. Without `parts`, `exitPrice` (older clients, MT5 import) closes
+   * the whole position at once.
+   */
+  parts: z.array(tradePartSchema).max(MAX_PARTS).optional(),
+  strategyId: z.uuid().nullable().optional(),
+  /** Rules of the strategy seen on the chart at entry. */
+  checkedRuleIds: z.array(z.uuid()).max(50).optional(),
 });
 
 export const createTradeSchema = tradeFields.superRefine((t, ctx) => {
@@ -427,6 +456,7 @@ export type CreateInstrumentInput = z.infer<typeof createInstrumentSchema>;
 export type UpdateInstrumentInput = z.infer<typeof updateInstrumentSchema>;
 export type AdminUpdateUserInput = z.infer<typeof adminUpdateUserSchema>;
 export type CreateTradeInput = z.infer<typeof createTradeSchema>;
+export type TradePartInput = z.infer<typeof tradePartSchema>;
 export type CreateStrategyInput = z.input<typeof createStrategySchema>;
 export type UpdateStrategyInput = z.infer<typeof updateStrategySchema>;
 export type CreateAccountInput = z.infer<typeof createAccountSchema>;

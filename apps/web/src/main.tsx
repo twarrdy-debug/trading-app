@@ -15,6 +15,7 @@ import { AdminPage } from './features/admin/AdminPage.tsx';
 import { AnalysisPage } from './features/analysis/AnalysisPage.tsx';
 import { DashboardPage } from './features/dashboard/DashboardPage.tsx';
 import { LandingPage } from './features/landing/LandingPage.tsx';
+import { TradesPage } from './features/trades/TradesPage.tsx';
 import { AppShell, ComingSoon } from './layout/AppShell.tsx';
 import './styles.css';
 
@@ -32,6 +33,7 @@ const routeTree = rootRoute.addChildren([
   appRoute.addChildren([
     createRoute({ getParentRoute: () => appRoute, path: '/', component: DashboardPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/dziennik', component: JournalPage }),
+    createRoute({ getParentRoute: () => appRoute, path: '/transakcje', component: TradesPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/statystyki', component: StatsPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/kalkulator', component: CalculatorPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/analiza', component: AnalysisPage }),

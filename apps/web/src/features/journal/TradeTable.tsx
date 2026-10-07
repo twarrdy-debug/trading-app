@@ -8,6 +8,8 @@ import { useT } from '../../i18n/index.tsx';
 import { currentLocale, formatAmount, formatNumber, formatPrice, formatUnits } from '../../lib/format.ts';
 import { InstrumentBadge } from '../../components/ui/InstrumentBadge.tsx';
 import { instrumentOptions } from '../../lib/instruments.ts';
+import { DateTimePicker } from '../../components/ui/DateTimePicker.tsx';
+import { Fragment, type ReactNode } from 'react';
 
 export function TradeFilters({
   value,
@@ -52,10 +54,10 @@ export function TradeFilters({
         />
       </Field>
       <Field label={t.dateFrom}>
-        <Input type="date" value={value.dateFrom ?? ''} onChange={(e) => set({ dateFrom: e.target.value || undefined })} />
+        <DateTimePicker mode="date" clearable value={value.dateFrom ?? ''} onChange={(v) => set({ dateFrom: v || undefined })} />
       </Field>
       <Field label={t.dateTo}>
-        <Input type="date" value={value.dateTo ?? ''} onChange={(e) => set({ dateTo: e.target.value || undefined })} />
+        <DateTimePicker mode="date" clearable value={value.dateTo ?? ''} onChange={(v) => set({ dateTo: v || undefined })} />
       </Field>
       <Field label={t.priceRange}>
         <div className="flex gap-1">
@@ -100,6 +102,13 @@ function RedNewsMark({ trade }: { trade: Trade }) {
 }
 
 type Outcome = 'tp' | 'sl' | 'be' | 'win' | 'loss' | 'open';
+
+/** An average exit price shown with one decimal more than the trade's own prices (not 4004,901961). */
+const roundLike = (price: number, prices: (number | null | undefined)[]) => {
+  const digits = Math.max(0, ...prices.map((p) => (p == null ? 0 : (String(p).split('.')[1] ?? '').length))) + 1;
+  const factor = 10 ** Math.min(digits, 6);
+  return Math.round(price * factor) / factor;
+};
 
 /** The badge in the result column: TP/SL/BE from the exit, otherwise the plain outcome. */
 export function rowOutcome(trade: Trade): Outcome {
@@ -180,6 +189,7 @@ export function TradeTable({
   timezone,
   selectedId,
   onSelect,
+  renderDetail,
 }: {
   trades: Trade[];
   /** The user's accounts; with any, an account column is shown. */
@@ -187,6 +197,8 @@ export function TradeTable({
   timezone: string;
   selectedId: string | null;
   onSelect: (trade: Trade) => void;
+  /** Shown in a full-width row under the selected trade (its editor). */
+  renderDetail?: (trade: Trade) => ReactNode;
 }) {
   const all = useT();
   const labels = all.table;
@@ -213,6 +225,8 @@ export function TradeTable({
             <HeaderCell help={labels.riskPctHelp}>{labels.riskPct}</HeaderCell>
             <HeaderCell help={labels.rrHelp}>{labels.rr}</HeaderCell>
             <HeaderCell help={labels.outcomeHelp}>{labels.outcome}</HeaderCell>
+            <HeaderCell>{labels.session}</HeaderCell>
+            <HeaderCell>{labels.strategy}</HeaderCell>
           </tr>
         </thead>
         <tbody>
@@ -223,9 +237,11 @@ export function TradeTable({
             const sameDay = closed != null && dateFormat.format(closed) === dateFormat.format(opened);
             const account = accounts.find((a) => a.id === t.accountId);
             const selected = t.id === selectedId;
+            // Results of the parts ("TP + BE"); a trade counts once everywhere else.
+            const exitsLabel = t.parts.map((p) => (p.result === 'manual' ? labels.manualExit : p.result === 'open' ? all.composer.results.open : p.result.toUpperCase())).join(' + ');
             return (
+              <Fragment key={t.id}>
               <tr
-                key={t.id}
                 onClick={() => onSelect(t)}
                 className={`cursor-pointer border-b border-line transition last:border-b-0 hover:brightness-110 ${ROW_TONE[outcome]} ${
                   selected ? 'outline-2 -outline-offset-2 outline-accent-ink' : ''
@@ -283,7 +299,7 @@ export function TradeTable({
                   <div className="flex flex-col items-start gap-1">
                     <InstrumentBadge symbol={t.instrument.symbol} />
                     <span className="flex items-center gap-1.5 text-[11px] whitespace-nowrap text-dim">
-                      {formatPrice(t.entryPrice)} → {t.exitPrice == null ? '…' : formatPrice(t.exitPrice)}
+                      {formatPrice(t.entryPrice)} → {t.exitPrice == null ? '…' : formatPrice(roundLike(t.exitPrice, [t.entryPrice, t.stopLoss, ...t.takeProfits]))}
                       {t.redNews.length > 0 && <RedNewsMark trade={t} />}
                     </span>
                   </div>
@@ -318,9 +334,39 @@ export function TradeTable({
                   </div>
                 </td>
                 <td className="px-3 py-3">
-                  <OutcomeBadge outcome={outcome} />
+                  <div className="flex flex-col items-start gap-1">
+                    {t.partial ? (
+                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 font-sans text-[11px] font-bold whitespace-nowrap ${BADGE.open}`}>
+                        {labels.partial(formatNumber(t.closedSize), formatNumber(t.positionSize))}
+                      </span>
+                    ) : (
+                      <OutcomeBadge outcome={outcome} />
+                    )}
+                    {t.parts.length > 1 && <span className="font-sans text-[11px] whitespace-nowrap text-dim">{exitsLabel}</span>}
+                  </div>
+                </td>
+                <td className="px-3 py-3 font-sans text-xs whitespace-nowrap">{all.tradeSessions[t.session] ?? t.session}</td>
+                <td className="px-3 py-3 font-sans text-xs">
+                  {t.strategy ? (
+                    <div className="flex flex-col">
+                      <span className="max-w-36 truncate font-semibold">{t.strategy.name}</span>
+                      {t.ruleCheck && t.ruleCheck.total > 0 && (
+                        <span className={t.ruleCheck.checked === t.ruleCheck.total ? 'text-buy' : 'text-warn'}>{all.composer.rulesKept(t.ruleCheck.checked, t.ruleCheck.total)}</span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-dim">—</span>
+                  )}
                 </td>
               </tr>
+              {selected && renderDetail && (
+                <tr className="border-b border-line bg-panel">
+                  <td colSpan={20} className="p-0">
+                    <div className="sticky left-0 w-[min(100%,calc(100vw-4rem))] p-5 font-sans">{renderDetail(t)}</div>
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             );
           })}
         </tbody>

@@ -141,6 +141,20 @@
       "when": 1791216234401,
       "tag": "0019_admin_users",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791232891584,
+      "tag": "0020_trade_exits",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1791235546683,
+      "tag": "0021_trade_parts",
+      "breakpoints": true
     }
   ]
 }

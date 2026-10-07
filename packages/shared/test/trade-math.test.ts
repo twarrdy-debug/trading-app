@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeTradeMetrics, detectDirection, exitReason, tradeOutcome, formatDayLabel, marginQuote, notionalQuote, riskQuote, parseSignal, toLocalDate, type InstrumentSpec } from '../src/index.ts';
+import { computeTradeMetrics, detectDirection, exitReason, tradeOutcome, formatDayLabel, marginQuote, notionalQuote, riskQuote, parseSignal, sizeForRisk, toLocalDate, type InstrumentSpec } from '../src/index.ts';
 
 const XAUUSD: InstrumentSpec = { measureUnit: 'pip', unitSize: 0.1, unitValue: 10 };
 const NQ: InstrumentSpec = { measureUnit: 'tick', unitSize: 0.25, unitValue: 5 };
@@ -165,5 +165,17 @@ describe('tradeOutcome', () => {
     expect(tradeOutcome({ resultUnits: 0, rMultiple: null })).toBe('breakeven');
     expect(tradeOutcome({ resultUnits: 2, rMultiple: null })).toBe('win');
     expect(tradeOutcome({ resultUnits: null })).toBeNull();
+  });
+});
+
+describe('sizeForRisk', () => {
+  it('sizes the position from the money at risk, rounded down to the step', () => {
+    // XAUUSD: 50 pips to the stop, $10 per pip per lot: $500 risk = 1 lot, $333 = 0.66.
+    expect(sizeForRisk(XAUUSD, 4000, 3995, 500, 0.01)).toBe(1);
+    expect(sizeForRisk(XAUUSD, 4000, 3995, 333, 0.01)).toBe(0.66);
+    // NQ: 40 ticks ($200) per contract; $500 allows 2 whole contracts.
+    expect(sizeForRisk(NQ, 20000, 19990, 500, 1)).toBe(2);
+    expect(sizeForRisk(NQ, 20000, 19990, 100, 1)).toBeNull();
+    expect(sizeForRisk(XAUUSD, 4000, null, 500, 0.01)).toBeNull();
   });
 });

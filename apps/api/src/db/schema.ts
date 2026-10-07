@@ -17,6 +17,7 @@ import {
   LANGUAGES,
   ACCOUNT_TYPES,
   DRAWDOWN_TYPES,
+  PART_RESULTS,
   LOSS_ALERT_MODES,
   NEWS_CATEGORIES,
   type NewsData,
@@ -38,6 +39,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 
 export const roleKey = pgEnum('role_key', ROLE_KEYS);
@@ -59,6 +61,8 @@ export const language = pgEnum('language', LANGUAGES);
 export const accountType = pgEnum('account_type', ACCOUNT_TYPES);
 export const drawdownType = pgEnum('drawdown_type', DRAWDOWN_TYPES);
 export const lossAlertMode = pgEnum('loss_alert_mode', LOSS_ALERT_MODES);
+/** Named exit_kind for history; the values are the part results. */
+export const exitKind = pgEnum('exit_kind', PART_RESULTS);
 export const newsCategory = pgEnum('news_category', NEWS_CATEGORIES);
 
 // Prices and money are exact decimals, read back as JS numbers.
@@ -304,7 +308,10 @@ export const trades = pgTable(
     entryPrice: priceCol('entry_price').notNull(),
     exitPrice: priceCol('exit_price'),
     stopLoss: priceCol('stop_loss'),
+    /** TP1; kept equal to `takeProfits[0]` for older readers. */
     takeProfit: priceCol('take_profit'),
+    /** Planned take profit levels TP1..TPn, in order. */
+    takeProfits: numeric('take_profits', { precision: 18, scale: 6, mode: 'number' }).array().notNull().default([]),
     positionSize: numeric('position_size', { precision: 18, scale: 4, mode: 'number' }).notNull(),
     fees: moneyCol('fees'),
     fxRate: numeric('fx_rate', { precision: 18, scale: 8, mode: 'number' }),
@@ -329,6 +336,9 @@ export const trades = pgTable(
     accountId: uuid('account_id').references(() => tradingAccounts.id, { onDelete: 'set null' }),
     /** Position id on the trading platform for imported trades ("mt5:<account>:<position>"); prevents duplicates. */
     externalId: text('external_id'),
+    /** The strategy the trade followed (optional) and the rules seen on the chart at entry. */
+    strategyId: uuid('strategy_id').references((): AnyPgColumn => strategies.id, { onDelete: 'set null' }),
+    checkedRuleIds: uuid('checked_rule_ids').array().notNull().default([]),
     ...timestamps,
   },
   (t) => [
@@ -337,6 +347,37 @@ export const trades = pgTable(
     index('trades_account_idx').on(t.accountId),
     uniqueIndex('trades_user_external_idx').on(t.userId, t.externalId),
   ],
+);
+
+/**
+ * Parts of a position (the table keeps its first name, trade_exits). Each part has its own size,
+ * take profit and stop loss, and a result: closed at its TP or SL, at breakeven, at another price,
+ * or still open. The trade is closed once every part is; its `exitPrice` is then the size-weighted
+ * average and `closedAt` the last close. Trades saved before parts existed have none: their single
+ * `exitPrice` counts as one part closing the whole position.
+ */
+export const tradeExits = pgTable(
+  'trade_exits',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tradeId: uuid('trade_id')
+      .notNull()
+      .references(() => trades.id, { onDelete: 'cascade' }),
+    /** The part's result (tp, sl, be, manual, open). */
+    kind: exitKind('kind').notNull(),
+    /** Unused since parts carry their own take profit (from the first version of partial closes). */
+    tpIndex: smallint('tp_index'),
+    /** The part's planned levels; the stop defaults to the previous part's. */
+    takeProfit: priceCol('take_profit'),
+    stopLoss: priceCol('stop_loss'),
+    /** Close price; null while the part is open. */
+    price: priceCol('price'),
+    /** Lots or contracts closed. */
+    size: numeric('size', { precision: 18, scale: 4, mode: 'number' }).notNull(),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    sortOrder: smallint('sort_order').notNull().default(0),
+  },
+  (t) => [index('trade_exits_trade_idx').on(t.tradeId)],
 );
 
 export const emotions = pgTable('emotions', {

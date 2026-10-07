@@ -1,4 +1,5 @@
 import { toLocalDate, zonedTimeToUtc } from './dates.ts';
+import type { TradeSession } from './enums.ts';
 
 /**
  * The four FX trading sessions, each as local business hours in its own city, so daylight saving
@@ -80,4 +81,17 @@ export function marketSessions(now: Date, timeZone: string): SessionState[] {
       today: all.filter((w) => w.end > day.start && w.start < day.end),
     };
   });
+}
+
+/**
+ * The session a moment belongs to: London and New York together are the overlap; Sydney or Tokyo
+ * alone are Asia; nothing open (weekend, late New York evening) is `off`.
+ */
+export function tradeSession(at: Date): TradeSession {
+  const open = new Set(marketSessions(at, 'UTC').filter((s) => s.open).map((s) => s.key));
+  if (open.has('london') && open.has('newyork')) return 'overlap';
+  if (open.has('london')) return 'london';
+  if (open.has('newyork')) return 'newyork';
+  if (open.has('sydney') || open.has('tokyo')) return 'asia';
+  return 'off';
 }

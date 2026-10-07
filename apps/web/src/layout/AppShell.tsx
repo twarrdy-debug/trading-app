@@ -15,6 +15,7 @@ export const APP_NAME = '[NAZWA]';
 const NAV = [
   { to: '/', label: 'dashboard' },
   { to: '/dziennik', label: 'journal' },
+  { to: '/transakcje', label: 'trades' },
   { to: '/statystyki', label: 'stats' },
   { to: '/kalkulator', label: 'calculator' },
   { to: '/analiza', label: 'analysis' },
