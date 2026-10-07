@@ -49,7 +49,7 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
    * Creates an invitation. One bound to an address is also e-mailed there (in the admin's language);
    * the invite stays when sending fails, and `emailed` tells the client whether it went out.
    */
-  app.post('/invites', { schema: { tags: ['konto'], body: createInviteSchema } }, async (req, reply) => {
+  app.post('/invites', { schema: { tags: ['konto'], body: createInviteSchema }, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
     requireRole(req, 'admin');
     const invite = await createInvite(app.db, req.user, req.body);
     let emailed = false;

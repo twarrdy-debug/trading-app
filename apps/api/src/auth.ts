@@ -1,9 +1,11 @@
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, passwordProblems } from '@trading/shared';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
+import { twoFactor } from 'better-auth/plugins/two-factor';
 import { eq } from 'drizzle-orm';
 import type { DB } from './db/client.ts';
-import { authAccounts, authSessions, authVerifications, users } from './db/schema.ts';
+import { authAccounts, authSessions, authTwoFactors, authVerifications, users } from './db/schema.ts';
 import type { Env } from './env.ts';
 import { t } from './i18n.ts';
 import { findUsableInvite, finishSignUp } from './services/invites.ts';
@@ -13,7 +15,12 @@ import type { Mailer } from './services/mailer.ts';
  * Better Auth: e-mail + password accounts, cookie sessions and password reset, stored in our own
  * tables (`users` is the Better Auth user). Mounted under /auth (the web app calls /api/auth).
  * Registration follows REGISTRATION: with `invite`, sign-up needs `inviteCode` from an admin.
+ * Passwords follow `passwordProblems()` (shared/password.ts). Two-factor sign-in (authenticator app
+ * codes, with backup codes) is optional per user, under /auth/two-factor/*.
  */
+/** Endpoints that set a new password from `newPassword`. */
+const PASSWORD_PATHS = new Set(['/reset-password', '/change-password']);
+
 export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mailer }) {
   return betterAuth({
     appName: 'Trading journal',
@@ -21,7 +28,7 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
     basePath: '/auth',
     secret: env.AUTH_SECRET,
     trustedOrigins: [env.PUBLIC_URL, ...env.CORS_ORIGIN.split(',').map((o) => o.trim())],
-    database: drizzleAdapter(db, { provider: 'pg', schema: { users, authSessions, authAccounts, authVerifications } }),
+    database: drizzleAdapter(db, { provider: 'pg', schema: { users, authSessions, authAccounts, authVerifications, authTwoFactors } }),
     advanced: {
       database: { generateId: 'uuid' },
       cookiePrefix: 'tj',
@@ -39,8 +46,8 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
     verification: { modelName: 'authVerifications' },
     emailAndPassword: {
       enabled: true,
-      minPasswordLength: 8,
-      maxPasswordLength: 128,
+      minPasswordLength: PASSWORD_MIN_LENGTH,
+      maxPasswordLength: PASSWORD_MAX_LENGTH,
       autoSignIn: true,
       disableSignUp: env.REGISTRATION === 'closed',
       revokeSessionsOnPasswordReset: true,
@@ -66,8 +73,21 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
         '/request-password-reset': { window: 60, max: 3 },
       },
     },
+    plugins: [
+      twoFactor({
+        // The name the authenticator app shows next to the codes.
+        issuer: new URL(env.PUBLIC_URL).hostname,
+        twoFactorTable: 'authTwoFactors',
+        backupCodeOptions: { storeBackupCodes: 'encrypted' },
+      }),
+    ],
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        // Every way of setting a password must meet the policy; Better Auth itself only checks the length.
+        const password = ctx.path === '/sign-up/email' ? ctx.body?.password : PASSWORD_PATHS.has(ctx.path) ? ctx.body?.newPassword : undefined;
+        if (typeof password === 'string' && passwordProblems(password).length > 0) {
+          throw new APIError('BAD_REQUEST', { message: 'Password too weak', code: 'PASSWORD_TOO_WEAK' });
+        }
         // A blocked account cannot sign in (the API refuses it anyway; this gives a clear message).
         if (ctx.path === '/sign-in/email' && typeof ctx.body?.email === 'string') {
           const [row] = await db.select({ disabledAt: users.disabledAt }).from(users).where(eq(users.email, ctx.body.email.trim().toLowerCase()));

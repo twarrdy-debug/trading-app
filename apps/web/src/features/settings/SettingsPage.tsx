@@ -13,9 +13,12 @@ import { Link, useParams } from '@tanstack/react-router';
 import { useEffect, useId, useState, type FormEvent, type InputHTMLAttributes, type ReactNode } from 'react';
 import { AuthError, authApi } from '../../api/auth.ts';
 import { ApiError } from '../../api/client.ts';
+import { useQueryClient } from '@tanstack/react-query';
 import { useMe, useOnboarding, useUpdateSettings } from '../../api/hooks.ts';
 import { Button } from '../../components/ui/Button.tsx';
 import { FieldLabelContext, Input, Segmented, toggleClass } from '../../components/ui/Field.tsx';
+import { isStrongPassword, PasswordRules } from '../../components/ui/PasswordRules.tsx';
+import { QrCode } from '../../components/ui/QrCode.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
 import { DEFAULT_ACCENT } from '../../lib/theme.ts';
@@ -230,6 +233,7 @@ function ProfileSection({ user, save }: { user: PublicUser; save: Save }) {
         </Row>
       </Card>
       {user.authenticated && <PasswordCard />}
+      {user.authenticated && <TwoFactorCard enabled={user.twoFactorEnabled} />}
     </>
   );
 }
@@ -245,6 +249,7 @@ function PasswordCard() {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!isStrongPassword(next)) return setMessage({ ok: false, text: all.auth.weakPassword });
     setPending(true);
     setMessage(null);
     try {
@@ -277,14 +282,15 @@ function PasswordCard() {
           <Input
             type="password"
             autoComplete="new-password"
-            placeholder={`${t.newPassword} (${all.auth.passwordHint})`}
+            placeholder={t.newPassword}
             aria-label={t.newPassword}
+            aria-describedby={`${id}-rules`}
             value={next}
             onChange={(e) => setNext(e.target.value)}
-            minLength={8}
             maxLength={128}
             required
           />
+          {next && <PasswordRules password={next} id={`${id}-rules`} />}
           <Button type="submit" size="sm" variant="primary" disabled={pending} className="self-end">
             {t.changePassword}
           </Button>
@@ -296,6 +302,223 @@ function PasswordCard() {
         </Row>
       </form>
     </Card>
+  );
+}
+
+type TwoFactorStep =
+  | { kind: 'idle' }
+  | { kind: 'password'; action: 'enable' | 'disable' | 'codes' }
+  | { kind: 'setup'; totpURI: string; backupCodes: string[] }
+  | { kind: 'codes'; backupCodes: string[] };
+
+/**
+ * Two-step sign-in: turning it on (password → QR code for the authenticator app → first code →
+ * backup codes to save), turning it off, and replacing the backup codes. Each step asks for the
+ * password again, as Better Auth requires.
+ */
+function TwoFactorCard({ enabled }: { enabled: boolean }) {
+  const all = useT();
+  const t = all.settings.twoFactor;
+  const id = useId();
+  const client = useQueryClient();
+  const [step, setStep] = useState<TwoFactorStep>({ kind: 'idle' });
+  const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const fail = (err: unknown) => {
+    const key = err instanceof AuthError ? err.code : 'UNKNOWN';
+    setMessage({ ok: false, text: all.auth.errors[key] ?? all.auth.errors.UNKNOWN! });
+  };
+  const run = async (action: () => Promise<void>) => {
+    setPending(true);
+    setMessage(null);
+    try {
+      await action();
+    } catch (err) {
+      fail(err);
+    } finally {
+      setPending(false);
+    }
+  };
+  const reset = () => {
+    setStep({ kind: 'idle' });
+    setPassword('');
+    setCode('');
+  };
+  const refreshMe = () => client.invalidateQueries({ queryKey: ['me'] });
+
+  const submitPassword = (e: FormEvent) => {
+    e.preventDefault();
+    if (step.kind !== 'password') return;
+    void run(async () => {
+      if (step.action === 'enable') {
+        const result = await authApi.enableTwoFactor(password);
+        setStep({ kind: 'setup', ...result });
+      } else if (step.action === 'disable') {
+        await authApi.disableTwoFactor(password);
+        reset();
+        await refreshMe();
+        setMessage({ ok: true, text: t.disabled });
+      } else {
+        const result = await authApi.newBackupCodes(password);
+        setStep({ kind: 'codes', backupCodes: result.backupCodes });
+      }
+      setPassword('');
+    });
+  };
+
+  const confirmSetup = (e: FormEvent) => {
+    e.preventDefault();
+    if (step.kind !== 'setup') return;
+    void run(async () => {
+      await authApi.verifyTotp(code, false);
+      setCode('');
+      setStep({ kind: 'codes', backupCodes: step.backupCodes });
+      await refreshMe();
+      setMessage({ ok: true, text: t.enabled });
+    });
+  };
+
+  const secret = step.kind === 'setup' ? (new URL(step.totpURI).searchParams.get('secret') ?? '') : '';
+
+  return (
+    <Card>
+      <Row label={t.title} help={t.help}>
+        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${enabled ? 'bg-buy-soft text-buy' : 'bg-chip text-dim'}`}>{enabled ? t.on : t.off}</span>
+        {step.kind === 'idle' && (
+          <div className="flex flex-wrap gap-2 md:justify-end">
+            {enabled ? (
+              <>
+                <Button size="sm" onClick={() => setStep({ kind: 'password', action: 'codes' })}>
+                  {t.newCodes}
+                </Button>
+                <Button size="sm" onClick={() => setStep({ kind: 'password', action: 'disable' })}>
+                  {t.disable}
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" variant="primary" onClick={() => setStep({ kind: 'password', action: 'enable' })}>
+                {t.enable}
+              </Button>
+            )}
+          </div>
+        )}
+        {step.kind === 'password' && (
+          <form onSubmit={submitPassword} className="flex w-full flex-col gap-2">
+            <Input
+              type="password"
+              autoComplete="current-password"
+              autoFocus
+              placeholder={t.passwordPrompt}
+              aria-label={t.passwordPrompt}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+            <div className="flex justify-end gap-2">
+              <Button size="sm" onClick={reset}>
+                {t.cancel}
+              </Button>
+              <Button type="submit" size="sm" variant="primary" disabled={pending || !password}>
+                {step.action === 'enable' ? t.continue : step.action === 'disable' ? t.disable : t.newCodes}
+              </Button>
+            </div>
+          </form>
+        )}
+        {message && (
+          <span role={message.ok ? 'status' : 'alert'} className={`text-[13px] ${message.ok ? 'text-buy' : 'text-sell'}`}>
+            {message.text}
+          </span>
+        )}
+      </Row>
+
+      {step.kind === 'setup' && (
+        <form onSubmit={confirmSetup} className="flex flex-col gap-4 border-t border-line px-5 py-5 sm:flex-row sm:items-start">
+          <div className="shrink-0 self-center rounded-xl bg-(--qr-paper) p-2 sm:self-start">
+            <QrCode value={step.totpURI} label={t.qrLabel} />
+          </div>
+          <div className="flex min-w-0 flex-col gap-3">
+            <p className="m-0 text-sm">{t.scan}</p>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-dim">{t.manual}</span>
+              <code className="font-mono text-[13px] break-all select-all">{secret.match(/.{1,4}/g)?.join(' ')}</code>
+            </div>
+            <label htmlFor={`${id}-code`} className="text-sm font-semibold">
+              {t.confirmCode}
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <div className="w-40">
+                <Input
+                  id={`${id}-code`}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  pattern="\d{6}"
+                  required
+                  className="text-center text-lg tracking-[0.3em]"
+                />
+              </div>
+              <Button type="submit" variant="primary" disabled={pending || code.length !== 6}>
+                {t.confirm}
+              </Button>
+              <Button onClick={reset}>{t.cancel}</Button>
+            </div>
+          </div>
+        </form>
+      )}
+
+      {step.kind === 'codes' && <BackupCodes codes={step.backupCodes} onDone={reset} />}
+    </Card>
+  );
+}
+
+/** The backup codes, shown once: copy, download as a text file, then confirm they are saved. */
+function BackupCodes({ codes, onDone }: { codes: string[]; onDone: () => void }) {
+  const t = useT().settings.twoFactor;
+  const [copied, setCopied] = useState(false);
+  const text = `${t.fileHeader(window.location.host)}\n\n${codes.join('\n')}\n`;
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `kody-zapasowe-${window.location.host}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <div className="flex flex-col gap-3 border-t border-line px-5 py-5">
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-semibold">{t.backupTitle}</span>
+        <span className="text-xs text-dim">{t.backupHelp}</span>
+      </div>
+      <ul className="m-0 grid list-none grid-cols-2 gap-x-6 gap-y-1.5 rounded-(--radius-control) bg-chip p-4 font-mono text-sm sm:grid-cols-5">
+        {codes.map((c) => (
+          <li key={c}>{c}</li>
+        ))}
+      </ul>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          onClick={() =>
+            void navigator.clipboard.writeText(text).then(() => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
+            })
+          }
+        >
+          {copied ? t.copied : t.copy}
+        </Button>
+        <Button size="sm" onClick={download}>
+          {t.download}
+        </Button>
+        <Button size="sm" variant="primary" onClick={onDone} className="ml-auto">
+          {t.done}
+        </Button>
+      </div>
+    </div>
   );
 }
 

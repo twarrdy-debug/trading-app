@@ -17,8 +17,8 @@ declare module 'fastify' {
   }
 }
 
-/** Reachable without a session: health, API docs, screenshots, auth endpoints and their config. */
-const PUBLIC_PREFIXES = ['/health', '/docs', '/files/', '/auth/', '/auth-config'];
+/** Reachable without a session: health, API docs, auth endpoints and their config. */
+const PUBLIC_PREFIXES = ['/health', '/docs', '/auth/', '/auth-config'];
 
 /**
  * Resolves the acting user from the Better Auth session cookie. Without a session the request is
@@ -30,7 +30,10 @@ export const currentUserPlugin = fp(async (app) => {
   app.decorateRequest('authenticated', false);
 
   app.addHook('onRequest', async (req) => {
-    if (PUBLIC_PREFIXES.some((p) => req.url.startsWith(p))) return;
+    // By the matched route pattern, not the raw (possibly percent-encoded) URL; unknown paths need a
+    // session too, so they answer 401 rather than revealing which routes exist.
+    const route = req.routeOptions.url;
+    if (route && PUBLIC_PREFIXES.some((p) => route.startsWith(p))) return;
 
     const session = await app.auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
     let user: CurrentUser | undefined;

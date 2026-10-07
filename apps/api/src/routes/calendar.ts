@@ -12,7 +12,7 @@ export const calendarRoutes: FastifyPluginAsyncZod = async (app) => {
   );
 
   /** Fetches the Forex Factory week now (at most once every 10 minutes). */
-  app.post('/calendar/refresh', { schema: { tags } }, async (req) => {
+  app.post('/calendar/refresh', { schema: { tags }, config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req) => {
     const result = await refreshCalendar(app.db, app.calendar);
     if (result.status === 'updated') return result;
     const message =

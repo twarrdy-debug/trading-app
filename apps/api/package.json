@@ -19,6 +19,7 @@
     "@electric-sql/pglite": "^0.5.8",
     "@fastify/cors": "^11.3.0",
     "@fastify/multipart": "^10.1.2",
+    "@fastify/rate-limit": "^11.2.0",
     "@fastify/static": "^10.1.5",
     "@fastify/swagger": "^9.9.0",
     "@fastify/swagger-ui": "^6.1.1",
@@ -29,7 +30,7 @@
     "fastify-plugin": "^6.0.0",
     "fastify-type-provider-zod": "^7.0.0",
     "fflate": "^0.8.3",
-    "nodemailer": "^7.0.13",
+    "nodemailer": "^10.0.15",
     "postgres": "^3.4.9",
     "zod": "^4.6.5"
   },

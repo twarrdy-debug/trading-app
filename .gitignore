@@ -7,3 +7,6 @@ dist/
 
 # Personal Claude Code settings
 .claude/settings.local.json
+
+# Browser test output
+.playwright-mcp/

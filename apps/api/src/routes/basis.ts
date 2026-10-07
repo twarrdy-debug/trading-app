@@ -9,7 +9,7 @@ export const basisRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get('/basis', { schema: { tags } }, () => basisOverview(app.db));
 
   /** Measures all pairs now instead of waiting for the scheduler. */
-  app.post('/basis/refresh', { schema: { tags } }, async (req) => {
+  app.post('/basis/refresh', { schema: { tags }, config: { rateLimit: { max: 3, timeWindow: '1 minute' } } }, async (req) => {
     const results = await measureAll(app.db, app.quotes);
     const message = (r: (typeof results)[number]) =>
       r.status === 'saved'
