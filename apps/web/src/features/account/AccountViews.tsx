@@ -106,14 +106,16 @@ export function AccountPanel({ account, currency }: { account: AccountOverview; 
     <Panel
       title={account.name}
       actions={<span className="font-mono text-xs text-dim">{accountKind(all, account, currency)}</span>}
+      className="flex flex-col"
     >
       <div className="flex flex-col gap-4 px-5 pt-1 pb-5">
-        <div className="flex items-end justify-between gap-3">
+        {/* In a narrow card the result moves under the balance instead of breaking in two. */}
+        <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-1">
           <div className="flex flex-col gap-0.5">
             <span className="eyebrow">{t.balance}</span>
-            <span className="text-2xl font-bold tracking-tight tabular-nums">{money(account.balance)}</span>
+            <span className="text-2xl font-bold tracking-tight whitespace-nowrap tabular-nums">{money(account.balance)}</span>
           </div>
-          <span className={`font-mono text-sm ${account.pnl > 0 ? 'text-buy' : account.pnl < 0 ? 'text-sell' : 'text-dim'}`}>
+          <span className={`font-mono text-sm whitespace-nowrap ${account.pnl > 0 ? 'text-buy' : account.pnl < 0 ? 'text-sell' : 'text-dim'}`}>
             {money(account.pnl, true)} · {pct(account.returnPct, true)}
           </span>
         </div>

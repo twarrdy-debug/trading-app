@@ -16,8 +16,9 @@ export function Stat({
 }) {
   const color = tone === 'buy' ? 'text-buy' : tone === 'sell' ? 'text-sell' : 'text-ink';
   return (
-    <div className="card flex items-center gap-4 px-5 py-4">
-      {visual}
+    // A size container: in a narrow tile the visual (gauge) steps aside so the text keeps its lines.
+    <div className="card @container flex items-center gap-4 px-5 py-4">
+      {visual && <div className="hidden shrink-0 @[14rem]:block">{visual}</div>}
       <div className="flex min-w-0 flex-col gap-0.5">
         <span className="eyebrow">{label}</span>
         <span className={`text-[26px] leading-tight font-bold tracking-tight tabular-nums ${color}`}>{value}</span>

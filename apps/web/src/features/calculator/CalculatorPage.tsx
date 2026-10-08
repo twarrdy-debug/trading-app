@@ -12,7 +12,6 @@ import { useBasis, useInstruments, useRefreshBasis } from '../../api/hooks.ts';
 import { Button } from '../../components/ui/Button.tsx';
 import { Field, Input, Segmented } from '../../components/ui/Field.tsx';
 import { Panel } from '../../components/ui/Panel.tsx';
-import { Stat } from '../../components/ui/Stat.tsx';
 import { useLanguage, useT } from '../../i18n/index.tsx';
 import { currentLocale, formatAmount, formatMoney, formatNumber, formatPrice, parseDecimal } from '../../lib/format.ts';
 
@@ -230,8 +229,24 @@ export function CalculatorPage() {
     { value: 'futures' as const, label: SIDE_LABEL.futures },
   ];
 
+  const levelTiles = [
+    { key: 'entry' as const, label: t.entryIn, row: 'IN' },
+    { key: 'stopLoss' as const, label: all.form.stopLoss, row: 'SL' },
+    { key: 'tp1' as const, label: 'TP1', row: 'TP1' },
+    { key: 'tp2' as const, label: 'TP2', row: 'TP2' },
+  ];
+  const targetSymbol = target === 'cfd' ? PAIR.cfd : FUT;
+  const sourceSymbol = levelsSide === 'cfd' ? PAIR.cfd : FUT;
+  const history = [...(measured?.history ?? [])].sort((a, b) => a.measuredAt.localeCompare(b.measuredAt));
+
+  /** Swapping keeps the converted price, so the other market can be read back at once. */
+  const swap = () => {
+    setPriceSide(other(priceSide));
+    setPriceInput(priceOut == null ? '' : String(priceOut));
+  };
+
   return (
-    <main className="flex grow flex-col gap-5 p-4 md:px-8 md:py-6">
+    <main className="page">
       <div className="flex flex-wrap items-center gap-4">
         <h1 className="m-0 text-2xl font-bold tracking-tight">{t.title}</h1>
         <div className="grow" />
@@ -246,117 +261,94 @@ export function CalculatorPage() {
         {PAIR.cfd} ↔ {FUT} · <span className="font-sans">{t.miniMicro}</span>
       </p>
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
-        <Panel title={t.basisTitle(PAIR.mini, PAIR.cfd)} className="flex flex-col self-start">
-          <div className="flex flex-col gap-4 p-5">
-            <Segmented
-              label={t.basisMode}
-              value={basisMode}
-              onChange={(mode) => updateBasis({ mode })}
-              options={[
-                { value: 'auto', label: t.auto },
-                { value: 'prices', label: t.fromPrices },
-                { value: 'offset', label: t.manual },
-              ]}
-            />
+      {/* The difference between the markets: the figure and its history on the left, how it is set on the right. */}
+      <section aria-label={t.basisTitle(PAIR.mini, PAIR.cfd)} className="card grid grid-cols-1 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+        <div className="flex min-w-0 flex-col gap-3 p-5 sm:p-6">
+          <span className="eyebrow">{t.relative(FUT, PAIR.cfd)}</span>
+          {difference != null ? (
+            <span className="text-[40px] leading-none font-bold tracking-tight tabular-nums">
+              {formatNumber(difference, true)}{' '}
+              <span className="text-lg font-semibold text-dim">
+                {t.points}
+                {basis && basisMode !== 'offset' && ` · ${formatNumber((basis.futuresPrice / basis.cfdPrice - 1) * 100, true)}%`}
+              </span>
+            </span>
+          ) : (
+            <span className="text-sm text-dim">{basisMode === 'auto' ? t.noMeasurements : t.basisFirst}</span>
+          )}
+          {basisMode === 'auto' && measured?.alert ? (
+            <p role="alert" className="m-0 rounded-(--radius-control) bg-sell-soft px-3 py-2.5 text-[13px] font-medium text-sell">
+              {t.alert(formatNumber(measured.change, true), formatNumber(measured.alertPoints))}
+            </p>
+          ) : (
+            basisMode === 'auto' &&
+            measured?.change != null && <span className="font-mono text-xs text-dim">{t.change(formatNumber(measured.change, true), formatNumber(measured.alertPoints))}</span>
+          )}
+          {basisMode === 'auto' && history.length > 1 && (
+            <div className="flex grow flex-col gap-1.5">
+              <span className="eyebrow">{t.history}</span>
+              <BasisSparkline values={history.map((h) => h.difference)} label={history.map((h) => `${shortTime(h.measuredAt)}: ${formatNumber(h.difference, true)} ${t.points}${h.live ? '' : t.closedMark}`).join(', ')} />
+            </div>
+          )}
+        </div>
 
-            {basisMode === 'auto' && (
-              <div className="flex flex-col gap-3">
-                {!snapshot ? (
-                  <p className="m-0 text-[13px] text-dim">{t.noMeasurements}</p>
-                ) : (
-                  <>
-                    <dl className="m-0 grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-1 font-mono text-[13px]">
-                      <dt className="text-dim">{PAIR.cfd}</dt>
-                      <dd className="m-0 text-right">{formatMoney(snapshot.cfdPrice, false)}</dd>
-                      <dd className="m-0 text-right text-dim">{shortTime(snapshot.cfdQuotedAt)}</dd>
-                      <dt className="text-dim">{FUT}</dt>
-                      <dd className="m-0 text-right">{formatMoney(snapshot.futuresPrice, false)}</dd>
-                      <dd className="m-0 text-right text-dim">{shortTime(snapshot.futuresQuotedAt)}</dd>
-                    </dl>
-                    <span className={`text-xs ${snapshot.live ? 'text-dim' : 'text-accent-ink'}`}>
-                      {snapshot.live
-                        ? t.measuredAt(shortTime(snapshot.measuredAt), PAIR.cfd, t.reference[PAIR.key] ?? '')
-                        : t.marketClosed(PAIR.cfd, t.reference[PAIR.key] ?? '')}
-                    </span>
-                    {measured?.alert ? (
-                      <p role="alert" className="m-0 rounded-(--radius-control) bg-sell-soft p-3 text-[13px] text-sell">
-                        {t.alert(formatNumber(measured.change, true), formatNumber(measured.alertPoints))}
-                      </p>
-                    ) : (
-                      measured?.change != null && (
-                        <span className="font-mono text-xs text-dim">
-                          {t.change(formatNumber(measured.change, true), formatNumber(measured.alertPoints))}
-                        </span>
-                      )
-                    )}
-                    {measured && measured.history.length > 1 && (
-                      <details className="text-[13px]">
-                        <summary className="cursor-pointer text-dim">{t.history}</summary>
-                        <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0 font-mono text-xs">
-                          {measured.history.map((h) => (
-                            <li key={h.id} className="flex justify-between gap-3">
-                              <span className="text-dim">{shortTime(h.measuredAt)}</span>
-                              <span>
-                                {formatNumber(h.difference, true)} {t.points}
-                                {h.live ? '' : t.closedMark}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </details>
-                    )}
-                  </>
-                )}
-                <Button size="sm" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
-                  {refresh.isPending ? t.checking : t.checkNow}
-                </Button>
-                {refresh.data?.results
-                  .filter((r) => r.pairKey === PAIR.key && r.message)
-                  .map((r) => (
-                    <span key={r.pairKey} className="text-xs text-dim">
-                      {r.message}
-                    </span>
-                  ))}
-                <span className="text-xs text-dim">{t.autoInfo}</span>
+        <div className="flex min-w-0 flex-col gap-4 border-t border-line p-5 sm:p-6 lg:border-t-0 lg:border-l">
+          {basisMode === 'auto' && snapshot && (
+            <div className="flex flex-col gap-1.5">
+              <dl className="m-0 grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-1 font-mono text-[13px]">
+                <dt className="text-dim">{PAIR.cfd}</dt>
+                <dd className="m-0 text-right font-semibold">{formatMoney(snapshot.cfdPrice, false)}</dd>
+                <dd className="m-0 text-right text-dim">{shortTime(snapshot.cfdQuotedAt)}</dd>
+                <dt className="text-dim">{FUT}</dt>
+                <dd className="m-0 text-right font-semibold">{formatMoney(snapshot.futuresPrice, false)}</dd>
+                <dd className="m-0 text-right text-dim">{shortTime(snapshot.futuresQuotedAt)}</dd>
+              </dl>
+              <span className={`text-xs ${snapshot.live ? 'text-dim' : 'font-medium text-accent-ink'}`}>
+                {snapshot.live ? t.measuredAt(shortTime(snapshot.measuredAt), PAIR.cfd, t.reference[PAIR.key] ?? '') : t.marketClosed(PAIR.cfd, t.reference[PAIR.key] ?? '')}
+              </span>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2">
+            <span className="eyebrow">{t.source}</span>
+            <div>
+              <Segmented
+                label={t.basisMode}
+                value={basisMode}
+                onChange={(mode) => updateBasis({ mode })}
+                options={[
+                  { value: 'auto', label: t.auto },
+                  { value: 'prices', label: t.fromPrices },
+                  { value: 'offset', label: t.manual },
+                ]}
+              />
+            </div>
+          </div>
+
+          {basisMode === 'prices' && (
+            <div className="flex flex-col gap-2">
+              <span className="text-[13px] text-dim">{t.readBoth}</span>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label={t.priceNow(PAIR.cfd)}>
+                  <Input inputMode="decimal" value={cfdPrice} onChange={(e) => updateBasis({ cfd: e.target.value })} placeholder={t.example(examples.cfd)} />
+                </Field>
+                <Field label={t.priceNow(PAIR.mini)}>
+                  <Input inputMode="decimal" value={futuresPrice} onChange={(e) => updateBasis({ futures: e.target.value })} placeholder={t.example(examples.futures)} />
+                </Field>
               </div>
-            )}
+            </div>
+          )}
 
-            {basisMode === 'prices' && (
-              <>
-                <p className="m-0 text-[13px] text-dim">{t.readBoth}</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label={t.priceNow(PAIR.cfd)}>
-                    <Input inputMode="decimal" value={cfdPrice} onChange={(e) => updateBasis({ cfd: e.target.value })} placeholder={t.example(examples.cfd)} />
-                  </Field>
-                  <Field label={t.priceNow(PAIR.mini)}>
-                    <Input inputMode="decimal" value={futuresPrice} onChange={(e) => updateBasis({ futures: e.target.value })} placeholder={t.example(examples.futures)} />
-                  </Field>
-                </div>
-              </>
-            )}
+          {basisMode === 'offset' && (
+            <Field label={t.offsetLabel(PAIR.mini, PAIR.cfd)} hint={t.offsetHint(PAIR.mini)}>
+              <Input inputMode="decimal" value={offsetText} onChange={(e) => updateBasis({ offset: e.target.value })} placeholder={t.example(examples.offset)} />
+            </Field>
+          )}
 
-            {basisMode === 'offset' && (
-              <Field label={t.offsetLabel(PAIR.mini, PAIR.cfd)} hint={t.offsetHint(PAIR.mini)}>
-                <Input inputMode="decimal" value={offsetText} onChange={(e) => updateBasis({ offset: e.target.value })} placeholder={t.example(examples.offset)} />
-              </Field>
-            )}
-
-            {difference != null && (
-              <div className="flex items-baseline justify-between rounded-(--radius-control) bg-raised px-3.5 py-3 font-mono text-[13px]">
-                <span className="text-dim">
-                  {t.relative(PAIR.mini, PAIR.cfd)}
-                </span>
-                <span>
-                  {formatNumber(difference, true)} {t.points}
-                  {basis && basisMode !== 'offset' && ` · ${formatNumber((basis.futuresPrice / basis.cfdPrice - 1) * 100, true)}%`}
-                </span>
-              </div>
-            )}
-
-            {basisMode !== 'offset' && (
-              <div className="flex flex-col gap-2">
-                <span className="eyebrow">{t.method}</span>
+          {basisMode !== 'offset' && (
+            <div className="flex flex-col gap-2">
+              <span className="eyebrow">{t.method}</span>
+              <div>
                 <Segmented
                   label={t.methodAria}
                   value={method}
@@ -366,151 +358,152 @@ export function CalculatorPage() {
                     { value: 'ratio', label: t.methodRatio },
                   ]}
                 />
-                <span className="text-xs text-dim">
-                  {method === 'offset' ? t.offsetInfo : t.ratioInfo}
-                </span>
               </div>
-            )}
-          </div>
-        </Panel>
-
-        <div className="flex flex-col gap-5">
-          <Panel title={t.priceTitle} className="flex flex-col">
-            <div className="flex flex-col gap-4 p-5">
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="eyebrow">{t.typingPrice}</span>
-                <Segmented
-                  label={t.priceInstrument}
-                  value={priceSide}
-                  onChange={(side) => {
-                    setPriceSide(side);
-                    setPriceInput('');
-                  }}
-                  options={sideOptions}
-                />
-              </div>
-              <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
-                <Field label={t.priceOf(priceSide === 'cfd' ? PAIR.cfd : FUT)}>
-                  <Input
-                    inputMode="decimal"
-                    value={priceInput}
-                    onChange={(e) => setPriceInput(e.target.value)}
-                    placeholder={t.typePrice}
-                    className="h-16 text-2xl"
-                  />
-                </Field>
-                <span aria-hidden className="flex h-16 items-center justify-center px-2 text-2xl text-accent-ink">
-                  →
-                </span>
-                <div className="flex min-h-16 flex-col justify-center gap-1 rounded-(--radius-control) bg-raised px-4 py-2">
-                  <span className="eyebrow">{SIDE_LABEL[other(priceSide)]}</span>
-                  <output className="font-mono text-2xl font-semibold" aria-live="polite">
-                    {priceOut == null ? '—' : formatPrice(priceOut)}
-                  </output>
-                </div>
-              </div>
-              <span className="text-xs text-dim">
-                {ready
-                  ? t.rounding(FUT, formatNumber(tick), perContracts(tick), PAIR.cfd, formatNumber(0.01))
-                  : t.basisFirst}
-              </span>
+              <span className="text-xs text-dim">{method === 'offset' ? t.offsetInfo : t.ratioInfo}</span>
             </div>
-          </Panel>
+          )}
 
-          <Panel title={t.levelsTitle} className="flex flex-col">
-            <div className="flex flex-col gap-4 p-5">
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="eyebrow">{t.levelsIn}</span>
-                <Segmented label={t.levelsMarket} value={levelsSide} onChange={setLevelsSide} options={sideOptions} />
-              </div>
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                <Field label={t.entryIn}>
-                  <Input inputMode="decimal" value={levels.entry} onChange={setLevel('entry')} />
-                </Field>
-                <Field label={all.form.stopLoss}>
-                  <Input inputMode="decimal" value={levels.stopLoss} onChange={setLevel('stopLoss')} />
-                </Field>
-                <Field label="TP1">
-                  <Input inputMode="decimal" value={levels.tp1} onChange={setLevel('tp1')} />
-                </Field>
-                <Field label="TP2">
-                  <Input inputMode="decimal" value={levels.tp2} onChange={setLevel('tp2')} />
-                </Field>
-              </div>
-              {warnings.length > 0 && (
-                <ul className="m-0 list-none rounded-(--radius-control) bg-sell-soft p-3 text-[13px] text-sell">
-                  {warnings.map((w) => (
-                    <li key={w}>{w}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            {ready && entry != null && (
-              <div className="flex justify-end px-5 pb-5">
-                <Button variant="primary" onClick={copy}>
-                  {copied ? t.copied : t.copy(target === 'cfd' ? PAIR.cfd : FUT)}
-                </Button>
-              </div>
-            )}
-          </Panel>
-
-          {entry != null && (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-live="polite">
-              <Stat
-                label={t.direction}
-                value={sideWord ?? '—'}
-                tone={direction === 'long' ? 'buy' : direction === 'short' ? 'sell' : 'ink'}
-                foot={directionReason}
-                visual={<DirectionMark direction={direction} />}
-              />
-              {ready &&
-                rows.map((row) => {
-                  const move = entryFut != null && row.label !== 'IN' ? Math.abs(onFutures(row.source) - entryFut) : null;
-                  const isSl = row.label === 'SL';
-                  const sign = isSl ? '−' : '+';
-                  const targetSymbol = target === 'cfd' ? PAIR.cfd : FUT;
-                  const sourceSymbol = levelsSide === 'cfd' ? PAIR.cfd : FUT;
-                  const rr = row.label.startsWith('TP') && riskMove && move != null ? t.rr(formatNumber(move / riskMove)) : null;
-                  return (
-                    <Stat
-                      key={row.label}
-                      label={t.levelTile(row.label, targetSymbol)}
-                      value={formatPrice(convertTo(row.source, target))}
-                      tone={row.label === 'IN' ? 'ink' : isSl ? 'sell' : 'buy'}
-                      foot={
-                        <span className="flex flex-col">
-                          <span>{t.fromSource(sourceSymbol, formatPrice(row.source))}</span>
-                          {move != null && (
-                            <>
-                              <span>
-                                {t.distance(`${sign}${formatNumber(move / distanceStep)}`, distanceUnit)}
-                                {rr && ` · ${rr}`}
-                              </span>
-                              <span>{t.perContract(perContracts(move, sign))}</span>
-                            </>
-                          )}
-                        </span>
-                      }
-                    />
-                  );
-                })}
+          {basisMode === 'auto' && (
+            <div className="mt-auto flex flex-wrap items-center gap-3">
+              <Button size="sm" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
+                {refresh.isPending ? t.checking : t.checkNow}
+              </Button>
+              <span className="text-xs text-dim">{t.autoInfo}</span>
+              {refresh.data?.results
+                .filter((r) => r.pairKey === PAIR.key && r.message)
+                .map((r) => (
+                  <span key={r.pairKey} className="w-full text-xs text-dim">
+                    {r.message}
+                  </span>
+                ))}
             </div>
           )}
         </div>
-      </div>
+      </section>
+
+      {/* One price: the side being typed on the left, the other market on the right, swappable. */}
+      <Panel title={t.priceTitle}>
+        <div className="flex flex-col gap-3 px-5 pb-5">
+          <div className="grid grid-cols-1 items-stretch gap-3 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+            <label className="flex min-w-0 flex-col gap-1 rounded-2xl border-[1.5px] border-accent bg-panel px-4 py-3">
+              <span className="text-xs font-semibold text-dim">
+                {priceSide === 'cfd' ? PAIR.cfd : FUT} · {t.side[priceSide]}
+              </span>
+              <input
+                inputMode="decimal"
+                value={priceInput}
+                onChange={(e) => setPriceInput(e.target.value)}
+                placeholder={t.typePrice}
+                aria-label={t.priceOf(priceSide === 'cfd' ? PAIR.cfd : FUT)}
+                className="w-full border-0 bg-transparent p-0 font-mono text-[28px] font-bold text-ink outline-none placeholder:text-dim/60"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={swap}
+              aria-label={t.swap}
+              title={t.swap}
+              className="flex size-11 items-center justify-center self-center justify-self-center rounded-full bg-accent text-lg font-bold text-on-accent shadow-(--shadow) transition hover:brightness-105 max-md:rotate-90"
+            >
+              ⇄
+            </button>
+            <div className="flex min-w-0 flex-col gap-1 rounded-2xl bg-raised px-4 py-3">
+              <span className="text-xs font-semibold text-dim">
+                {priceSide === 'cfd' ? FUT : PAIR.cfd} · {t.side[other(priceSide)]}
+              </span>
+              <output className="truncate font-mono text-[28px] font-bold" aria-live="polite">
+                {priceOut == null ? '—' : formatPrice(priceOut)}
+              </output>
+            </div>
+          </div>
+          <span className="text-xs text-dim">{ready ? t.rounding(FUT, formatNumber(tick), perContracts(tick), PAIR.cfd, formatNumber(0.01)) : t.basisFirst}</span>
+        </div>
+      </Panel>
+
+      {/* Levels: typed on one market, each tile shows the other market's price, distance and money. */}
+      <section aria-label={t.levelsTitle} className="card flex flex-col">
+        <header className="flex flex-wrap items-center gap-x-3 gap-y-2 px-5 pt-4 pb-3">
+          <h2 className="m-0 text-[15px] font-bold">{t.levelsTitle}</h2>
+          {sideWord && (
+            <span title={directionReason} className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${direction === 'long' ? 'bg-buy-soft text-buy' : 'bg-sell-soft text-sell'}`}>
+              {sideWord}
+            </span>
+          )}
+          <span className="text-[12.5px] text-dim">{sideWord ? directionReason : t.needLevels}</span>
+          <div className="grow" />
+          <Segmented label={t.levelsMarket} value={levelsSide} onChange={setLevelsSide} options={sideOptions} />
+        </header>
+        <div className="grid grid-cols-1 gap-2.5 px-5 sm:grid-cols-2 xl:grid-cols-4">
+          {levelTiles.map((tile) => {
+            const source = parseDecimal(levels[tile.key]);
+            const out = ready && source != null ? convertTo(source, target) : null;
+            const move = source != null && entryFut != null && tile.row !== 'IN' ? Math.abs(onFutures(source) - entryFut) : null;
+            const isSl = tile.row === 'SL';
+            const sign = isSl ? '−' : '+';
+            const rr = tile.row.startsWith('TP') && riskMove && move != null ? t.rr(formatNumber(move / riskMove)) : null;
+            const tone = tile.row === 'IN' ? 'bg-raised' : isSl ? 'bg-sell-soft' : 'bg-buy-soft';
+            return (
+              <div key={tile.key} className={`flex min-w-0 flex-col gap-2 rounded-2xl p-3.5 ${tone}`}>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-xs font-bold">{tile.label}</span>
+                  {move != null && (
+                    <span className={`font-mono text-xs font-bold ${isSl ? 'text-sell' : 'text-buy'}`}>{t.distance(`${sign}${formatNumber(move / distanceStep)}`, distanceUnit)}</span>
+                  )}
+                </div>
+                <Input inputMode="decimal" value={levels[tile.key]} onChange={setLevel(tile.key)} aria-label={`${tile.label} · ${sourceSymbol}`} placeholder={sourceSymbol} />
+                <span className="truncate font-mono text-xl font-bold" aria-live="polite">
+                  {out == null ? '—' : formatPrice(out)}
+                </span>
+                <span className="flex flex-col text-[11.5px] text-dim">
+                  <span>{targetSymbol}</span>
+                  {move != null && (
+                    <span>
+                      {perContracts(move, sign)}
+                      {rr && ` · ${rr}`}
+                    </span>
+                  )}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        {warnings.length > 0 && (
+          <ul className="m-0 mx-5 mt-3 list-none rounded-(--radius-control) bg-sell-soft p-3 text-[13px] text-sell">
+            {warnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        )}
+        <div className="flex flex-wrap items-center justify-between gap-3 px-5 pt-3 pb-5">
+          <span className="text-xs text-dim">{t.levelsAs(sourceSymbol)}</span>
+          {ready && entry != null && (
+            <Button variant="primary" onClick={copy}>
+              {copied ? t.copied : t.copy(targetSymbol)}
+            </Button>
+          )}
+        </div>
+      </section>
     </main>
   );
 }
 
-/** Round badge with an up (BUY) or down (SELL) arrow, the visual of the direction tile. */
-function DirectionMark({ direction }: { direction: 'long' | 'short' | null }) {
-  const tone = direction === 'long' ? 'bg-buy-soft text-buy' : direction === 'short' ? 'bg-sell-soft text-sell' : 'bg-chip text-dim';
+/** Line of the last measured differences, the latest marked; drawn to the card's width. */
+function BasisSparkline({ values, label }: { values: number[]; label: string }) {
+  const width = 400;
+  const height = 56;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const points = values.map((v, i) => [(i / (values.length - 1)) * (width - 8) + 4, height - 6 - ((v - min) / span) * (height - 12)] as const);
+  const last = points[points.length - 1]!;
   return (
-    <span aria-hidden className={`flex size-15 shrink-0 items-center justify-center rounded-full ${tone}`}>
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-        {direction === 'short' ? <path d="M12 5v14M5 12l7 7 7-7" /> : direction === 'long' ? <path d="M12 19V5M5 12l7-7 7 7" /> : <path d="M6 12h12" />}
+    // Grows with the card (at least 3.5 rem), so the line fills the space beside the settings.
+    <div className="relative min-h-14 grow">
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={label} className="absolute inset-0 block size-full">
+        <polyline points={points.map((p) => p.join(',')).join(' ')} fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       </svg>
-    </span>
+      {/* The latest point as a dot outside the stretched drawing, so it stays round. */}
+      <span aria-hidden className="absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent" style={{ left: `${(last[0] / width) * 100}%`, top: `${(last[1] / height) * 100}%` }} />
+    </div>
   );
 }

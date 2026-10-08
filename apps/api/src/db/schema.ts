@@ -101,6 +101,8 @@ export const users = pgTable('users', {
   lossAlertMode: lossAlertMode('loss_alert_mode').notNull().default('streak'),
   /** Words that highlight a news headline and raise an alert. */
   newsKeywords: text('news_keywords').array().notNull().default([]),
+  /** Dashboard widgets the user hid (DASHBOARD_WIDGETS); empty shows everything. */
+  dashboardHidden: text('dashboard_hidden').array().notNull().default([]),
   /**
    * When the user finished the first-run introduction (currency, favourites, account, strategy).
    * Null until then; existing users and users created outside sign-up count as done.
@@ -306,6 +308,10 @@ export const tradingAccounts = pgTable(
     profitTargetPct: numeric('profit_target_pct', { precision: 6, scale: 2, mode: 'number' }),
     /** CFD leverage 1:n (LEVERAGE_OPTIONS); only used to show margins. */
     leverage: smallint('leverage'),
+    /** Own daily trade limit; null = the user's default (users.max_trades_per_day). */
+    maxTradesPerDay: smallint('max_trades_per_day'),
+    /** Own losses warning threshold; null = the user's default (users.loss_streak_alert). */
+    lossStreakAlert: smallint('loss_streak_alert'),
     ...timestamps,
   },
   (t) => [index('trading_accounts_user_idx').on(t.userId)],

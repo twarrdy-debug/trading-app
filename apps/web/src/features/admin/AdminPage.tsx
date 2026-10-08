@@ -23,15 +23,15 @@ export function AdminPage() {
   const { data: me } = useMe();
   const { section: slug } = useParams({ strict: false }) as { section?: string };
 
-  if (!me) return <main className="grow p-8 text-dim">{all.common.loading}</main>;
-  if (me.role !== 'admin') return <main className="grow p-8 text-dim">{all.common.errorStatus(403)}</main>;
+  if (!me) return <main className="page text-dim">{all.common.loading}</main>;
+  if (me.role !== 'admin') return <main className="page text-dim">{all.common.errorStatus(403)}</main>;
   const current = SECTIONS.find((s) => s.slug === slug) ?? SECTIONS[0];
 
   return (
-    <main className="mx-auto flex w-full max-w-7xl grow flex-col gap-5 p-4 md:px-8 md:py-6">
+    <main className="page max-w-7xl">
       <h1 className="m-0 text-2xl font-bold tracking-tight">{t.title}</h1>
       <div className="grid items-start gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <nav aria-label={t.sectionsLabel} className="lg:card -mx-4 flex gap-1 overflow-x-auto px-4 lg:sticky lg:top-28 lg:mx-0 lg:flex-col lg:p-2">
+        <nav aria-label={t.sectionsLabel} className="lg:card no-scrollbar -mx-3 flex gap-1 overflow-x-auto px-3 sm:-mx-4 sm:px-4 lg:sticky lg:top-4 lg:mx-0 lg:flex-col lg:p-2">
           {SECTIONS.map((s) => (
             <Link
               key={s.slug}

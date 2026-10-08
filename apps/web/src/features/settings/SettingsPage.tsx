@@ -60,14 +60,14 @@ export function SettingsPage() {
     return () => clearTimeout(id);
   }, [savedAt]);
 
-  if (!me) return <main className="grow p-8 text-dim">{all.common.loading}</main>;
+  if (!me) return <main className="page text-dim">{all.common.loading}</main>;
 
   const sections = SECTIONS;
   const current = sections.find((s) => s.slug === slug) ?? sections[0]!;
   const save: Save = (patch) => update.mutate(patch, { onSuccess: () => setSavedAt(Date.now()) });
 
   return (
-    <main className="mx-auto flex w-full max-w-6xl grow flex-col gap-5 p-4 md:px-8 md:py-6">
+    <main className="page max-w-6xl">
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <h1 className="m-0 text-2xl font-bold tracking-tight">{t.title}</h1>
         <span role="status" className="text-xs text-dim">
@@ -76,7 +76,7 @@ export function SettingsPage() {
       </div>
 
       <div className="grid items-start gap-5 lg:grid-cols-[230px_minmax(0,1fr)]">
-        <nav aria-label={t.sectionsLabel} className="lg:card -mx-4 flex gap-1 overflow-x-auto px-4 lg:sticky lg:top-28 lg:mx-0 lg:flex-col lg:p-2">
+        <nav aria-label={t.sectionsLabel} className="lg:card no-scrollbar -mx-3 flex gap-1 overflow-x-auto px-3 sm:-mx-4 sm:px-4 lg:sticky lg:top-4 lg:mx-0 lg:flex-col lg:p-2">
           {sections.map((s) => (
             <Link
               key={s.slug}

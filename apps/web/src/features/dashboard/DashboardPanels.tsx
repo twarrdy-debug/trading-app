@@ -14,22 +14,25 @@ type Day = TradeStats['equityCurve'][number];
 /** Card with a title row; `actions` sit on the right of the title. */
 export function DashboardCard({ title, info, actions, children, className = '' }: { title: string; info?: InfoContent; actions?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <section className={`card flex min-w-0 flex-col ${className}`}>
-      <header className="flex min-h-15 flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-5 py-3">
-        <h2 className="m-0 text-base font-bold">{title}</h2>
+    // A size container: links in the title row shrink to icons when the card itself is narrow.
+    <section className={`card @container flex min-w-0 flex-col ${className}`}>
+      {/* The title wraps within itself; the info and actions stay on its line. */}
+      <header className="flex min-h-15 items-center gap-x-3 border-b border-line px-4 py-3 sm:px-5">
+        <h2 className="m-0 min-w-0 text-base font-bold text-balance">{title}</h2>
         {info && <InfoTip info={info} />}
         <div className="grow" />
-        {actions}
+        <div className="flex shrink-0 items-center gap-2">{actions}</div>
       </header>
       {children}
     </section>
   );
 }
 
-export function CardLink({ to, children }: { to: '/transakcje' | '/statystyki'; children: ReactNode }) {
+export function CardLink({ to, children }: { to: '/transakcje' | '/statystyki'; children: string }) {
   return (
-    <Link to={to} className="flex items-center gap-1.5 rounded-[9px] px-2 py-1 text-[13px] font-semibold text-dim no-underline hover:bg-chip hover:text-ink">
-      {children}
+    <Link to={to} title={children} aria-label={children} className="flex items-center gap-1.5 rounded-[9px] px-2 py-1 text-[13px] font-semibold text-dim no-underline hover:bg-chip hover:text-ink">
+      {/* In a narrow card only the icon stays, so the title keeps its row. */}
+      <span className="hidden @[27rem]:inline">{children}</span>
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
       </svg>
@@ -264,7 +267,8 @@ export function Streaks({ streaks }: { streaks: TradeStats['streaks'] }) {
         )}
         <dl className="m-0 grid grid-cols-2 gap-4 border-t border-line pt-4 sm:grid-cols-4">
           {stats.map((s) => (
-            <div key={s.label} className="flex flex-col gap-1">
+            // Labels may take two lines; the values stay on one baseline.
+            <div key={s.label} className="flex flex-col justify-between gap-1">
               <dt className="text-[11px] text-dim">{s.label}</dt>
               <dd className={`m-0 font-mono text-lg font-bold ${s.tone}`}>{s.value}</dd>
             </div>

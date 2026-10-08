@@ -1,10 +1,11 @@
 import { isBankHoliday, localDayBounds, marketSessions, toLocalDate, zonedTimeToUtc, type SessionKey } from '@trading/shared';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useCalendar } from '../api/hooks.ts';
 import { useT } from '../i18n/index.tsx';
 import { addDays } from '../lib/format.ts';
 
-// Header clock for traders: the time in the user's zone plus a 24-hour strip of the four FX
+// Clock for traders (side menu, or the top bar on phones): the time in the user's zone plus a 24-hour strip of the four FX
 // sessions (Sydney, Tokyo, London, New York). Open sessions light up in the accent (ink) colour and a
 // line marks "now"; the tooltip tells when each one opens or closes, and a click opens the full chart.
 
@@ -21,7 +22,11 @@ function duration(ms: number) {
   return h > 0 ? `${h} h ${minutes % 60} min` : `${minutes} min`;
 }
 
-export function SessionClock({ timezone }: { timezone: string }) {
+/**
+ * `placement`: where the full chart opens (below in a top bar, to the right in the side menu).
+ * `compact`: the time alone (collapsed side menu, phone top bar).
+ */
+export function SessionClock({ timezone, placement = 'below', compact = false }: { timezone: string; placement?: 'below' | 'right'; compact?: boolean }) {
   const all = useT();
   const t = all.nav;
   const [now, setNow] = useState(() => new Date());
@@ -58,10 +63,19 @@ export function SessionClock({ timezone }: { timezone: string }) {
   // The full chart opens under the clock; a click outside or Escape closes it.
   const [open, setOpen] = useState(false);
   const wrapper = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  // In the side menu the chart floats over the page next to the clock (the menu may scroll and clip it).
+  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!open || placement !== 'right') return;
+    const box = wrapper.current?.getBoundingClientRect();
+    if (box) setAnchor({ top: box.top, left: box.right + 12 });
+  }, [open, placement]);
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent | KeyboardEvent) => {
-      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !wrapper.current?.contains(e.target as Node)) setOpen(false);
+      const inside = (node: Node) => wrapper.current?.contains(node) || panel.current?.contains(node);
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !inside(e.target as Node)) setOpen(false);
     };
     document.addEventListener('mousedown', close);
     document.addEventListener('keydown', close);
@@ -72,7 +86,7 @@ export function SessionClock({ timezone }: { timezone: string }) {
   }, [open]);
 
   return (
-    <div ref={wrapper} className="relative hidden lg:block">
+    <div ref={wrapper} className={placement === 'right' && !compact ? 'relative w-full' : 'relative'}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -80,7 +94,9 @@ export function SessionClock({ timezone }: { timezone: string }) {
         aria-haspopup="dialog"
         aria-label={`${hours}:${minutes}. ${t.sessionsTitle}`}
         title={open ? undefined : tooltip}
-        className={`flex h-11 items-center gap-3 rounded-(--radius-control) py-1 pr-3.5 pl-3 text-left transition ${open ? 'bg-raised ring-1 ring-line' : 'bg-chip hover:bg-raised'}`}
+        className={`flex h-11 items-center gap-3 rounded-(--radius-control) py-1 text-left transition ${compact ? 'justify-center px-2.5' : 'pr-3.5 pl-3'} ${
+          placement === 'right' && !compact ? 'w-full justify-between' : ''
+        } ${open ? 'bg-raised ring-1 ring-line' : 'bg-chip hover:bg-raised'}`}
       >
         <span className="flex flex-col items-start leading-none">
           <span className="font-mono text-[17px] font-medium tracking-tight tabular-nums">
@@ -88,9 +104,9 @@ export function SessionClock({ timezone }: { timezone: string }) {
             <span className="clock-colon text-accent-ink">:</span>
             {minutes}
           </span>
-          <span className="mt-1 text-[10px] font-semibold text-dim">{date}</span>
+          {!compact && <span className="mt-1 text-[10px] font-semibold text-dim">{date}</span>}
         </span>
-        <span className="hidden flex-col gap-1 xl:flex">
+        <span className={compact ? 'hidden' : placement === 'right' ? 'flex flex-col gap-1' : 'hidden flex-col gap-1 xl:flex'}>
           <svg width={WIDTH} height={height + 4} viewBox={`0 -2 ${WIDTH} ${height + 4}`} aria-hidden className="overflow-visible">
             {sessions.map((s, i) => {
               const y = i * (TRACK_H + GAP);
@@ -119,7 +135,16 @@ export function SessionClock({ timezone }: { timezone: string }) {
           </span>
         </span>
       </button>
-      {open && <SessionsPanel now={now} timezone={timezone} sessions={sessions} holidayOn={holidayOn} />}
+      {open && placement === 'below' && <SessionsPanel now={now} timezone={timezone} sessions={sessions} holidayOn={holidayOn} />}
+      {open &&
+        placement === 'right' &&
+        anchor &&
+        createPortal(
+          <div ref={panel} className="fixed z-50" style={anchor}>
+            <SessionsPanel now={now} timezone={timezone} sessions={sessions} holidayOn={holidayOn} floating />
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
@@ -149,11 +174,14 @@ function SessionsPanel({
   timezone,
   sessions,
   holidayOn,
+  floating = false,
 }: {
   now: Date;
   timezone: string;
   sessions: ReturnType<typeof marketSessions>;
   holidayOn: HolidayLookup;
+  /** Placed by its parent (the side menu's floating layer) rather than under the clock. */
+  floating?: boolean;
 }) {
   const all = useT();
   const t = all.nav;
@@ -167,7 +195,13 @@ function SessionsPanel({
   const weekend = sessions.every((s) => s.today.length === 0);
 
   return (
-    <div role="dialog" aria-label={t.sessionsTitle} className="card absolute top-full right-0 z-30 mt-2 p-4 shadow-(--shadow-pop)" style={{ width: PANEL_W }}>
+    <div
+      role="dialog"
+      aria-label={t.sessionsTitle}
+      className={`card z-50 p-4 shadow-(--shadow-pop) ${floating ? '' : 'absolute top-full right-0 mt-2'}`}
+      // Never wider than the screen (phones).
+      style={{ width: `min(${PANEL_W}px, calc(100vw - 2rem))` }}
+    >
       <div className="mb-3 flex items-baseline justify-between">
         <span className="text-[15px] font-bold">{t.sessionsTitle}</span>
         <span className="text-xs text-dim">{t.sessionsZone(timezone)}</span>

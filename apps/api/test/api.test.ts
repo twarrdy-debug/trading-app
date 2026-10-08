@@ -112,6 +112,14 @@ describe('reference data', () => {
     // Only orange and monochrome are offered.
     expect((await app.inject({ method: 'PATCH', url: '/me', payload: { accentColor: '#FF5A1F' } })).statusCode).toBe(400);
   });
+
+  it('remembers which dashboard widgets are hidden', async () => {
+    expect((await app.inject({ url: '/me' })).json().settings.dashboardHidden).toEqual([]);
+    const saved = await app.inject({ method: 'PATCH', url: '/me', payload: { dashboardHidden: ['streaks', 'monitor', 'streaks'] } });
+    expect(saved.json().settings.dashboardHidden).toEqual(['streaks', 'monitor']);
+    expect((await app.inject({ method: 'PATCH', url: '/me', payload: { dashboardHidden: ['<script>'] } })).statusCode).toBe(400);
+    await app.inject({ method: 'PATCH', url: '/me', payload: { dashboardHidden: [] } });
+  });
 });
 
 describe('trading journal', () => {
@@ -507,6 +515,23 @@ describe('economic calendar', () => {
     expect(all.coverage).toMatchObject({ from: '2025-10-14', to: '2025-10-14' });
   });
 
+  it('returns earlier releases of an event for its chart', async () => {
+    const { importWeek } = await import('../src/services/calendar.ts');
+    const release = (date: string, forecast: string, previous: string): FfEvent => ({ title: 'Retail Sales m/m', country: 'USD', date, impact: 'High', forecast, previous });
+    // Three monthly releases (weeks before the ones above, since an import replaces its week);
+    // Forex Factory's previous of each is the result of the one before.
+    await importWeek(database.db, [release('2025-07-16T08:30:00-04:00', '0.5%', '0.6%')], new Date('2025-07-16T00:00:00Z'));
+    await importWeek(database.db, [release('2025-08-14T08:30:00-04:00', '0.2%', '0.4%')], new Date('2025-08-14T00:00:00Z'));
+    await importWeek(database.db, [release('2025-09-16T08:30:00-04:00', '0.3%', '0.6%')], new Date('2025-09-16T00:00:00Z'));
+    const september = (await app.inject({ url: '/calendar?from=2025-09-16&to=2025-09-16' })).json().events.find((e: { title: string }) => e.title === 'Retail Sales m/m');
+    const history = (await app.inject({ url: `/calendar/${september.id}/history` })).json().history;
+    expect(history.map((h: { value: string; forecast: string }) => [h.value, h.forecast])).toEqual([
+      ['0.4%', '0.5%'],
+      ['0.6%', '0.2%'],
+    ]);
+    expect((await app.inject({ url: '/calendar/00000000-0000-4000-8000-000000000000/history' })).statusCode).toBe(404);
+  });
+
   it('feeds the pre-session checklist', async () => {
     const checklist = (await app.inject({ url: `/checklists/${ids.XAUUSD}/2025-10-14` })).json();
     expect(checklist.events.map((e: { title: string }) => e.title)).toEqual(['Core CPI m/m', 'FOMC Member Waller Speaks']);
@@ -686,12 +711,13 @@ describe('news', () => {
 });
 
 describe('trading monitor', () => {
-  const trade = (minutesAgo: number, exitPrice: number) =>
+  // Seconds apart rather than minutes, so the trades stay on today even just after midnight.
+  const trade = (tenthsAgo: number, exitPrice: number) =>
     post('/trades', {
       instrumentId: ids.XAUUSD,
       direction: 'long',
-      openedAt: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
-      closedAt: new Date(Date.now() - (minutesAgo - 1) * 60_000).toISOString(),
+      openedAt: new Date(Date.now() - tenthsAgo * 6_000).toISOString(),
+      closedAt: new Date(Date.now() - tenthsAgo * 6_000 + 3_000).toISOString(),
       entryPrice: 4000,
       exitPrice,
       positionSize: 0.1,
@@ -708,6 +734,9 @@ describe('trading monitor', () => {
     const alerted = await monitor();
     expect(alerted).toMatchObject({ lossMode: 'streak', lossLimit: 3, alert: true });
     expect(alerted.groups[0]).toMatchObject({ lossCount: 3, alert: true, tradesToday: 3, overLimit: true });
+    // Today's trades in order with their outcome, and the day's result (0.1 lot gold: $10 a pip).
+    expect(alerted.groups[0].trades.map((t: { outcome: string }) => t.outcome)).toEqual(['loss', 'loss', 'loss']);
+    expect(alerted.groups[0].pnlToday).toBe(-170);
     expect(alerted.groups[0].lossLabels).toHaveLength(3);
 
     // A win resets the streak.
@@ -1153,6 +1182,40 @@ describe('partial closes and several take profits', () => {
   // XAUUSD long 4000, stop 3990 (100 pips = 1R), 1 lot in total (1 pip = $10 per lot).
   const base = () => ({ instrumentId: ids.XAUUSD, direction: 'long', openedAt: '2025-06-02T09:00:00Z', entryPrice: 4000, stopLoss: 3990, positionSize: 1 });
 
+  it('refuses parts of a position too small to split, and part sizes off the lot step', async () => {
+    const tiny = await post('/trades', {
+      ...base(),
+      positionSize: 0.01,
+      parts: [
+        { size: 0.01, takeProfit: 4010, result: 'open' },
+        { size: 0.01, takeProfit: 4020, result: 'open' },
+      ],
+    });
+    expect(tiny.statusCode).toBe(400);
+    expect(tiny.json().error).toMatch(/nie da się zamknąć w częściach/);
+    const offStep = await post('/trades', {
+      ...base(),
+      positionSize: 0.05,
+      parts: [
+        { size: 0.025, takeProfit: 4010, result: 'open' },
+        { size: 0.025, takeProfit: 4020, result: 'open' },
+      ],
+    });
+    expect(offStep.statusCode).toBe(400);
+    expect(offStep.json().error).toMatch(/wielokrotnością 0.01/);
+    // The smallest split: 0.02 lot as two parts of 0.01.
+    const smallest = await post('/trades', {
+      ...base(),
+      positionSize: 0.02,
+      parts: [
+        { size: 0.01, takeProfit: 4010, result: 'open' },
+        { size: 0.01, takeProfit: 4020, result: 'open' },
+      ],
+    });
+    expect(smallest.statusCode).toBe(201);
+    await app.inject({ method: 'DELETE', url: `/trades/${smallest.json().trade.id}` });
+  });
+
   it('splits a position into parts with their own take profits; pips add up', async () => {
     const half = (
       await post('/trades', {
@@ -1390,7 +1453,8 @@ describe('trading accounts', () => {
   });
 
   it('runs the trading monitor per account', async () => {
-    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+    // Tenths of a minute, so the trades stay on today even just after midnight.
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 6_000).toISOString();
     const loss = (minutes: number, accountId?: string) =>
       as('POST', '/trades', {
         instrumentId: ids.XAUUSD,
@@ -1413,6 +1477,20 @@ describe('trading accounts', () => {
     ]);
     expect(monitor.alert).toBe(true);
     await as('PATCH', '/me', { lossStreakAlert: 3 });
+
+    // An account's own limits replace the defaults for that account only.
+    await as('PATCH', `/accounts/${live.id}`, { maxTradesPerDay: 1, lossStreakAlert: 1 });
+    const own = (await as('GET', '/trades/monitor')).json();
+    expect(own.groups.find((g: { name: string }) => g.name === 'Live')).toMatchObject({ maxTradesPerDay: 1, lossLimit: 1, ownLimits: true, alert: true, overLimit: false });
+    expect(own.groups.find((g: { name: string }) => g.name === 'FTMO 10k')).toMatchObject({ lossLimit: 3, ownLimits: false, alert: false });
+    expect((await as('GET', '/accounts')).json().find((a: { name: string }) => a.name === 'Live')).toMatchObject({ maxTradesPerDay: 1, lossStreakAlert: 1 });
+    const second = (await loss(5, live.id)).json().trade.id;
+    const trades = (await as('GET', `/trades?account=${live.id}`)).json().items;
+    expect(trades.filter((t: { overDailyLimit: boolean }) => t.overDailyLimit)).toHaveLength(1);
+    await as('DELETE', `/trades/${second}`);
+    // Cleared, the account follows the defaults again.
+    await as('PATCH', `/accounts/${live.id}`, { maxTradesPerDay: null, lossStreakAlert: null });
+    expect((await as('GET', '/trades/monitor')).json().groups.find((g: { name: string }) => g.name === 'Live')).toMatchObject({ lossLimit: 3, ownLimits: false });
   });
 
   it('trails an end-of-day drawdown from the best closing balance, up to the start', async () => {

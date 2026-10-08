@@ -33,7 +33,13 @@ const routeTree = rootRoute.addChildren([
   appRoute.addChildren([
     createRoute({ getParentRoute: () => appRoute, path: '/', component: DashboardPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/dziennik', component: JournalPage }),
-    createRoute({ getParentRoute: () => appRoute, path: '/transakcje', component: TradesPage }),
+    createRoute({
+      getParentRoute: () => appRoute,
+      path: '/transakcje',
+      component: TradesPage,
+      // `?import=mt5` opens the MT5 import right away (from the empty statistics and dashboard).
+      validateSearch: (search: Record<string, unknown>): { import?: 'mt5' } => (search.import === 'mt5' ? { import: 'mt5' } : {}),
+    }),
     createRoute({ getParentRoute: () => appRoute, path: '/statystyki', component: StatsPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/kalkulator', component: CalculatorPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/analiza', component: AnalysisPage }),

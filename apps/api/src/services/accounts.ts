@@ -20,6 +20,15 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 export const listAccounts = (db: DB, user: CurrentUser) =>
   db.select().from(tradingAccounts).where(eq(tradingAccounts.userId, user.id)).orderBy(asc(tradingAccounts.createdAt));
 
+/** The daily limits in force for an account: its own where set, otherwise the user's defaults. */
+export const accountLimits = (
+  user: Pick<CurrentUser, 'maxTradesPerDay' | 'lossStreakAlert'>,
+  account: Pick<TradingAccount, 'maxTradesPerDay' | 'lossStreakAlert'> | null | undefined,
+) => ({
+  maxTradesPerDay: account?.maxTradesPerDay ?? user.maxTradesPerDay,
+  lossStreakAlert: account?.lossStreakAlert ?? user.lossStreakAlert,
+});
+
 export async function getAccount(db: DB, user: CurrentUser, id: string): Promise<TradingAccount> {
   const [account] = await db
     .select()
@@ -161,6 +170,9 @@ export function accountOverview(account: TradingAccount, rows: AccountTradeRow[]
     type: account.type,
     market: account.market,
     leverage: account.leverage,
+    /** Own limits (null = the defaults from the settings). */
+    maxTradesPerDay: account.maxTradesPerDay,
+    lossStreakAlert: account.lossStreakAlert,
     size,
     trades: rows.length,
     balance: round2(balance),

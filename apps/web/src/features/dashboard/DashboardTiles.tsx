@@ -1,4 +1,5 @@
 import type { TradeStats } from '@trading/api/types';
+import type { DashboardWidget } from '@trading/shared';
 import { scaleLinear } from 'd3-scale';
 import { area, curveMonotoneX, line } from 'd3-shape';
 import type { ReactNode } from 'react';
@@ -9,12 +10,14 @@ import { InfoTip, type InfoContent } from '../../components/ui/InfoTip.tsx';
 /** Dashboard tile: label with help on top, the value bottom-left and a visual bottom-right. */
 function Tile({ label, info, value, foot, visual }: { label: string; info: InfoContent; value: ReactNode; foot?: ReactNode; visual?: ReactNode }) {
   return (
-    <div className="card flex min-h-36 flex-col justify-between gap-4 px-5 py-4">
+    // A size container: in a narrow tile the visual moves under the value instead of squeezing it.
+    <div className="card @container flex min-h-36 flex-col justify-between gap-4 px-5 py-4">
       <div className="flex items-center gap-2 text-sm text-dim">
         {label}
         <InfoTip info={info} />
       </div>
-      <div className="flex items-end justify-between gap-4">
+      {/* Narrow: the visual goes above the value, so values stay on one line across the tiles. */}
+      <div className="flex flex-col-reverse gap-3 @[16rem]:flex-row @[16rem]:items-end @[16rem]:justify-between @[16rem]:gap-4">
         <div className="flex shrink-0 flex-col gap-1">
           <span className="text-[30px] leading-none font-bold tracking-tight tabular-nums">{value}</span>
           {foot && <span className="font-mono text-xs text-dim">{foot}</span>}
@@ -27,24 +30,47 @@ function Tile({ label, info, value, foot, visual }: { label: string; info: InfoC
 
 const tone = (v: number | null | undefined) => (v == null || v === 0 ? '' : v > 0 ? 'text-buy' : 'text-sell');
 
-/** Net P&L, profit factor, win rate and average win/loss for the period. */
-export function DashboardTiles({ stats }: { stats: TradeStats }) {
+/** This month's figures (from the 1st to today), independent of the dashboard period. */
+export interface MonthFigures {
+  label: string;
+  pnl: number;
+  trades: number;
+  returnPct: number | null;
+  curve: number[];
+}
+
+/** Net P&L, this month's result, win rate, profit factor and average win/loss; hidden ones are left out. */
+export function DashboardTiles({ stats, month, hidden = new Set() }: { stats: TradeStats; month?: MonthFigures; hidden?: Set<DashboardWidget> }) {
   const t = useT().dashboard;
   const s = stats.summary;
   const currency = stats.currency;
   const ratio = s.avgWin != null && s.avgLoss ? s.avgWin / Math.abs(s.avgLoss) : null;
+  const show = (w: DashboardWidget) => !hidden.has(w);
+  if (!['netPnl', 'monthPnl', 'winRate', 'profitFactor', 'avgWinLoss'].some((w) => show(w as DashboardWidget))) return null;
 
-  return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 min-[87.5rem]:grid-cols-4">
-      <Tile
+  const tiles = [
+    show('netPnl') && <Tile
         label={t.netPnl}
         info={t.info.netPnl}
         value={<span className={tone(s.pnl)}>{formatAmount(s.pnl, currency)}</span>}
         foot={s.returnPct != null ? <span className={tone(s.returnPct)}>{`${s.returnPct >= 0 ? '↗' : '↘'} ${formatNumber(s.returnPct, true)}%`}</span> : undefined}
         visual={<Sparkline values={stats.equityCurve.map((p) => p.cumulative)} />}
-      />
-      <Tile label={t.profitFactor} info={t.info.profitFactor} value={formatNumber(s.profitFactor)} visual={<ProfitFactorScale value={s.profitFactor} />} />
-      <Tile
+      />,
+    show('monthPnl') && month && (
+        <Tile
+          label={t.monthPnl(month.label)}
+          info={t.info.monthPnl}
+          value={<span className={tone(month.pnl)}>{formatAmount(month.pnl, currency)}</span>}
+          foot={
+            <>
+              {t.monthFoot(month.trades)}
+              {month.returnPct != null && <span className={tone(month.returnPct)}>{` · ${formatNumber(month.returnPct, true)}%`}</span>}
+            </>
+          }
+          visual={<Sparkline values={month.curve} />}
+        />
+      ),
+    show('winRate') && <Tile
         label={t.winRate}
         info={t.info.winRate}
         value={formatPercent(s.winRate)}
@@ -55,16 +81,42 @@ export function DashboardTiles({ stats }: { stats: TradeStats }) {
           </>
         }
         visual={<WinRateArc wins={s.wins} losses={s.losses} />}
-      />
-      <Tile
+      />,
+    show('profitFactor') && <Tile label={t.profitFactor} info={t.info.profitFactor} value={formatNumber(s.profitFactor)} visual={<ProfitFactorScale value={s.profitFactor} />} />,
+    show('avgWinLoss') && <Tile
         label={t.avgWinLoss}
         info={t.info.avgWinLoss}
         value={formatNumber(ratio)}
         visual={<WinLossBar win={s.avgWin} loss={s.avgLoss} currency={currency} />}
-      />
+      />,
+  ].filter((tile) => tile !== false && tile != null);
+  const layout = TILE_LAYOUT[tiles.length] ?? TILE_LAYOUT[1]!;
+
+  return (
+    <div className={`grid grid-cols-1 gap-4 ${layout.grid}`}>
+      {tiles.map((tile, i) => (
+        <div key={i} className={`flex min-w-0 *:grow ${layout.span(i)}`}>
+          {tile}
+        </div>
+      ))}
     </div>
   );
 }
+
+/**
+ * Columns per number of visible tiles, so no row ends with a hole or a lone stretched tile: five sit
+ * in one row from 90 rem and as 3 + 2 (equal widths per row) below; four as 2 × 2, then one row.
+ */
+const TILE_LAYOUT: Record<number, { grid: string; span: (i: number) => string }> = {
+  1: { grid: '', span: () => '' },
+  2: { grid: 'sm:grid-cols-2', span: () => '' },
+  3: { grid: 'md:grid-cols-3', span: () => '' },
+  4: { grid: 'sm:grid-cols-2 [@media(min-width:80rem)]:grid-cols-4', span: () => '' },
+  5: {
+    grid: 'md:grid-cols-6 [@media(min-width:90rem)]:grid-cols-5',
+    span: (i) => (i < 3 ? 'md:col-span-2 [@media(min-width:90rem)]:col-span-1' : 'md:col-span-3 [@media(min-width:90rem)]:col-span-1'),
+  },
+};
 
 /** Cumulative result as a small area chart, green when it ends in profit, red otherwise. */
 function Sparkline({ values }: { values: number[] }) {

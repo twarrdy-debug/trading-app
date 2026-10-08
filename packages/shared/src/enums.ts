@@ -253,3 +253,24 @@ export type PartResult = (typeof PART_RESULTS)[number];
 /** The market session a trade was opened in, from its opening time (`tradeSession()`). */
 export const TRADE_SESSIONS = ['asia', 'london', 'overlap', 'newyork', 'off'] as const;
 export type TradeSession = (typeof TRADE_SESSIONS)[number];
+
+/**
+ * Dashboard widgets the user can show or hide (all shown by default; `users.dashboardHidden` lists
+ * the hidden ones, so a widget added later shows up for everyone).
+ */
+export const DASHBOARD_WIDGETS = [
+  'netPnl',
+  'monthPnl',
+  'winRate',
+  'profitFactor',
+  'avgWinLoss',
+  'accounts',
+  'monitor',
+  'recentTrades',
+  'progress',
+  'cumulative',
+  'calendar',
+  'streaks',
+  'bySymbol',
+] as const;
+export type DashboardWidget = (typeof DASHBOARD_WIDGETS)[number];

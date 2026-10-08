@@ -1,4 +1,4 @@
-import { updateSettingsSchema } from '@trading/shared';
+import { updateSettingsSchema, type DashboardWidget } from '@trading/shared';
 import { eq } from 'drizzle-orm';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { users } from '../db/schema.ts';
@@ -25,6 +25,7 @@ export const toPublicUser = (u: CurrentUser, authenticated = true) => ({
     lossStreakAlert: u.lossStreakAlert,
     lossAlertMode: u.lossAlertMode,
     newsKeywords: u.newsKeywords,
+    dashboardHidden: u.dashboardHidden as DashboardWidget[],
   },
 });
 

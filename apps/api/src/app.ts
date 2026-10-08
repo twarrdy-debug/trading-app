@@ -105,12 +105,14 @@ export async function buildApp({
       .send({ error: status >= 500 ? t(language, 'serverError') : (error as Error).message });
   });
 
-  // Before everything else, so floods are refused before any database work. Per client IP: behind
-  // Cloudflare that is CF-Connecting-IP (Caddy and the tunnel would otherwise be the only client).
-  // Routes that cost more (outside requests, e-mails, file parsing) set a lower `config.rateLimit`.
+  // Before everything else, so floods are refused before any database work. Per client IP (behind
+  // Cloudflare that is CF-Connecting-IP), never per cookie: a made-up cookie per request would get
+  // a fresh limit each time. 1200 a minute leaves room for a few people behind one home or office
+  // address (a page load is 15–20 requests). Routes that cost more (outside requests, e-mails, file
+  // parsing) set a lower `config.rateLimit`.
   if (rateLimits) {
     await app.register(rateLimit, {
-      max: 300,
+      max: 1200,
       timeWindow: '1 minute',
       keyGenerator: (req) => clientIp(req),
       errorResponseBuilder: () => new HttpError(429, 'tooManyRequests'),

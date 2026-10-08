@@ -1,11 +1,14 @@
 import type { AccountSummary, Instrument, PublicUser, Trade, TradeMutation } from '@trading/api/types';
 import {
   AUTO_FX_CURRENCIES,
+  canSplit,
   computeTradeMetrics,
+  isWholeSteps,
   marginQuote,
   priceToUnits,
   riskQuote,
   sizeForRisk,
+  sizeStep,
   toLocalDate,
   tradeSession,
   type CreateTradeInput,
@@ -14,7 +17,7 @@ import {
   type TradeSource,
 } from '@trading/shared';
 import { Link } from '@tanstack/react-router';
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useState, type ClipboardEvent, type FormEvent, type ReactNode } from 'react';
 import { ApiError } from '../../api/client.ts';
 import {
   useCreateEducator,
@@ -37,18 +40,20 @@ import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
 import { formatAmount, formatDate, formatNumber, formatPrice, parseDecimal, toDateTimeLocal, toInputNumber } from '../../lib/format.ts';
 import { instrumentOptions } from '../../lib/instruments.ts';
-import { emptyPart, PartsEditor, partsTotal, splitInTwo, type PartDraft } from './PartsEditor.tsx';
-
-type SizeMode = 'lots' | 'pct' | 'money';
+import { emptyPart, PartsEditor, partsTotal, ResultPicker, splitEqually, type PartDraft } from './PartsEditor.tsx';
+import { PositionSize, type RiskMode } from './PositionSize.tsx';
+import { onlyImages, ScreenshotDrop } from './ScreenshotDrop.tsx';
 
 /** The last choices, so the next trade needs fewer clicks (per browser). */
 const DEFAULTS_KEY = 'trade-composer-defaults';
 interface Remembered {
   accountId?: string;
   instrumentId?: string;
-  sizeMode?: SizeMode;
+  riskMode?: RiskMode;
   riskText?: string;
   strategyId?: string;
+  /** The last size per instrument. */
+  sizes?: Record<string, string>;
 }
 const readDefaults = (): Remembered => {
   try {
@@ -81,10 +86,28 @@ interface Props {
   onDeleted?: () => void;
 }
 
+/** Parts of a saved trade as drafts; a part's stop shows only where it differs from the one before. */
+function draftsOf(trade: Trade): PartDraft[] {
+  let previous = trade.stopLoss;
+  return trade.parts.map((p) => {
+    const slText = p.stopLoss != null && p.stopLoss !== previous ? toInputNumber(p.stopLoss) : '';
+    previous = p.stopLoss ?? previous;
+    return {
+      sizeText: toInputNumber(p.size),
+      tpText: toInputNumber(p.takeProfit),
+      slText,
+      result: p.result,
+      priceText: p.result === 'manual' ? toInputNumber(p.price) : '',
+      closedAt: localTime(p.closedAt),
+    };
+  });
+}
+
 /**
- * Adds or edits a trade. The total size comes first; then take profit, stop loss and the result,
- * for the whole position or, closed in parts, for each part (a part copies the previous stop).
- * Emotions, notes and screenshots are always in view; source, spread and FX rate under "Advanced".
+ * Adds or edits a trade, in the order a trader thinks of it: what and when, how big, the levels, how
+ * it ended (as a whole or in parts), then the psychology. The size comes from presets, ×2 and +step
+ * or from the risk; a summary of risk, planned RR and result is always in view. Screenshots can be
+ * dropped or pasted anywhere in the form.
  */
 export function TradeComposer({ user, instruments, accounts, trade, preferredAccountId, onSaved, onCancel, onDeleted }: Props) {
   const all = useT();
@@ -106,30 +129,14 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
     const preferred = trade?.instrumentId ?? remembered.instrumentId;
     return allowed.find((i) => i.id === preferred)?.id ?? allowed.find((i) => i.favorite)?.id ?? allowed[0]?.id ?? '';
   });
-  const chooseAccount = (id: string) => {
-    setAccountId(id);
-    const market = accounts.find((a) => a.id === id)?.market;
-    const current = instruments.find((i) => i.id === instrumentId);
-    if (market && current?.market !== market) setInstrumentId(instruments.find((i) => i.market === market)?.id ?? '');
-  };
   const [openedAt, setOpenedAt] = useState(trade ? localTime(trade.openedAt) : toDateTimeLocal(new Date()));
-  const [entry, setEntry] = useState(toInputNumber(trade?.entryPrice));
-  const [sizeMode, setSizeMode] = useState<SizeMode>(trade ? 'lots' : (remembered.sizeMode ?? 'lots'));
-  const [sizeText, setSizeText] = useState(toInputNumber(trade?.positionSize));
+  const [sizeText, setSizeText] = useState(() => (trade ? toInputNumber(trade.positionSize) : (remembered.sizes?.[instrumentId] ?? '')));
   const [riskText, setRiskText] = useState(remembered.riskText ?? '1');
+  const [riskMode, setRiskMode] = useState<RiskMode>(remembered.riskMode ?? 'pct');
+  const [entry, setEntry] = useState(toInputNumber(trade?.entryPrice));
+  const [stopText, setStopText] = useState(toInputNumber(trade?.stopLoss));
   const [split, setSplit] = useState((trade?.parts.length ?? 0) > 1);
-  const [parts, setParts] = useState<PartDraft[]>(() =>
-    trade?.parts.length
-      ? trade.parts.map((p) => ({
-          sizeText: toInputNumber(p.size),
-          tpText: toInputNumber(p.takeProfit),
-          slText: toInputNumber(p.stopLoss),
-          result: p.result,
-          priceText: p.result === 'manual' ? toInputNumber(p.price) : '',
-          closedAt: localTime(p.closedAt),
-        }))
-      : [emptyPart()],
-  );
+  const [parts, setParts] = useState<PartDraft[]>(() => (trade?.parts.length ? draftsOf(trade) : [emptyPart({ tpText: toInputNumber(trade?.takeProfit) })]));
   const [strategyId, setStrategyId] = useState(trade ? (trade.strategyId ?? '') : (remembered.strategyId ?? ''));
   const [checkedRuleIds, setCheckedRuleIds] = useState<string[]>(trade?.checkedRuleIds ?? []);
   const [emotionKeys, setEmotionKeys] = useState<string[]>(trade?.emotionKeys ?? []);
@@ -159,7 +166,7 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
   const instrument = instruments.find((i) => i.id === instrumentId);
   const isFutures = instrument?.market === 'futures';
   const isCfd = instrument?.market === 'cfd';
-  const step = isFutures ? 1 : 0.01;
+  const step = sizeStep(instrument?.market ?? 'cfd');
   const unitLabel = isFutures ? t.contractsShort : t.lotsShort;
   const tradeDate = openedAt ? toLocalDate(new Date(openedAt), user.settings.timezone) : undefined;
   const spread = useDailySpread(isCfd && advanced ? instrumentId : undefined, tradeDate);
@@ -167,6 +174,19 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
     const suggestion = spread.data?.spread ?? spread.data?.suggestion?.spread;
     setSpreadText(suggestion == null ? '' : toInputNumber(suggestion));
   }, [spread.data]);
+
+  const chooseInstrument = (id: string) => {
+    setInstrumentId(id);
+    // A new trade picks up the size last used on that instrument.
+    const last = trade ? undefined : readDefaults().sizes?.[id];
+    if (last) setSizeText(last);
+  };
+  const chooseAccount = (id: string) => {
+    setAccountId(id);
+    const market = accounts.find((a) => a.id === id)?.market;
+    const current = instruments.find((i) => i.id === instrumentId);
+    if (market && current?.market !== market) chooseInstrument(instruments.find((i) => i.market === market)?.id ?? '');
+  };
 
   // Quote → account rate: the same automatic ECB rate the API applies, or the one typed in.
   const sameCurrency = instrument?.quoteCurrency === account;
@@ -177,26 +197,26 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
   const rate = sameCurrency ? 1 : (parseDecimal(fxRate) ?? autoFx.data?.rate ?? null);
 
   const entryNum = parseDecimal(entry) ?? null;
-  // The first part's stop is the trade's initial risk.
-  const firstStop = parseDecimal(parts[0]?.slText ?? '') ?? null;
+  const stop = parseDecimal(stopText) ?? null;
+  const position = parseDecimal(sizeText) ?? null;
   const balance = tradeAccount?.balance ?? null;
+  const splittable = canSplit(position, step);
 
-  // Total size: typed, or worked out from the risk (% of the balance or an amount) and the stop.
+  // The risk helper: % of the balance or an amount, turned into a size between entry and stop.
   const riskValue = parseDecimal(riskText);
-  const riskMoneyTarget = sizeMode === 'pct' ? (balance != null && riskValue != null ? (balance * riskValue) / 100 : null) : sizeMode === 'money' ? (riskValue ?? null) : null;
-  const sizedFromRisk =
-    sizeMode !== 'lots' && instrument && entryNum != null && riskMoneyTarget != null && rate != null ? sizeForRisk(instrument, entryNum, firstStop, riskMoneyTarget / rate, step) : null;
-  const position = sizeMode === 'lots' ? (parseDecimal(sizeText) ?? null) : sizedFromRisk;
+  const riskTarget = riskMode === 'pct' ? (balance != null && riskValue != null ? (balance * riskValue) / 100 : null) : (riskValue ?? null);
+  const sizedFromRisk = instrument && entryNum != null && riskTarget != null && rate != null ? sizeForRisk(instrument, entryNum, stop, riskTarget / rate, step) : null;
+  const riskBlocker = sizedFromRisk != null ? null : stop == null || entryNum == null ? t.needStop : riskMode === 'pct' && balance == null ? t.needBalance : riskValue ? t.tooTight : '—';
 
-  // Parts with sizes, stops (copied from the part before when empty) and close prices.
-  let previousStop: number | null = null;
+  // Parts with sizes, stops (an empty stop copies the part before) and close prices.
+  let previousStop = stop;
   const resolved = parts.map((p) => {
-    const stop = parseDecimal(p.slText) ?? previousStop;
-    previousStop = stop;
+    const partStop = parseDecimal(p.slText) ?? previousStop;
+    previousStop = partStop;
     const tp = parseDecimal(p.tpText) ?? null;
     const size = split ? (parseDecimal(p.sizeText) ?? null) : position;
-    const price = p.result === 'tp' ? tp : p.result === 'sl' ? stop : p.result === 'be' ? entryNum : p.result === 'manual' ? (parseDecimal(p.priceText) ?? null) : null;
-    return { draft: p, size, tp, stop, price };
+    const price = p.result === 'tp' ? tp : p.result === 'sl' ? partStop : p.result === 'be' ? entryNum : p.result === 'manual' ? (parseDecimal(p.priceText) ?? null) : null;
+    return { draft: p, size, tp, stop: partStop, price };
   });
   const closedParts = resolved.filter((r) => r.price != null && r.size != null);
   const preview =
@@ -204,29 +224,40 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
       ? computeTradeMetrics(instrument, {
           direction,
           entryPrice: entryNum,
-          stopLoss: firstStop,
+          stopLoss: stop,
           positionSize: position,
           fxRate: rate,
           parts: resolved.filter((r) => r.size != null).map((r) => ({ size: r.size!, price: r.price, takeProfit: r.tp })),
         })
       : null;
   // Each closed part's pips with its result ("TP +100 · BE 0"); they add up to the trade's pips.
-  const partPips = instrument && entryNum != null ? closedParts.map((r) => `${t.results[r.draft.result]} ${formatNumber(priceToUnits(instrument, direction, entryNum, r.price!), true)}`) : [];
-  const riskMoney = instrument && entryNum != null && position != null && rate != null ? (riskQuote(instrument, { entryPrice: entryNum, stopLoss: firstStop, positionSize: position }) ?? 0) * rate : null;
+  const partPips = split && instrument && entryNum != null ? closedParts.map((r) => `${t.results[r.draft.result]} ${formatNumber(priceToUnits(instrument, direction, entryNum, r.price!), true)}`) : [];
+  const riskMoney = instrument && entryNum != null && position != null && rate != null && stop != null ? (riskQuote(instrument, { entryPrice: entryNum, stopLoss: stop, positionSize: position }) ?? 0) * rate : null;
   const leverage = tradeAccount?.leverage ?? null;
   const margin = isCfd && leverage && instrument && entryNum != null && position != null && rate != null ? marginQuote(instrument, entryNum, position, leverage) * rate : null;
   const session = openedAt ? tradeSession(new Date(openedAt)) : null;
   const strategy = strategies.find((s) => s.id === strategyId);
+  const single = parts[0] ?? emptyPart();
+  const updateSingle = (patch: Partial<PartDraft>) => setParts([{ ...single, ...patch }, ...parts.slice(1)]);
 
-  const toggleSplit = (on: boolean) => {
-    setSplit(on);
-    const first = parts[0] ?? emptyPart();
-    if (!on) return setParts([first]);
-    const [a, b] = position ? splitInTwo(position, step) : [null, null];
-    setParts([
-      { ...first, sizeText: a != null ? toInputNumber(a) : '' },
-      emptyPart({ slText: first.slText, sizeText: b != null ? toInputNumber(b) : '' }),
-    ]);
+  const toggleSplit = () => {
+    if (split) {
+      setSplit(false);
+      return setParts([single]);
+    }
+    if (!splittable || position == null) return;
+    const [a, b] = splitEqually(position, 2, step);
+    setSplit(true);
+    setParts([{ ...single, sizeText: toInputNumber(a) }, emptyPart({ sizeText: toInputNumber(b) })]);
+  };
+
+  const addFiles = (added: File[]) => setFiles((current) => [...current, ...added]);
+  // A screenshot pasted anywhere in the form (Ctrl+V / ⌘V) is added; text pastes are left alone.
+  const onPaste = (e: ClipboardEvent<HTMLFormElement>) => {
+    const images = onlyImages(e.clipboardData.files);
+    if (images.length === 0) return;
+    e.preventDefault();
+    addFiles(images.map((file, i) => new File([file], file.name === 'image.png' ? `wklejony-${Date.now()}-${i}.png` : file.name, { type: file.type })));
   };
 
   const loadSignal = () =>
@@ -234,14 +265,17 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
       onSuccess: (result) => {
         if (!result.ok) return setSignalNotes(result.errors);
         const { signal } = result;
-        if (result.instrument) setInstrumentId(result.instrument.id);
+        if (result.instrument) chooseInstrument(result.instrument.id);
         setDirection(signal.direction);
         setEntry(toInputNumber(signal.entryPrice));
+        setStopText(toInputNumber(signal.stopLoss));
         setSource('educator');
-        // Several take profits become parts, each with the signal's stop.
+        // Several take profits become parts, split equally when the size allows it.
         const tps = signal.takeProfits.length ? signal.takeProfits : [null];
-        setSplit(tps.length > 1);
-        setParts(tps.map((tp) => emptyPart({ tpText: toInputNumber(tp), slText: toInputNumber(signal.stopLoss) })));
+        const many = tps.length > 1 && position != null && position >= tps.length * step - 1e-9;
+        const sizes = many ? splitEqually(position!, tps.length, step) : [];
+        setSplit(many);
+        setParts(many ? tps.map((tp, i) => emptyPart({ tpText: toInputNumber(tp), sizeText: toInputNumber(sizes[i]) })) : [emptyPart({ tpText: toInputNumber(tps[0]) })]);
         setSignalNotes([f.signalLoaded(signal.symbol, signal.direction.toUpperCase(), false), ...result.warnings]);
       },
     });
@@ -251,9 +285,13 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
     setErrors([]);
     if (!accountId) return setErrors([f.errAccount]);
     if (!instrument || entryNum == null) return setErrors([t.errEntry]);
-    if (position == null || position <= 0) return setErrors([sizeMode === 'lots' ? t.errSize : t.errRiskSize]);
+    if (position == null || position <= 0) return setErrors([t.errSize]);
     if (isFutures && !Number.isInteger(position)) return setErrors([f.errFutures]);
-    if (split && Math.abs(partsTotal(parts) - position) > 1e-6) return setErrors([t.errSplit(formatNumber(position), unitLabel)]);
+    if (split) {
+      if (Math.abs(partsTotal(parts) - position) > 1e-6) return setErrors([t.errSplit(formatNumber(position), unitLabel)]);
+      const bad = resolved.findIndex((r) => r.size == null || r.size < step || !isWholeSteps(r.size, step));
+      if (bad >= 0) return setErrors([t.errPartStep(bad + 1, formatNumber(step))]);
+    }
     if (resolved.some((r) => r.draft.result === 'manual' && r.price == null)) return setErrors([t.errExitPrice]);
     if (source === 'educator' && !educatorId) return setErrors([f.errEducator]);
     const now = toDateTimeLocal(new Date());
@@ -276,7 +314,7 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
         direction,
         openedAt: toIso(openedAt),
         entryPrice: entryNum,
-        stopLoss: firstStop,
+        stopLoss: stop,
         takeProfits: resolved.map((r) => r.tp).filter((tp): tp is number => tp != null),
         positionSize: position,
         parts: partInput,
@@ -292,7 +330,7 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
       };
       const result = await saveTrade.mutateAsync({ id: trade?.id, input });
       for (const file of files) await upload.mutateAsync({ tradeId: result.trade.id, file });
-      if (!trade) writeDefaults({ accountId, instrumentId, sizeMode, riskText, strategyId });
+      if (!trade) writeDefaults({ accountId, instrumentId, riskMode, riskText, strategyId, sizes: { ...readDefaults().sizes, [instrumentId]: sizeText } });
       onSaved(result, trade ? 'updated' : 'created');
     } catch (err) {
       setErrors(err instanceof ApiError ? err.lines : [(err as Error).message]);
@@ -315,10 +353,10 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
   }
 
   return (
-    <form onSubmit={submit} aria-label={trade ? f.editAria : t.title} className="flex flex-col gap-4">
+    <form onSubmit={submit} onPaste={onPaste} aria-label={trade ? f.editAria : t.title} className="flex flex-col gap-5">
       {/* 1. What and when; the session follows from the time. */}
-      <div className="grid gap-3 md:grid-cols-[auto_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.2fr)]">
-        <Field label={f.direction}>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[auto_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.2fr)]">
+        <Group label={f.direction}>
           <div className="flex gap-1.5" role="group" aria-label={f.direction}>
             <Button variant="buy" size="md" selected={direction === 'long'} onClick={() => setDirection('long')} className="w-20">
               BUY
@@ -327,9 +365,9 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
               SELL
             </Button>
           </div>
-        </Field>
+        </Group>
         <Field label={f.instrument}>
-          <Select value={instrumentId} onChange={setInstrumentId} options={instrumentOptions(allowed, { label: (i) => `${i.symbol} · ${i.name}`, favorites: all.instruments.favorites, others: all.instruments.others })} />
+          <Select value={instrumentId} onChange={chooseInstrument} options={instrumentOptions(allowed, { label: (i) => `${i.symbol} · ${i.name}`, favorites: all.instruments.favorites, others: all.instruments.others })} />
         </Field>
         <Field label={all.accounts.switcher}>
           <Select value={accountId} onChange={chooseAccount} options={[...(accountId ? [] : [{ value: '', label: f.chooseAccount }]), ...accounts.map((a) => ({ value: a.id, label: a.name }))]} />
@@ -339,86 +377,118 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
         </Field>
       </div>
 
-      {/* 2. The whole position: size first, then the entry. */}
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)]">
-        <Field
-          label={t.totalSize}
-          hint={sizeMode !== 'lots' ? <span className="font-mono">{sizedFromRisk != null ? t.sizedAs(formatNumber(sizedFromRisk), unitLabel) : firstStop == null ? t.needStop : '—'}</span> : undefined}
-        >
-          <div className="flex gap-1.5">
-            <Segmented
-              label={t.sizeMode}
-              value={sizeMode}
-              onChange={(m) => {
-                setSizeMode(m);
-                if (m === 'lots' && sizedFromRisk != null) setSizeText(toInputNumber(sizedFromRisk));
-              }}
-              options={[
-                { value: 'lots', label: unitLabel },
-                { value: 'pct', label: '%' },
-                { value: 'money', label: currencySymbol(account) },
-              ]}
-            />
-            {sizeMode === 'lots' ? (
-              <Input aria-label={t.totalSize} inputMode="decimal" value={sizeText} onChange={(e) => setSizeText(isFutures ? e.target.value.replace(/\D/g, '') : e.target.value)} placeholder={isFutures ? '1' : '0,10'} className="min-w-0" />
-            ) : (
-              <Input aria-label={sizeMode === 'pct' ? t.riskPct : t.riskMoney} inputMode="decimal" value={riskText} onChange={(e) => setRiskText(e.target.value)} placeholder="1" className="min-w-0" />
-            )}
-          </div>
-        </Field>
+      {/* 2. Size: presets, ×2, +step, or from the risk. */}
+      <Group label={t.size}>
+        <PositionSize
+          value={sizeText}
+          onChange={(text) => {
+            setSizeText(text);
+            if (!canSplit(parseDecimal(text) ?? null, step) && split) {
+              setSplit(false);
+              setParts([single]);
+            }
+          }}
+          isFutures={isFutures}
+          unitLabel={unitLabel}
+          riskText={riskText}
+          onRiskText={setRiskText}
+          riskMode={riskMode}
+          onRiskMode={setRiskMode}
+          sizedFromRisk={sizedFromRisk}
+          riskBlocker={riskBlocker}
+          currencySymbol={currencySymbol(account)}
+        />
+      </Group>
+
+      {/* 3. Levels. */}
+      <div className="grid gap-3 sm:grid-cols-3">
         <Field label={f.entry}>
-          <Input inputMode="decimal" value={entry} onChange={(e) => setEntry(e.target.value)} placeholder="0,00" />
+          <Input inputMode="decimal" value={entry} onChange={(e) => setEntry(e.target.value)} placeholder="0,00" className="font-semibold" />
         </Field>
-        <Field label={t.partialClose}>
-          <label className={`flex h-11 cursor-pointer items-center gap-2.5 px-3 text-sm ${toggleClass(split)}`}>
-            <input type="checkbox" checked={split} onChange={(e) => toggleSplit(e.target.checked)} className="size-4 accent-(--accent)" />
-            {t.partialCloseLabel}
-          </label>
+        <Field label={t.stopLoss}>
+          <Input inputMode="decimal" value={stopText} onChange={(e) => setStopText(e.target.value)} placeholder="—" />
+        </Field>
+        <Field label={t.takeProfit} hint={split ? t.tpInParts : undefined}>
+          <Input inputMode="decimal" value={split ? '' : single.tpText} onChange={(e) => updateSingle({ tpText: e.target.value })} placeholder={split ? '↓' : '—'} disabled={split} />
         </Field>
       </div>
 
-      {/* 3. Take profit, stop and result: for the whole position or per part. */}
-      <PartsEditor parts={parts} onChange={setParts} split={split} total={position} unitLabel={unitLabel} isFutures={isFutures} />
-
-      {/* What the numbers come to; the per-part pips only here. */}
-      {preview && (
-        <dl className="m-0 flex flex-wrap gap-x-6 gap-y-2 rounded-(--radius-control) border border-line px-4 py-3 text-[13px]">
-          <Metric label={t.result}>
-            {closedParts.length === 0 ? (
-              <span className="text-dim">{all.common.open}</span>
-            ) : (
-              <>
-                <span className={`font-mono font-semibold ${tone(preview.pnlAccount ?? preview.pnlQuote)}`}>
-                  {preview.pnlAccount != null ? formatAmount(preview.pnlAccount, account) : formatAmount(preview.pnlQuote, instrument?.quoteCurrency)}
-                </span>
-                <span className="font-mono text-dim">
-                  {' · '}
-                  {partPips.length > 1 ? `${partPips.join(' · ')} = ` : ''}
-                  {formatNumber(preview.resultUnits, true)} {unit} · {formatNumber(preview.rMultiple, true)} R
-                </span>
-              </>
-            )}
-          </Metric>
-          <Metric label={f.risk}>
-            <span className="font-mono">
-              {preview.riskUnits == null ? '—' : `${formatNumber(preview.riskUnits)} ${unit}`}
-              {riskMoney ? ` · ${formatAmount(riskMoney, account, false)}` : ''}
-              {riskMoney && balance ? ` · ${formatNumber((riskMoney / balance) * 100)}%` : ''}
-            </span>
-          </Metric>
-          <Metric label={t.plannedRR}>
-            <span className="font-mono">{preview.plannedRR == null ? '—' : `1 : ${formatNumber(preview.plannedRR)}`}</span>
-          </Metric>
-          {margin != null && leverage != null && (
-            <Metric label={f.margin(leverage)}>
-              <span className="font-mono">{formatAmount(margin, account, false)}</span>
-            </Metric>
+      {/* 4. How it ended: as a whole, or part by part. */}
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-end gap-3">
+          {!split && (
+            <>
+              <Group label={t.outcome}>
+                <ResultPicker label={t.outcome} value={single.result} onChange={(result) => updateSingle({ result })} />
+              </Group>
+              {single.result === 'manual' && (
+                <Field label={t.closePrice} className="w-36">
+                  <Input inputMode="decimal" value={single.priceText} onChange={(e) => updateSingle({ priceText: e.target.value })} />
+                </Field>
+              )}
+              {single.result !== 'open' && (
+                <Field label={t.closedAt} className="w-52">
+                  <DateTimePicker value={single.closedAt} onChange={(closedAt) => updateSingle({ closedAt })} clearable placeholder={t.closedNow} />
+                </Field>
+              )}
+            </>
           )}
-        </dl>
-      )}
+          {split && <span className="eyebrow">{t.parts}</span>}
+          <span className="grow" />
+          <div className="flex flex-col items-end gap-1">
+            <button
+              type="button"
+              aria-pressed={split}
+              onClick={toggleSplit}
+              disabled={!split && !splittable}
+              className={`flex h-11 items-center gap-2 px-4 text-[13px] font-semibold disabled:cursor-not-allowed disabled:opacity-45 ${toggleClass(split)}`}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                {split ? <path d="M4 12h16" /> : <path d="M4 7h16M4 12h10M4 17h6" />}
+              </svg>
+              {split ? t.splitOff : t.splitOn}
+            </button>
+            {!split && !splittable && <span className="text-[11px] text-dim">{t.splitTooSmall(formatNumber(2 * step), unitLabel)}</span>}
+          </div>
+        </div>
+        {split && <PartsEditor parts={parts} onChange={setParts} total={position} step={step} unitLabel={unitLabel} isFutures={isFutures} tradeStop={stopText} />}
+      </div>
 
-      {/* 4. Psychology and context, always in view. */}
-      <div className="grid gap-4 lg:grid-cols-2">
+      {/* 5. What it comes to; per-part pips only here. Always in view, with dashes until known. */}
+      <dl className="m-0 grid grid-cols-2 gap-px overflow-hidden rounded-(--radius-control) border border-line bg-line text-[13px] lg:grid-cols-4">
+        <Metric label={t.risk}>
+          {preview?.riskUnits == null ? (
+            '—'
+          ) : (
+            <>
+              {formatNumber(preview.riskUnits)} {unit}
+              {riskMoney ? <span className="text-dim"> · {formatAmount(riskMoney, account, false)}</span> : null}
+              {riskMoney && balance ? <span className="text-dim"> · {formatNumber((riskMoney / balance) * 100)}%</span> : null}
+            </>
+          )}
+        </Metric>
+        <Metric label={t.plannedRR}>{preview?.plannedRR == null ? '—' : `1 : ${formatNumber(preview.plannedRR)}`}</Metric>
+        <Metric label={t.result}>
+          {!preview || closedParts.length === 0 ? (
+            <span className="text-dim">{preview ? all.common.open : '—'}</span>
+          ) : (
+            <>
+              <span className={`font-semibold ${tone(preview.pnlAccount ?? preview.pnlQuote)}`}>
+                {preview.pnlAccount != null ? formatAmount(preview.pnlAccount, account) : formatAmount(preview.pnlQuote, instrument?.quoteCurrency)}
+              </span>
+              <span className="text-dim">
+                {' · '}
+                {partPips.length > 1 ? `${partPips.join(' + ')} = ` : ''}
+                {formatNumber(preview.resultUnits, true)} {unit} · {formatNumber(preview.rMultiple, true)} R
+              </span>
+            </>
+          )}
+        </Metric>
+        <Metric label={leverage != null && isCfd ? f.margin(leverage) : t.margin}>{margin != null ? formatAmount(margin, account, false) : '—'}</Metric>
+      </dl>
+
+      {/* 6. Psychology and context, always in view. */}
+      <div className="grid gap-5 lg:grid-cols-2">
         <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
           <legend className="mb-2 text-sm font-semibold">{f.emotions}</legend>
           <div className="flex flex-wrap gap-1.5">
@@ -436,31 +506,13 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
         <Field label={f.notes}>
           <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={10_000} rows={3} className="min-h-0 font-sans" />
         </Field>
-        <div className="flex flex-col gap-2">
-          <span className="text-sm font-semibold">{f.screenshots}</span>
-          {trade && trade.screenshots.length > 0 && (
-            <ul className="m-0 grid list-none grid-cols-4 gap-2 p-0">
-              {trade.screenshots.map((shot) => (
-                <li key={shot.id} className="relative">
-                  <a href={shot.url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-(--radius-control) border border-line">
-                    <img src={shot.url} alt={f.screenshotAlt} className="block aspect-video w-full object-cover" />
-                  </a>
-                  <button type="button" aria-label={f.removeScreenshot} onClick={() => removeShot.mutate({ tradeId: trade.id, screenshotId: shot.id })} className="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-lg bg-panel/90 text-sell shadow-sm">
-                    ✕
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <input
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            multiple
-            aria-label={f.addScreenshots}
-            onChange={(e) => setFiles([...(e.target.files ?? [])])}
-            className="text-sm text-dim file:mr-3 file:h-9 file:cursor-pointer file:rounded-(--radius-chip) file:border file:border-line file:bg-panel file:px-3 file:font-sans file:text-[13px] file:font-semibold file:text-ink"
-          />
-        </div>
+        <ScreenshotDrop
+          saved={trade?.screenshots ?? []}
+          onRemoveSaved={(id) => trade && removeShot.mutate({ tradeId: trade.id, screenshotId: id })}
+          pending={files}
+          onAdd={addFiles}
+          onRemovePending={(i) => setFiles((current) => current.filter((_, j) => j !== i))}
+        />
         {strategies.length > 0 && (
           <div className="flex flex-col gap-2">
             <div className="flex flex-wrap items-center gap-3">
@@ -495,7 +547,7 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
         )}
       </div>
 
-      {/* 5. Advanced: signal, source, spread, rate. */}
+      {/* 7. Advanced: signal, source, spread, rate. */}
       <div className="flex flex-col gap-3">
         <Button size="sm" variant="ghost" aria-expanded={advanced} onClick={() => setAdvanced((a) => !a)} className="self-start">
           {advanced ? '− ' : '+ '}
@@ -580,11 +632,21 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
   );
 }
 
+/** A label over a group of buttons (a <label> would only reach the first one). */
+function Group({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <span className="eyebrow">{label}</span>
+      {children}
+    </div>
+  );
+}
+
 function Metric({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex items-baseline gap-2">
-      <dt className="text-dim">{label}</dt>
-      <dd className="m-0">{children}</dd>
+    <div className="flex min-w-0 flex-col gap-0.5 bg-panel px-3 py-2.5 sm:px-4">
+      <dt className="text-[11px] text-dim">{label}</dt>
+      <dd className="m-0 font-mono">{children}</dd>
     </div>
   );
 }

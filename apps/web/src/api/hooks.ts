@@ -6,6 +6,7 @@ import type {
   SystemStatus,
   BasisOverview,
   CalendarRefresh,
+  EventHistory,
   CalendarResponse,
   DailySpread,
   Educator,
@@ -75,10 +76,17 @@ export function useUpdateSettings() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (patch: UpdateSettingsInput) => api<PublicUser>('/me', { method: 'PATCH', json: patch }),
+    // The dashboard layout shows at once; the server's answer then confirms it.
+    onMutate: (patch) => {
+      if (!patch.dashboardHidden) return;
+      client.setQueryData<PublicUser>(['me'], (me) => (me ? { ...me, settings: { ...me.settings, dashboardHidden: patch.dashboardHidden! } } : me));
+    },
     onSuccess: (user, patch) => {
       client.setQueryData(['me'], user);
       // Emotion labels, stats labels and messages come from the API in the user's language.
       if (patch.language) void client.invalidateQueries({ predicate: (q) => q.queryKey[0] !== 'me' });
+      // Only the layout changed: nothing to recompute.
+      if (Object.keys(patch).every((key) => key === 'dashboardHidden')) return;
       // Currency, time zone and limits change how trades and stats are computed.
       void client.invalidateQueries({ queryKey: ['trades'] });
       void client.invalidateQueries({ queryKey: ['stats'] });
@@ -247,6 +255,15 @@ export function useRefreshCalendar() {
     onSuccess: () => client.invalidateQueries({ queryKey: ['calendar'] }),
   });
 }
+
+/** Earlier releases of one calendar event (the event card's chart). */
+export const useEventHistory = (id: string | null) =>
+  useQuery({
+    queryKey: ['calendar', 'history', id],
+    queryFn: () => api<EventHistory>(`/calendar/${id}/history`),
+    enabled: id != null,
+    staleTime: 10 * 60_000,
+  });
 
 export interface NewsParams {
   categories?: string[];

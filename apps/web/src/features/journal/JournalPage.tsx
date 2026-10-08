@@ -26,8 +26,8 @@ function MonthOverview({ user, today }: { user: PublicUser; today: string }) {
 
   return (
     <>
-      {/* Five in a row from 1400 px (87.5rem, in rem so it sorts after sm:); below that pairs, so today and the month share a row. */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 min-[87.5rem]:grid-cols-5">
+      {/* Rows fill the width: a shorter last row stretches its tiles instead of leaving a hole. */}
+      <div className="flex flex-wrap gap-4 *:min-w-0 *:grow *:basis-52">
         <Stat label={t.winRate} value={formatPercent(s?.winRate)} visual={<Gauge percent={s?.winRate ?? null} />} foot={s ? t.winsLosses(s.wins, s.losses) : undefined} />
         <Stat label={t.avgR} value={s?.avgR == null ? '—' : `${formatNumber(s.avgR, true)} R`} foot={s?.avgPlannedRR != null ? t.planRR(formatNumber(s.avgPlannedRR)) : undefined} />
         <Stat
@@ -44,9 +44,10 @@ function MonthOverview({ user, today }: { user: PublicUser; today: string }) {
         />
         <Stat label={t.profitFactor} value={formatNumber(s?.profitFactor)} foot={s ? t.maxLossStreak(s.maxLossStreak) : undefined} />
       </div>
-      <Panel title={t.equityCurve} actions={<span className="font-mono text-xs text-dim">{month}</span>}>
-        <div className="px-3 py-4">
+      <Panel title={t.equityCurve} actions={<span className="font-mono text-xs text-dim">{month}</span>} className="flex grow flex-col">
+        <div className="flex grow flex-col px-3 py-4">
           <EquityChart
+            fill
             data={stats?.equityCurve ?? []}
             currency={currency}
             height={220}
@@ -75,11 +76,11 @@ function JournalAccounts({ currency }: { currency: string }) {
 export function JournalPage() {
   const all = useT();
   const { data: me } = useMe();
-  if (!me) return <main className="grow p-8 text-dim">{all.common.loading}</main>;
+  if (!me) return <main className="page text-dim">{all.common.loading}</main>;
   const today = toLocalDate(new Date(), me.settings.timezone);
 
   return (
-    <div className="flex grow flex-col gap-6 p-4 md:px-8 md:py-6 xl:flex-row">
+    <div className="page gap-6 xl:flex-row">
       <main className="flex min-w-0 grow flex-col gap-5">
         <div className="flex flex-wrap items-center gap-4">
           <h1 className="m-0 text-2xl font-bold tracking-tight">{all.nav.journal}</h1>

@@ -26,17 +26,17 @@ export interface ChartLevel {
 const MARGIN = { top: 14, right: 16, bottom: 26 };
 const TONE: Record<ChartLevel['tone'], string> = { dim: 'var(--dim)', sell: 'var(--sell)', buy: 'var(--buy)' };
 
-function useWidth() {
+function useSize() {
   const ref = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
+  const [size, setSize] = useState({ width: 0, height: 0 });
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const observer = new ResizeObserver(([entry]) => setWidth(entry!.contentRect.width));
+    const observer = new ResizeObserver(([entry]) => setSize({ width: entry!.contentRect.width, height: entry!.contentRect.height }));
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
-  return [ref, width] as const;
+  return [ref, size] as const;
 }
 
 /**
@@ -46,7 +46,8 @@ function useWidth() {
 export function EquityChart({
   data,
   currency,
-  height = 230,
+  height: minHeight = 230,
+  fill = false,
   balance,
   levels = [],
   polarity = false,
@@ -54,6 +55,8 @@ export function EquityChart({
   data: EquityPoint[];
   currency: string;
   height?: number;
+  /** Grow to the free height of a flex column (at least `height`), so the card has no empty space. */
+  fill?: boolean;
   balance?: BalanceCurve | null;
   levels?: ChartLevel[];
   /** Smooth line, green above the baseline and red below it, with a dashed baseline (dashboard). */
@@ -62,13 +65,17 @@ export function EquityChart({
   const t = useT().chart;
   // useId contains characters that are not valid in url(#…).
   const clipId = `eq${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
-  const [ref, width] = useWidth();
+  const [ref, size] = useSize();
+  const width = size.width;
+  const height = fill ? Math.max(minHeight, size.height) : minHeight;
+  // In fill mode the box takes the free space and the drawing sits inside it, so it never pushes it.
+  const box = fill ? { flex: '1 1 auto', minHeight } : { height };
   const [hover, setHover] = useState<number | null>(null);
 
   const days = balance ? balance.points.map((p) => p.date) : data.map((p) => p.date);
   if (days.length === 0) {
     return (
-      <div ref={ref} className="flex items-center justify-center text-sm text-dim" style={{ height }}>
+      <div ref={ref} className="flex items-center justify-center text-sm text-dim" style={box}>
         {t.empty}
       </div>
     );
@@ -132,9 +139,9 @@ export function EquityChart({
   const tooltipX = active == null ? 0 : x(dates[active]!) + left;
 
   return (
-    <div ref={ref} className="relative" style={{ height }}>
+    <div ref={ref} className="relative" style={box}>
       {width > 0 && (
-        <svg width={width} height={height} role="img" aria-label={t.aria}>
+        <svg width={width} height={height} role="img" aria-label={t.aria} className={fill ? 'absolute inset-0' : undefined}>
           <g transform={`translate(${left},${MARGIN.top})`}>
             {ticks.map((v) => (
               <g key={v}>

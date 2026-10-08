@@ -1,6 +1,7 @@
 // Request schemas shared by the API (validation) and clients (forms).
 import { z } from 'zod';
 import {
+  DASHBOARD_WIDGETS,
   ACCENT_COLORS,
   ACCOUNT_TYPES,
   ROLE_KEYS,
@@ -86,6 +87,11 @@ export const updateSettingsSchema = z
       .max(30)
       // Duplicates differing only in case are dropped; the first spelling stays.
       .transform((words) => words.filter((w, i) => words.findIndex((o) => o.toLowerCase() === w.toLowerCase()) === i)),
+    /** Dashboard widgets the user hid (the rest show). */
+    dashboardHidden: z
+      .array(z.enum(DASHBOARD_WIDGETS))
+      .max(DASHBOARD_WIDGETS.length)
+      .transform((ids) => [...new Set(ids)]),
   })
   .partial();
 
@@ -133,6 +139,10 @@ const accountFields = z.object({
     .refine((v) => (LEVERAGE_OPTIONS as readonly number[]).includes(v), 'validation.leverage')
     .nullable()
     .optional(),
+  /** Own daily trade limit; null = the default from the settings. */
+  maxTradesPerDay: z.number().int().min(1).max(100).nullable().optional(),
+  /** Own losses warning threshold; null = the default from the settings. */
+  lossStreakAlert: z.number().int().min(1).max(20).nullable().optional(),
 });
 
 /** Prop accounts need a market and a maximum drawdown. */

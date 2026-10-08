@@ -221,6 +221,18 @@ export function exitReason(trade: {
   return null;
 }
 
+/** The smallest size step: 0.01 lot for CFD, one contract for futures. */
+export const sizeStep = (market: 'cfd' | 'futures') => (market === 'futures' ? 1 : 0.01);
+
+/** True when `size` is a whole number of steps (0.07 lot yes, 0.075 no). */
+export const isWholeSteps = (size: number, step: number) => Math.abs(size / step - Math.round(size / step)) < 1e-6;
+
+/**
+ * A position can be closed in parts only when each part can be at least one step: 0.02 lot or two
+ * contracts. A 0.01 lot position cannot be split, as no broker closes less than 0.01.
+ */
+export const canSplit = (size: number | null | undefined, step: number) => size != null && size >= 2 * step - 1e-9;
+
 /**
  * Position size that risks `riskQuote` (quote currency) between entry and stop, rounded down to
  * `step` (0.01 lot for CFD, 1 contract for futures). Null without a stop or when even one step

@@ -28,11 +28,9 @@ export function FavoriteInstrumentsPicker() {
               .filter(g.match)
               .map((i) => (
                 <Chip key={i.id} active={i.favorite} label={t.toggle(i.symbol, i.favorite)} onClick={() => toggle.mutate({ id: i.id, favorite: !i.favorite })}>
-                  <span aria-hidden className={i.favorite ? 'text-accent-ink' : 'opacity-40'}>
-                    {i.favorite ? '★' : '☆'}
-                  </span>
-                  <InstrumentLogo symbol={i.symbol} size={16} />
-                  <span className="font-mono">{i.symbol}</span>
+                  <Star filled={i.favorite} />
+                  <InstrumentLogo symbol={i.symbol} size={18} />
+                  <span className="font-semibold">{i.symbol}</span>
                 </Chip>
               ))}
           </div>
@@ -42,3 +40,17 @@ export function FavoriteInstrumentsPicker() {
   );
 }
 
+/** Drawn rather than the ★/☆ characters, which come from a fallback font and look rough at this size. */
+function Star({ filled }: { filled: boolean }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden className={filled ? 'text-accent-ink' : 'text-dim'}>
+      <path
+        d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"
+        fill={filled ? 'currentColor' : 'none'}
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
