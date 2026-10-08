@@ -1,5 +1,6 @@
 import type { Trade } from '@trading/api/types';
 import { toLocalDate } from '@trading/shared';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
 import { useInstruments, useMe, useTrades, type TradeQuery } from '../../api/hooks.ts';
 import { Button } from '../../components/ui/Button.tsx';
@@ -7,6 +8,7 @@ import { Panel } from '../../components/ui/Panel.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
 import { addDays } from '../../lib/format.ts';
+import { AccountsAndMonitor } from '../account/AccountsAndMonitor.tsx';
 import { AccountSwitcher, useSelectedAccount } from '../account/AccountSwitcher.tsx';
 import { Mt5ImportDialog } from '../journal/Mt5ImportDialog.tsx';
 import { rowOutcome, TradeFilters, TradeTable } from '../journal/TradeTable.tsx';
@@ -83,7 +85,14 @@ export function TradesPage() {
   const tt = all.trades;
   const { data: me } = useMe();
   const { data: instruments } = useInstruments();
-  const [importOpen, setImportOpen] = useState(false);
+  const search = useSearch({ strict: false }) as { import?: 'mt5' };
+  const navigate = useNavigate();
+  const [importOpen, setImportOpenState] = useState(search.import === 'mt5');
+  const setImportOpen = (open: boolean) => {
+    setImportOpenState(open);
+    // Closing drops `?import=mt5`, so a reload does not open it again.
+    if (!open && search.import) void navigate({ to: '/transakcje', search: {}, replace: true });
+  };
   const [filters, setFilters] = useState<TradeQuery>({});
   const [limit, setLimit] = useState(PAGE);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -94,7 +103,7 @@ export function TradesPage() {
   const { accounts, filter } = useSelectedAccount();
   const trades = useTrades({ ...filters, account: filter || undefined, limit });
 
-  if (!me || !instruments) return <main className="grow p-8 text-dim">{all.common.loading}</main>;
+  if (!me || !instruments) return <main className="page text-dim">{all.common.loading}</main>;
 
   const setComposerOpen = (open: boolean) => {
     setComposerOpenState(open);
@@ -118,7 +127,7 @@ export function TradesPage() {
   };
 
   return (
-    <main className="flex grow flex-col gap-5 p-4 md:px-8 md:py-6">
+    <main className="page">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="m-0 text-2xl font-bold tracking-tight">{tt.title}</h1>
         <div className="grow" />
@@ -157,17 +166,20 @@ export function TradesPage() {
         </div>
       )}
 
-      <section id="trade-composer" className="card scroll-mt-28">
-        <header className="flex items-center gap-3 px-5 py-3.5">
+      {/* The account and the day's limits in sight while entering trades. */}
+      <AccountsAndMonitor currency={me.settings.accountCurrency} />
+
+      <section id="trade-composer" className="card scroll-mt-24 lg:scroll-mt-6">
+        <header className="flex items-center gap-3 px-4 py-3.5 sm:px-5">
           <h2 className="m-0 text-[15px] font-bold">{all.composer.title}</h2>
-          <span className="text-xs text-dim">{tt.composerHint}</span>
+          <span className="hidden text-xs text-dim md:inline">{tt.composerHint}</span>
           <div className="grow" />
           <Button size="sm" variant="ghost" aria-expanded={composerOpen} onClick={() => setComposerOpen(!composerOpen)}>
             {composerOpen ? tt.collapse : tt.expand}
           </Button>
         </header>
         {composerOpen && (
-          <div className="border-t border-line p-5">
+          <div className="border-t border-line p-4 sm:p-5">
             <TradeComposer
               key={`new-${composerKey}-${filter}`}
               user={me}

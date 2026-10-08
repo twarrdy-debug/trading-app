@@ -24,7 +24,7 @@ function Errors({ lines }: { lines: string[] }) {
 export function AnalysisPage() {
   const t = useT().analysis;
   return (
-    <main className="flex grow flex-col gap-5 p-4 md:px-8 md:py-6">
+    <main className="page">
       <h1 className="m-0 text-2xl font-bold tracking-tight">{t.title}</h1>
       <StrategiesPanel />
       <Panel title={t.dailyTitle}>

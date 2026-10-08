@@ -2,7 +2,7 @@ import type { AccountSummary } from '@trading/api/types';
 import { LEVERAGE_OPTIONS, type AccountType, type DrawdownType, type Market } from '@trading/shared';
 import { useState } from 'react';
 import { ApiError } from '../../api/client.ts';
-import { useAccounts, useDeleteAccount, useSaveAccount } from '../../api/hooks.ts';
+import { useAccounts, useDeleteAccount, useMe, useSaveAccount } from '../../api/hooks.ts';
 import { Button } from '../../components/ui/Button.tsx';
 import { Field, Input, Segmented } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
@@ -37,6 +37,7 @@ export function AccountsManager({ currency }: { currency: string }) {
                   {a.prop ? ` · DD ${toInputNumber(a.prop.maxDrawdownPct)}%${a.prop.drawdownType === 'eod' ? ' EOD' : ''}` : ''}
                   {a.prop?.target ? ` · ${all.accounts.profitTarget} ${toInputNumber(a.prop.target.pct)}%` : ''}
                   {a.leverage ? ` · 1:${a.leverage}` : ''}
+                  {a.maxTradesPerDay != null || a.lossStreakAlert != null ? ` · ${t.ownLimits(a.maxTradesPerDay, a.lossStreakAlert)}` : ''}
                 </span>
               </div>
               <Button size="sm" variant="ghost" onClick={() => setEditing(a.id)}>
@@ -71,6 +72,7 @@ function AccountForm({ account, currency, onDone }: { account?: AccountSummary; 
   const all = useT();
   const t = all.accounts;
   const save = useSaveAccount();
+  const { data: me } = useMe();
   const [name, setName] = useState(account?.name ?? '');
   const [type, setType] = useState<AccountType>(account?.type ?? 'live');
   const [market, setMarket] = useState<Market>(account?.market ?? 'cfd');
@@ -79,6 +81,9 @@ function AccountForm({ account, currency, onDone }: { account?: AccountSummary; 
   const [drawdownType, setDrawdownType] = useState<DrawdownType>(account?.prop?.drawdownType ?? 'static');
   const [target, setTarget] = useState(toInputNumber(account?.prop?.target?.pct));
   const [leverage, setLeverage] = useState(account?.leverage ? String(account.leverage) : '');
+  // Empty: the account follows the defaults from Settings → Discipline.
+  const [tradeLimit, setTradeLimit] = useState(account?.maxTradesPerDay?.toString() ?? '');
+  const [lossLimit, setLossLimit] = useState(account?.lossStreakAlert?.toString() ?? '');
   const [errors, setErrors] = useState<string[]>([]);
 
   const prop = type === 'prop';
@@ -104,6 +109,8 @@ function AccountForm({ account, currency, onDone }: { account?: AccountSummary; 
           ...(prop ? { drawdownType } : {}),
           profitTargetPct: prop ? (parseDecimal(target) ?? null) : null,
           leverage: showLeverage && leverage ? Number(leverage) : null,
+          maxTradesPerDay: tradeLimit.trim() ? Number(tradeLimit) : null,
+          lossStreakAlert: lossLimit.trim() ? Number(lossLimit) : null,
         },
       },
       { onSuccess: onDone, onError: (err) => setErrors(err instanceof ApiError ? err.lines : [err.message]) },
@@ -184,6 +191,14 @@ function AccountForm({ account, currency, onDone }: { account?: AccountSummary; 
             />
           </Field>
         )}
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field label={t.tradeLimit} help={t.limitsHelp}>
+          <Input type="number" inputMode="numeric" min={1} max={100} step={1} value={tradeLimit} onChange={(e) => setTradeLimit(e.target.value)} placeholder={t.byDefault(me?.settings.maxTradesPerDay ?? null)} />
+        </Field>
+        <Field label={t.lossLimit}>
+          <Input type="number" inputMode="numeric" min={1} max={20} step={1} value={lossLimit} onChange={(e) => setLossLimit(e.target.value)} placeholder={t.byDefault(me?.settings.lossStreakAlert ?? null)} />
+        </Field>
       </div>
       {errors.length > 0 && (
         <ul role="alert" className="m-0 list-none rounded-(--radius-control) bg-sell-soft p-3 text-[13px] text-sell">

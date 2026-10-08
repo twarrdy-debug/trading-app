@@ -1,5 +1,5 @@
 import { categorizeEvent, toLocalDate, type CalendarQuery, type EventImpact } from '@trading/shared';
-import { and, asc, desc, eq, gte, inArray, lte, notInArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lt, lte, notInArray } from 'drizzle-orm';
 import type { DB } from '../db/client.ts';
 import { economicEvents, instrumentCurrencies, instruments } from '../db/schema.ts';
 import type { CurrentUser } from '../plugins/current-user.ts';
@@ -202,6 +202,30 @@ export async function listEvents(db: DB, user: CurrentUser, q: CalendarQuery) {
       to: lastEvent ? toLocalDate(lastEvent.last, user.timezone) : null,
       fetchedAt,
     },
+  };
+}
+
+/**
+ * Earlier releases of the same event (same title and currency), oldest first, for the event card's
+ * chart. Forex Factory has no actuals, so a release without one (from a matched headline) takes the
+ * next release's `previous`, which is that result as later published (revisions included).
+ */
+export async function eventHistory(db: DB, id: string, limit = 8) {
+  const [event] = await db.select().from(economicEvents).where(eq(economicEvents.id, id));
+  if (!event) return null;
+  const earlier = await db
+    .select()
+    .from(economicEvents)
+    .where(and(eq(economicEvents.title, event.title), eq(economicEvents.currency, event.currency), lt(economicEvents.eventTime, event.eventTime)))
+    .orderBy(desc(economicEvents.eventTime))
+    .limit(limit);
+  // Newest first: the release after earlier[i] is chain[i].
+  const chain = [event, ...earlier];
+  return {
+    history: earlier
+      .map((e, i) => ({ id: e.id, eventTime: e.eventTime, forecast: e.forecast, value: e.actual ?? chain[i]!.previous }))
+      .filter((e): e is typeof e & { value: string } => e.value != null)
+      .reverse(),
   };
 }
 

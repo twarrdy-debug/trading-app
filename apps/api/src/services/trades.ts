@@ -1,6 +1,9 @@
 import {
   averageExitPrice,
+  canSplit,
   closesPosition,
+  isWholeSteps,
+  sizeStep,
   computeTradeMetrics,
   tradeSession,
   type PartResult,
@@ -39,7 +42,7 @@ import {
 import { badRequest, notFound } from '../errors.ts';
 import { t as tr } from '../i18n.ts';
 import type { CurrentUser } from '../plugins/current-user.ts';
-import { accountBalanceCurve, accountOverview, accountTradeRows, balanceAt, getAccount, listAccounts } from './accounts.ts';
+import { accountBalanceCurve, accountLimits, accountOverview, accountTradeRows, balanceAt, getAccount, listAccounts } from './accounts.ts';
 import { getFxRate, supportsAutoRate, type FxProvider } from './fx.ts';
 
 export interface TradeContext {
@@ -177,6 +180,10 @@ function resolveParts(instrument: Instrument, draft: TradeDraft, parts: TradePar
           },
         ]
       : []);
+  const step = sizeStep(instrument.market);
+  if (list.length > 1 && !canSplit(draft.positionSize, step)) {
+    throw badRequest('partsTooSmall', { size: draft.positionSize, min: 2 * step });
+  }
   let previousStop = draft.stopLoss ?? null;
   const resolved = list.map((p, i): ResolvedPart => {
     const stopLoss = p.stopLoss === undefined ? previousStop : p.stopLoss;
@@ -195,6 +202,7 @@ function resolveParts(instrument: Instrument, draft: TradeDraft, parts: TradePar
       if (price == null) throw badRequest('partNoPrice', { n: i + 1 });
     }
     if (instrument.market === 'futures' && !Number.isInteger(p.size)) throw badRequest('futuresWholeContracts', { symbol: instrument.symbol });
+    if (list.length > 1 && !isWholeSteps(p.size, step)) throw badRequest('partSizeStep', { n: i + 1, step });
     return { kind: p.result, takeProfit, stopLoss, price, size: p.size, closedAt: price != null && p.closedAt ? new Date(p.closedAt) : null };
   });
   const total = resolved.reduce((sum, p) => sum + p.size, 0);
@@ -527,8 +535,11 @@ async function decorate(db: DB, user: CurrentUser, rows: NumberedRow[]) {
     /** The same as % of its account's balance when the trade was opened (null without an account). */
     riskPct: riskAccount != null && balance != null && balance > 0 ? round2((riskAccount / balance) * 100) : null,
     dayLabel: formatDayLabel(t.dayIndex, t.tradeDate, t.direction),
-    /** Over the daily limit within the trade's account (the limit applies to each account). */
-    overDailyLimit: user.maxTradesPerDay != null && t.accountDayIndex > user.maxTradesPerDay,
+    /** Over the daily limit within the trade's account (its own limit, or the default). */
+    overDailyLimit: (() => {
+      const limit = accountLimits(user, account).maxTradesPerDay;
+      return limit != null && t.accountDayIndex > limit;
+    })(),
     status: t.exitPrice == null ? ('open' as const) : ('closed' as const),
     /** Win, loss or breakeven (±BREAKEVEN_R); null while open. */
     outcome: tradeOutcome(t),
@@ -618,6 +629,7 @@ export async function tradingMonitor(db: DB, user: CurrentUser) {
   const isLoss = (t: (typeof rows)[number]) => tradeOutcome(t) === 'loss';
 
   const group = (accountId: string | null, name: string | null) => {
+    const limits = accountLimits(user, accounts.find((a) => a.id === accountId));
     const own = rows.filter((t) => t.accountId === accountId);
     const closed = own
       .filter((t) => t.exitPrice != null)
@@ -630,13 +642,29 @@ export async function tradingMonitor(db: DB, user: CurrentUser) {
       /** null = trades without an account. */
       accountId,
       name,
+      /** The limits in force for this account (its own, or the defaults from the settings). */
+      maxTradesPerDay: limits.maxTradesPerDay,
+      lossLimit: limits.lossStreakAlert,
+      /** Whether the account overrides a default. */
+      ownLimits: limits.maxTradesPerDay !== user.maxTradesPerDay || limits.lossStreakAlert !== user.lossStreakAlert,
       tradesToday: own.length,
-      overLimit: user.maxTradesPerDay != null && own.length > user.maxTradesPerDay,
+      overLimit: limits.maxTradesPerDay != null && own.length > limits.maxTradesPerDay,
       lossCount: counted.length,
-      alert: counted.length >= user.lossStreakAlert,
+      alert: counted.length >= limits.lossStreakAlert,
       /** Identifies the counted losses, so a dismissed alert comes back after the next loss. */
       alertKey: `${user.lossAlertMode}:${accountId ?? 'none'}:${counted.map((t) => t.id).join(',')}`,
       lossLabels: counted.map((t) => formatDayLabel(t.dayIndex, t.tradeDate, t.direction)),
+      /** Result of today's closed trades in the account currency. */
+      pnlToday: round2(closed.reduce((sum, t) => sum + (t.pnlAccount ?? 0), 0)),
+      /** Today's trades in opening order; `outcome` is null while a trade is open. */
+      trades: own.map((t) => ({
+        id: t.id,
+        openedAt: t.openedAt,
+        symbol: t.instrumentSymbol,
+        outcome: t.exitPrice == null ? null : tradeOutcome(t),
+        rMultiple: t.exitPrice == null ? null : t.rMultiple,
+        pnl: t.exitPrice == null ? null : t.pnlAccount,
+      })),
     };
   };
 
@@ -648,6 +676,7 @@ export async function tradingMonitor(db: DB, user: CurrentUser) {
 
   return {
     date: today,
+    /** The defaults from the settings; each group carries the limits in force for it. */
     maxTradesPerDay: user.maxTradesPerDay,
     lossMode: user.lossAlertMode,
     lossLimit: user.lossStreakAlert,
@@ -724,6 +753,9 @@ export async function tradeStats(db: DB, user: CurrentUser, filters: Pick<TradeF
     ? await db.select().from(tradeEmotions).where(inArray(tradeEmotions.tradeId, rows.map((r) => r.id)))
     : [];
   const educatorRows = await db.select({ id: users.id, name: users.displayName }).from(users).where(eq(users.role, 'educator'));
+  const accounts = await listAccounts(db, user);
+  // Each account's own daily limits for the discipline checks.
+  const accountsById = new Map(accounts.map((a) => [a.id, a]));
 
   const all = emptyBucket();
   const byDay = new Map<string, number>();
@@ -794,13 +826,14 @@ export async function tradeStats(db: DB, user: CurrentUser, filters: Pick<TradeF
     day.trades++;
     if (win) day.wins++;
     if (loss) day.losses++;
-    if (user.maxTradesPerDay != null && t.accountDayIndex > user.maxTradesPerDay) day.overLimit = true;
+    const limits = accountLimits(user, accountsById.get(t.accountId ?? ''));
+    if (limits.maxTradesPerDay != null && t.accountDayIndex > limits.maxTradesPerDay) day.overLimit = true;
     if (t.stopLoss == null) day.missingStop = true;
     if (!emotionRows.some((e) => e.tradeId === t.id)) day.missingEmotions = true;
     const key = t.accountId ?? 'none';
     const counted = loss ? (day.lossRun.get(key) ?? 0) + 1 : user.lossAlertMode === 'day' ? (day.lossRun.get(key) ?? 0) : 0;
     day.lossRun.set(key, counted);
-    if (counted >= user.lossStreakAlert) day.lossAlert = true;
+    if (counted >= limits.lossStreakAlert) day.lossAlert = true;
     add(byInstrument, t.instrumentSymbol, win, loss, pnl, t.rMultiple);
     const educator = educatorRows.find((e) => e.id === t.educatorId)?.name;
     const sourceLabel =
@@ -835,7 +868,6 @@ export async function tradeStats(db: DB, user: CurrentUser, filters: Pick<TradeF
     });
 
   const entries = (map: Map<string, Bucket>) => [...map.entries()].map(([key, b]) => ({ key, ...summarize(b) }));
-  const accounts = await listAccounts(db, user);
   const accountRows = await accountTradeRows(db, user, accounts.map((a) => a.id));
   const overviews = accounts.map((a) => accountOverview(a, accountRows.get(a.id) ?? [], user.timezone));
   const selected = filters.account && filters.account !== 'none' ? accounts.find((a) => a.id === filters.account) : undefined;

@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "dashboard_hidden" text[] DEFAULT '{}' NOT NULL;

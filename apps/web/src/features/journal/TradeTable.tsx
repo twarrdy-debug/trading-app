@@ -6,6 +6,7 @@ import { Field, Input } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
 import { currentLocale, formatAmount, formatNumber, formatPrice, formatUnits } from '../../lib/format.ts';
+import { useMedia } from '../../lib/media.ts';
 import { InstrumentBadge } from '../../components/ui/InstrumentBadge.tsx';
 import { instrumentOptions } from '../../lib/instruments.ts';
 import { DateTimePicker } from '../../components/ui/DateTimePicker.tsx';
@@ -202,6 +203,8 @@ export function TradeTable({
 }) {
   const all = useT();
   const labels = all.table;
+  // Cards on phones, the table from `md`; the editor is mounted in the visible one only.
+  const wide = useMedia('(min-width: 48rem)');
   if (trades.length === 0) {
     return <p className="m-0 px-5 py-10 text-center text-sm text-dim">{labels.empty}</p>;
   }
@@ -210,7 +213,62 @@ export function TradeTable({
   const showAccount = accounts.length > 0;
 
   return (
-    <div className="overflow-x-auto">
+    <>
+    {/* Phones: one card per trade with what matters at a glance; the editor opens under it. */}
+    <ul className="m-0 flex list-none flex-col gap-2 p-3 md:hidden">
+      {trades.map((t) => {
+        const outcome = rowOutcome(t);
+        const opened = new Date(t.openedAt);
+        const account = accounts.find((a) => a.id === t.accountId);
+        const selected = t.id === selectedId;
+        return (
+          <li key={t.id} className="flex flex-col gap-2">
+            <button
+              type="button"
+              aria-current={selected || undefined}
+              aria-label={labels.openTradeAria(t.dayLabel)}
+              onClick={() => onSelect(t)}
+              className={`flex flex-col gap-2 rounded-(--radius-control) border border-line p-3 text-left font-mono text-sm transition active:brightness-110 ${ROW_TONE[outcome]} ${
+                selected ? 'outline-2 -outline-offset-2 outline-accent-ink' : ''
+              }`}
+            >
+              <span className="flex items-start justify-between gap-3">
+                <span className="flex min-w-0 flex-col items-start gap-1.5">
+                  <span className="flex items-center gap-2">
+                    <InstrumentBadge symbol={t.instrument.symbol} />
+                    <DirectionMark direction={t.direction} />
+                  </span>
+                  <span className="font-sans text-xs text-dim">
+                    {dateFormat.format(opened)} <span className="font-mono font-semibold text-ink">{timeFormat.format(opened)}</span> · #{t.dayIndex}
+                    {showAccount && ` · ${account?.name ?? all.accounts.none}`}
+                  </span>
+                </span>
+                <span className="flex shrink-0 flex-col items-end gap-0.5">
+                  <span className={`text-[15px] font-semibold ${tone(t.pnlAccount)}`}>
+                    {t.pnlAccount != null ? formatAmount(t.pnlAccount, t.accountCurrency) : t.pnlQuote != null ? labels.noRate : '—'}
+                  </span>
+                  <span className={`text-xs ${tone(t.rMultiple)}`}>{t.rMultiple == null ? '' : `${formatNumber(t.rMultiple, true)} R`}</span>
+                </span>
+              </span>
+              <span className="flex flex-wrap items-center gap-2 text-xs text-dim">
+                {t.partial ? (
+                  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 font-sans text-[11px] font-bold whitespace-nowrap ${BADGE.open}`}>
+                    {labels.partial(formatNumber(t.closedSize), formatNumber(t.positionSize))}
+                  </span>
+                ) : (
+                  <OutcomeBadge outcome={outcome} />
+                )}
+                <span>{t.resultUnits == null ? all.common.open : formatUnits(t.resultUnits, all.units.short[t.instrument.measureUnit])}</span>
+                {t.redNews.length > 0 && <RedNewsMark trade={t} />}
+                <span className="ml-auto font-sans">{all.tradeSessions[t.session] ?? t.session}</span>
+              </span>
+            </button>
+            {selected && renderDetail && !wide && <div className="card p-3 font-sans">{renderDetail(t)}</div>}
+          </li>
+        );
+      })}
+    </ul>
+    <div className="hidden overflow-x-auto md:block">
       <table className="w-full min-w-[1080px] border-collapse font-mono text-sm">
         <thead className="bg-raised">
           <tr>
@@ -359,7 +417,7 @@ export function TradeTable({
                   )}
                 </td>
               </tr>
-              {selected && renderDetail && (
+              {selected && renderDetail && wide && (
                 <tr className="border-b border-line bg-panel">
                   <td colSpan={20} className="p-0">
                     <div className="sticky left-0 w-[min(100%,calc(100vw-4rem))] p-5 font-sans">{renderDetail(t)}</div>
@@ -372,5 +430,6 @@ export function TradeTable({
         </tbody>
       </table>
     </div>
+    </>
   );
 }

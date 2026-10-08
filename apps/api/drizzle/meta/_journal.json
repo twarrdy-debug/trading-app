@@ -162,6 +162,20 @@
       "when": 1791375494897,
       "tag": "0022_two_factor",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1791407532984,
+      "tag": "0023_dashboard_widgets",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791446451101,
+      "tag": "0024_acoustic_shadow_king",
+      "breakpoints": true
     }
   ]
 }
