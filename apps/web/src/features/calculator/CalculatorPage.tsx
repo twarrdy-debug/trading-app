@@ -237,6 +237,8 @@ export function CalculatorPage() {
   ];
   const targetSymbol = target === 'cfd' ? PAIR.cfd : FUT;
   const sourceSymbol = levelsSide === 'cfd' ? PAIR.cfd : FUT;
+  // Where the CFD price came from: the broker CFD (Capital.com) or the cash index / spot gold.
+  const reference = snapshot?.cfdSource === 'capital' ? t.referenceCapital : (t.reference[PAIR.key] ?? '');
   const history = [...(measured?.history ?? [])].sort((a, b) => a.measuredAt.localeCompare(b.measuredAt));
 
   /** Swapping keeps the converted price, so the other market can be read back at once. */
@@ -304,7 +306,7 @@ export function CalculatorPage() {
                 <dd className="m-0 text-right text-dim">{shortTime(snapshot.futuresQuotedAt)}</dd>
               </dl>
               <span className={`text-xs ${snapshot.live ? 'text-dim' : 'font-medium text-accent-ink'}`}>
-                {snapshot.live ? t.measuredAt(shortTime(snapshot.measuredAt), PAIR.cfd, t.reference[PAIR.key] ?? '') : t.marketClosed(PAIR.cfd, t.reference[PAIR.key] ?? '')}
+                {snapshot.live ? t.measuredAt(shortTime(snapshot.measuredAt), PAIR.cfd, reference) : t.marketClosed(PAIR.cfd, reference)}
               </span>
             </div>
           )}

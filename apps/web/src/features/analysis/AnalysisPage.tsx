@@ -4,9 +4,10 @@ import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, ty
 import { ApiError } from '../../api/client.ts';
 import { useChangeStrategyRules, useDeleteStrategy, useSaveStrategy, useStrategies } from '../../api/hooks.ts';
 import { Button } from '../../components/ui/Button.tsx';
-import { Field, Input, Textarea } from '../../components/ui/Field.tsx';
+import { Field, Input, Segmented, Textarea } from '../../components/ui/Field.tsx';
 import { Panel } from '../../components/ui/Panel.tsx';
 import { useT } from '../../i18n/index.tsx';
+import { MarketPanel } from './MarketPanel.tsx';
 
 const errorLines = (err: unknown) => (err instanceof ApiError ? err.lines : [err instanceof Error ? err.message : String(err)]);
 
@@ -21,15 +22,42 @@ function Errors({ lines }: { lines: string[] }) {
   );
 }
 
+const TAB_KEY = 'analysis-tab';
+
+/** Analysis: the automatic market analysis ("Market", the default) and the user's strategies. */
 export function AnalysisPage() {
   const t = useT().analysis;
+  const [tab, setTab] = useState<'market' | 'strategies'>(() => {
+    try {
+      return localStorage.getItem(TAB_KEY) === 'strategies' ? 'strategies' : 'market';
+    } catch {
+      return 'market';
+    }
+  });
+  const choose = (next: 'market' | 'strategies') => {
+    setTab(next);
+    try {
+      localStorage.setItem(TAB_KEY, next);
+    } catch {
+      // The tab resets to "Market" on the next visit.
+    }
+  };
   return (
     <main className="page">
-      <h1 className="m-0 text-2xl font-bold tracking-tight">{t.title}</h1>
-      <StrategiesPanel />
-      <Panel title={t.dailyTitle}>
-        <p className="m-0 px-5 pb-5 text-sm text-dim">{t.dailyText}</p>
-      </Panel>
+      <div className="flex flex-wrap items-center gap-4">
+        <h1 className="m-0 text-2xl font-bold tracking-tight">{t.title}</h1>
+        <div className="grow" />
+        <Segmented
+          label={t.title}
+          value={tab}
+          onChange={choose}
+          options={[
+            { value: 'market', label: t.tabs.market! },
+            { value: 'strategies', label: t.tabs.strategies! },
+          ]}
+        />
+      </div>
+      {tab === 'market' ? <MarketPanel /> : <StrategiesPanel />}
     </main>
   );
 }

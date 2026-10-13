@@ -1,0 +1,1 @@
+ALTER TABLE "basis_snapshots" ADD COLUMN "cfd_source" text;

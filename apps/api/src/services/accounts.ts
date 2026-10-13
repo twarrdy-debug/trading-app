@@ -1,7 +1,7 @@
 import { toLocalDate, type CreateAccountInput, type UpdateAccountInput } from '@trading/shared';
-import { and, asc, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNotNull, ne } from 'drizzle-orm';
 import type { DB } from '../db/client.ts';
-import { tradingAccounts, trades } from '../db/schema.ts';
+import { instruments, tradeScreenshots, tradingAccounts, trades } from '../db/schema.ts';
 import { badRequest, notFound } from '../errors.ts';
 import type { CurrentUser } from '../plugins/current-user.ts';
 
@@ -38,17 +38,29 @@ export async function getAccount(db: DB, user: CurrentUser, id: string): Promise
   return account;
 }
 
-/** Prop accounts need a market and a maximum drawdown; checked on the account as it will be saved. */
+/** Prop accounts need a market and a maximum drawdown (as % or an amount); checked on the account as it will be saved. */
 function assertPropRules(account: Partial<CreateAccountInput>) {
   if (account.type !== 'prop') return;
   if (!account.market) throw badRequest('validation.propMarket');
-  if (account.maxDrawdownPct == null) throw badRequest('validation.propDrawdown');
+  if (account.maxDrawdownPct == null && account.maxDrawdownAmount == null) throw badRequest('validation.propDrawdown');
+  if (account.maxDrawdownAmount != null && account.size != null && account.maxDrawdownAmount >= account.size) throw badRequest('validation.drawdownOverSize');
+}
+
+/** A limit is stored either as % or as an amount: setting one clears the other. */
+function oneUnit<T extends Partial<CreateAccountInput>>(input: T): T {
+  const out = { ...input };
+  if (out.maxDrawdownAmount != null) out.maxDrawdownPct = null;
+  else if (out.maxDrawdownPct != null) out.maxDrawdownAmount = null;
+  if (out.profitTargetAmount != null) out.profitTargetPct = null;
+  else if (out.profitTargetPct != null) out.profitTargetAmount = null;
+  return out;
 }
 
 export async function createAccount(db: DB, user: CurrentUser, input: CreateAccountInput) {
+  assertPropRules(input);
   const [row] = await db
     .insert(tradingAccounts)
-    .values({ ...input, market: input.market ?? null, userId: user.id })
+    .values({ ...oneUnit(input), market: input.market ?? null, userId: user.id })
     .returning();
   return row!;
 }
@@ -56,14 +68,62 @@ export async function createAccount(db: DB, user: CurrentUser, input: CreateAcco
 export async function updateAccount(db: DB, user: CurrentUser, id: string, patch: UpdateAccountInput) {
   const existing = await getAccount(db, user, id);
   assertPropRules({ ...existing, ...patch });
-  const [row] = await db.update(tradingAccounts).set(patch).where(eq(tradingAccounts.id, existing.id)).returning();
+  const [row] = await db.update(tradingAccounts).set(oneUnit(patch)).where(eq(tradingAccounts.id, existing.id)).returning();
   return row!;
 }
 
-/** Deletes the account; its trades stay in the journal without an account. */
-export async function deleteAccount(db: DB, user: CurrentUser, id: string) {
+/**
+ * Deletes the account. Its trades stay in the journal without an account (`keep`), move to another
+ * of the user's accounts (`move`, which must accept their market), or are deleted with it (`delete`).
+ * Returns the storage keys of deleted screenshots, for the caller to remove the files.
+ */
+export async function deleteAccount(
+  db: DB,
+  user: CurrentUser,
+  id: string,
+  { trades: mode = 'keep', moveTo }: { trades?: 'keep' | 'move' | 'delete'; moveTo?: string } = {},
+): Promise<string[]> {
   const existing = await getAccount(db, user, id);
-  await db.delete(tradingAccounts).where(eq(tradingAccounts.id, existing.id));
+  const own = and(eq(trades.accountId, existing.id), eq(trades.userId, user.id));
+  if (mode === 'move') {
+    if (!moveTo || moveTo === existing.id) throw badRequest('moveTargetRequired');
+    const target = await getAccount(db, user, moveTo);
+    if (target.market) {
+      const [other] = await db
+        .select({ symbol: instruments.symbol })
+        .from(trades)
+        .innerJoin(instruments, eq(instruments.id, trades.instrumentId))
+        .where(and(own, ne(instruments.market, target.market)))
+        .limit(1);
+      if (other) throw badRequest('accountMarketMismatch', { account: target.name, market: target.market === 'cfd' ? 'CFD' : 'futures', symbol: other.symbol });
+    }
+  }
+  return db.transaction(async (tx) => {
+    let files: string[] = [];
+    if (mode === 'move') await tx.update(trades).set({ accountId: moveTo }).where(own);
+    if (mode === 'delete') {
+      files = (
+        await tx
+          .select({ key: tradeScreenshots.storageKey })
+          .from(tradeScreenshots)
+          .innerJoin(trades, eq(trades.id, tradeScreenshots.tradeId))
+          .where(own)
+      ).map((r) => r.key);
+      await tx.delete(trades).where(own);
+    }
+    await tx.delete(tradingAccounts).where(eq(tradingAccounts.id, existing.id));
+    return files;
+  });
+}
+
+/** How many trades (open ones included) each of the user's accounts has. */
+export async function accountTradeCounts(db: DB, user: CurrentUser) {
+  const rows = await db
+    .select({ accountId: trades.accountId, n: count() })
+    .from(trades)
+    .where(and(eq(trades.userId, user.id), isNotNull(trades.accountId)))
+    .groupBy(trades.accountId);
+  return new Map(rows.map((r) => [r.accountId!, r.n]));
 }
 
 /** Closed trades of the given accounts in the user's current currency, oldest first, per account. */
@@ -113,10 +173,13 @@ export function accountOverview(account: TradingAccount, rows: AccountTradeRow[]
   }
   const pnl = balance - size;
 
+  // A limit entered as an amount is used as is; as %, it is that share of the size.
+  const ddLimit = account.maxDrawdownAmount ?? (account.maxDrawdownPct != null ? (size * account.maxDrawdownPct) / 100 : null);
+  const targetAmount = account.profitTargetAmount ?? (account.profitTargetPct != null ? (size * account.profitTargetPct) / 100 : null);
   const prop =
-    account.type === 'prop' && account.maxDrawdownPct != null
+    account.type === 'prop' && ddLimit != null
       ? (() => {
-          const limit = (size * account.maxDrawdownPct) / 100;
+          const limit = ddLimit;
           // Highest balance at the close of a finished day (today is not closed yet).
           const today = toLocalDate(now, timeZone);
           const dayOf = (r: AccountTradeRow) => toLocalDate(new Date(r.at), timeZone);
@@ -133,11 +196,13 @@ export function accountOverview(account: TradingAccount, rows: AccountTradeRow[]
           const remaining = Math.max(0, balance - floor);
           const used = Math.min(limit, Math.max(0, limit - (balance - floor)));
           const target =
-            account.profitTargetPct != null
+            targetAmount != null
               ? (() => {
-                  const amount = (size * account.profitTargetPct) / 100;
+                  const amount = targetAmount;
                   return {
-                    pct: account.profitTargetPct,
+                    pct: round2((amount / size) * 100),
+                    /** How the target was entered: as % or as an amount. */
+                    unit: account.profitTargetAmount != null ? ('amount' as const) : ('pct' as const),
                     amount: round2(amount),
                     /** Balance at which the target is reached. */
                     balance: round2(size + amount),
@@ -150,7 +215,9 @@ export function accountOverview(account: TradingAccount, rows: AccountTradeRow[]
           return {
             target,
             drawdownType: account.drawdownType,
-            maxDrawdownPct: account.maxDrawdownPct,
+            maxDrawdownPct: round2((limit / size) * 100),
+            /** How the drawdown was entered: as % or as an amount. */
+            drawdownUnit: account.maxDrawdownAmount != null ? ('amount' as const) : ('pct' as const),
             limit: round2(limit),
             /** Lowest allowed balance now. */
             floor: round2(floor),
@@ -191,8 +258,12 @@ export type AccountOverview = ReturnType<typeof accountOverview>;
 /** Every account of the user with its current figures. */
 export async function accountOverviews(db: DB, user: CurrentUser) {
   const accounts = await listAccounts(db, user);
-  const rows = await accountTradeRows(db, user, accounts.map((a) => a.id));
-  return accounts.map((a) => accountOverview(a, rows.get(a.id) ?? [], user.timezone));
+  const [rows, counts] = await Promise.all([accountTradeRows(db, user, accounts.map((a) => a.id)), accountTradeCounts(db, user)]);
+  return accounts.map((a) => ({
+    ...accountOverview(a, rows.get(a.id) ?? [], user.timezone),
+    /** Every trade of the account, open ones included (asked about when deleting it). */
+    tradeCount: counts.get(a.id) ?? 0,
+  }));
 }
 
 /** Balance before the first of `days` and after each of them. */

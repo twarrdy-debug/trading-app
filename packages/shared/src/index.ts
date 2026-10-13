@@ -9,3 +9,5 @@ export * from './instruments.ts';
 export * from './schemas.ts';
 export * from './mt5-report.ts';
 export * from './password.ts';
+export * from './analysis.ts';
+export * from './indicators.ts';

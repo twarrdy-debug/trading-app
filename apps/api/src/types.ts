@@ -1,8 +1,9 @@
 // Response types for clients (web, mobile). Type-only: import with `import type`.
 import type { instruments } from './db/schema.ts';
 import type { toPublicUser } from './routes/me.ts';
-import type { AccountOverview, TradingAccount as TradingAccountRow } from './services/accounts.ts';
+import type { AccountOverview, accountOverviews, TradingAccount as TradingAccountRow } from './services/accounts.ts';
 import type { basisOverview } from './services/basis.ts';
+import type { analysisOverview, marketAnalysis } from './services/market-analysis.ts';
 import type { eventHistory, listEvents, RefreshResult } from './services/calendar.ts';
 import type { invites } from './db/schema.ts';
 import type { importMt5 } from './services/mt5-import.ts';
@@ -32,11 +33,15 @@ export type BasisPair = BasisOverview[number];
 export type CalendarResponse = Jsonify<Awaited<ReturnType<typeof listEvents>>>;
 export type CalendarEvent = CalendarResponse['events'][number];
 export type CalendarRefresh = RefreshResult;
+export type MarketAnalysis = Jsonify<Awaited<ReturnType<typeof marketAnalysis>>>;
+export type AnalysisOverview = Jsonify<Awaited<ReturnType<typeof analysisOverview>>>;
 export type EventHistory = Jsonify<NonNullable<Awaited<ReturnType<typeof eventHistory>>>>;
 export type NewsResponse = Jsonify<Awaited<ReturnType<typeof listNews>>>;
 export type NewsItem = NewsResponse['items'][number];
 export type TradingMonitor = Jsonify<Awaited<ReturnType<typeof tradingMonitor>>>;
 export type AccountSummary = Jsonify<AccountOverview>;
+/** An account in `GET /accounts`: its figures plus the number of its trades. */
+export type AccountListItem = Jsonify<Awaited<ReturnType<typeof accountOverviews>>[number]>;
 export type TradingAccount = Jsonify<TradingAccountRow>;
 export type Invite = Jsonify<typeof invites.$inferSelect>;
 /** A new invite; `emailed` when it was sent to its address. */

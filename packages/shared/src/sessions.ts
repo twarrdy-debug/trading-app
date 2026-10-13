@@ -40,7 +40,7 @@ const addDays = (isoDate: string, days: number) => new Date(Date.parse(`${isoDat
 const isWeekend = (isoDate: string) => [0, 6].includes(new Date(`${isoDate}T12:00:00Z`).getUTCDay());
 
 /** Weekday windows of a session around a date in its own zone. */
-function windows(session: (typeof MARKET_SESSIONS)[number], around: Date, daysBack: number, daysForward: number): SessionWindow[] {
+export function windows(session: (typeof MARKET_SESSIONS)[number], around: Date, daysBack: number, daysForward: number): SessionWindow[] {
   const localToday = toLocalDate(around, session.zone);
   const result: SessionWindow[] = [];
   for (let d = -daysBack; d <= daysForward; d++) {

@@ -47,6 +47,23 @@
   /* Headlines FinancialJuice marks red (their #b80101), so they read the same as in FJ. */
   --breaking: #b80101;
   --on-breaking: #ffffff;
+  /* The analysis chart in TradingView's colours (owner's choice, 2026-10-13). */
+  --chart-bg: #ffffff;
+  --chart-text: #131722;
+  --chart-grid: #f0f3fa;
+  --chart-border: #e0e3eb;
+  --chart-up: #26a69a;
+  --chart-down: #ef5350;
+  --chart-accent: #2962ff;
+  --chart-fvg: #9c6bff;
+  --chart-level: #f0a530;
+  --chart-ema-1: #9c6bff;
+  --chart-ema-2: #f0a530;
+  --chart-ema-3: #2962ff;
+  --chart-ema-4: #e91e63;
+  --chart-tokyo: #ff9800;
+  --chart-london: #2962ff;
+  --chart-newyork: #e91e63;
   /* Category tints (news): blue for central banks, violet for geopolitics. */
   --info: #2f6fdb;
   --info-soft: #e6eefc;
@@ -77,6 +94,22 @@
   --warn: #f0a530;
   --breaking: #b80101;
   --on-breaking: #ffffff;
+  --chart-bg: #131722;
+  --chart-text: #d1d4dc;
+  --chart-grid: #1e222d;
+  --chart-border: #2a2e39;
+  --chart-up: #26a69a;
+  --chart-down: #ef5350;
+  --chart-accent: #2962ff;
+  --chart-fvg: #b18cff;
+  --chart-level: #f0a530;
+  --chart-ema-1: #b18cff;
+  --chart-ema-2: #f0a530;
+  --chart-ema-3: #5b8cff;
+  --chart-ema-4: #f06292;
+  --chart-tokyo: #ffa726;
+  --chart-london: #5b8cff;
+  --chart-newyork: #f06292;
   --info: #8fb0ff;
   --info-soft: rgb(143 176 255 / 0.14);
   --violet: #c2a6ff;

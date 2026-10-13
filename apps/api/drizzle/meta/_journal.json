@@ -176,6 +176,20 @@
       "when": 1791446451101,
       "tag": "0024_acoustic_shadow_king",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791890657392,
+      "tag": "0025_daily_forgotten_one",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791893957999,
+      "tag": "0026_easy_vargas",
+      "breakpoints": true
     }
   ]
 }

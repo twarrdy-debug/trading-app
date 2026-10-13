@@ -11,6 +11,7 @@ import { loadEnv } from '../src/env.ts';
 import type { QuoteProvider, QuoteSource } from '../src/services/basis.ts';
 import type { CalendarSource, FfEvent } from '../src/services/calendar.ts';
 import type { FxProvider } from '../src/services/fx.ts';
+import type { MarketDataProvider } from '../src/services/market-data.ts';
 import { parseFjApiNews, refreshNews, type FeedItem, type NewsSource } from '../src/services/news.ts';
 
 /** Offline stand-in for the ECB feed; counts calls to check caching. */
@@ -43,6 +44,29 @@ const calendar: CalendarSource = { fetchWeek: async () => ffWeek };
 let feed: FeedItem[] = [];
 const news: NewsSource = { fetchLatest: async () => feed };
 
+/**
+ * Offline market data: candles oscillating around 4100 (a peak every 12 candles at the same price,
+ * so equal highs and lows), ending on 12 Oct 2026; records the requests.
+ */
+const marketCalls: string[] = [];
+const market: MarketDataProvider = {
+  async fetchCandles(epic, resolution, { from }) {
+    marketCalls.push(`${epic}:${resolution}:${from ? 'from' : 'full'}`);
+    const step = resolution === 'D1' ? 86_400_000 : resolution === 'H4' ? 4 * 3_600_000 : 3_600_000;
+    const end = Date.parse('2026-10-12T00:00:00Z');
+    return Array.from({ length: 60 }, (_, i) => {
+      const mid = 4100 + 15 * Math.sin((i * 2 * Math.PI) / 12);
+      return { time: new Date(end - (59 - i) * step).toISOString(), open: mid, high: Math.round((mid + 3) * 100) / 100, low: Math.round((mid - 3) * 100) / 100, close: mid };
+    });
+  },
+  async fetchQuote() {
+    throw new Error('offline');
+  },
+  async fetchSentiment(epics) {
+    return epics.map((epic) => ({ epic, long: 70, short: 30 }));
+  },
+};
+
 let app: App;
 let database: Database;
 let uploadDir: string;
@@ -54,7 +78,7 @@ beforeAll(async () => {
   database = createDatabase(env.DATABASE_URL);
   await database.migrate();
   await seed(database.db, env.DEV_USER_EMAIL);
-  app = await buildApp({ db: database.db, env, fx, quotes, calendar, news, logger: false });
+  app = await buildApp({ db: database.db, env, fx, quotes, market, calendar, news, logger: false });
 
   const instruments = (await app.inject({ url: '/instruments' })).json<{ id: string; symbol: string }[]>();
   for (const i of instruments) ids[i.symbol] = i.id;
@@ -1508,6 +1532,40 @@ describe('trading accounts', () => {
     expect((await as('GET', '/accounts')).json()[0].prop).toMatchObject({ drawdownType: 'static', floor: 9000 });
   });
 
+  it('takes prop limits as amounts', async () => {
+    const created = await as('POST', '/accounts', { name: 'Apex 50k', type: 'prop', market: 'cfd', size: 50_000, maxDrawdownAmount: 2_500, profitTargetAmount: 3_000 });
+    expect(created.statusCode).toBe(201);
+    const apex = created.json();
+    const view = async () => (await as('GET', '/accounts')).json().find((a: { id: string }) => a.id === apex.id);
+    expect((await view()).prop).toMatchObject({ limit: 2500, maxDrawdownPct: 5, drawdownUnit: 'amount', target: { amount: 3000, pct: 6, unit: 'amount' } });
+    // Switching to % clears the amount.
+    await as('PATCH', `/accounts/${apex.id}`, { maxDrawdownPct: 4, maxDrawdownAmount: null });
+    expect((await view()).prop).toMatchObject({ limit: 2000, drawdownUnit: 'pct' });
+    expect((await as('POST', '/accounts', { name: 'Too much', type: 'prop', market: 'cfd', size: 1_000, maxDrawdownAmount: 1_000 })).statusCode).toBe(400);
+    await as('DELETE', `/accounts/${apex.id}`);
+  });
+
+  it('moves or deletes the trades of a deleted account when asked', async () => {
+    const account = async (body: object) => (await as('POST', '/accounts', body)).json() as { id: string };
+    const target = await account({ name: 'Target', type: 'live', size: 5_000 });
+    const futures = await account({ name: 'Futures prop', type: 'prop', market: 'futures', size: 50_000, maxDrawdownPct: 5 });
+    const moving = await account({ name: 'Moving', type: 'live', size: 5_000 });
+    await gold('2026-09-08', 4001, { accountId: moving.id });
+    const count = async (id: string) => (await as('GET', '/accounts')).json().find((a: { id: string }) => a.id === id)?.tradeCount;
+    expect(await count(moving.id)).toBe(1);
+
+    expect((await as('DELETE', `/accounts/${moving.id}?trades=move`)).statusCode).toBe(400);
+    // Gold is a CFD here; the futures prop account does not take it.
+    expect((await as('DELETE', `/accounts/${moving.id}?trades=move&moveTo=${futures.id}`)).json().error).toContain('Futures prop');
+    expect((await as('DELETE', `/accounts/${moving.id}?trades=move&moveTo=${target.id}`)).statusCode).toBe(204);
+    expect(await count(target.id)).toBe(1);
+
+    const tradeId = (await as('GET', `/trades?account=${target.id}`)).json().items[0].id;
+    expect((await as('DELETE', `/accounts/${target.id}?trades=delete`)).statusCode).toBe(204);
+    expect((await as('GET', `/trades/${tradeId}`)).statusCode).toBe(404);
+    await as('DELETE', `/accounts/${futures.id}`);
+  });
+
   it('keeps the trades when an account is deleted', async () => {
     expect((await as('DELETE', `/accounts/${live.id}`)).statusCode).toBe(204);
     expect((await as('GET', '/accounts')).json()).toHaveLength(1);
@@ -1806,5 +1864,42 @@ describe('request limits', () => {
     } finally {
       await limited.close();
     }
+  });
+});
+
+describe('market analysis', () => {
+  it('fetches candles once, finds equal highs and lows and day levels, with sentiment', async () => {
+    const res = await app.inject({ url: `/analysis/market/${ids.XAUUSD}?resolution=H4` });
+    expect(res.statusCode).toBe(200);
+    const a = res.json();
+    expect(a.source).toMatchObject({ epic: 'GOLD', via: null });
+    expect(a.candles.length).toBe(60);
+    expect(a.swings.filter((s: { kind: string }) => s.kind === 'high').length).toBeGreaterThan(2);
+    const highs = a.equalLevels.find((l: { kind: string }) => l.kind === 'highs');
+    expect(highs.touches.length).toBeGreaterThan(2);
+    expect(highs.swept).toBe(false);
+    expect(a.dayLevels.pdh).not.toBeNull();
+    expect(a.sentiment).toMatchObject({ long: 70, short: 30 });
+    expect(marketCalls).toEqual(expect.arrayContaining(['GOLD:H4:full', 'GOLD:D1:full']));
+
+    // Within a few minutes the stored candles are used without asking the source again.
+    const before = marketCalls.length;
+    await app.inject({ url: `/analysis/market/${ids.XAUUSD}?resolution=H4` });
+    expect(marketCalls.length).toBe(before);
+  });
+
+  it('gives futures the paired CFD analysis, shifted by the measured difference', async () => {
+    const gold = (await app.inject({ url: `/analysis/market/${ids.XAUUSD}?resolution=H4` })).json();
+    const futures = (await app.inject({ url: `/analysis/market/${ids.GC1}?resolution=H4` })).json();
+    expect(futures.source).toMatchObject({ epic: 'GOLD', via: 'XAUUSD' });
+    const shift = futures.offset?.difference ?? 0;
+    expect(futures.lastPrice).toBeCloseTo(gold.lastPrice + shift, 4);
+  });
+
+  it('validates the request and lists favourites in the overview', async () => {
+    expect((await app.inject({ url: `/analysis/market/${ids.XAUUSD}?resolution=M1` })).statusCode).toBe(400);
+    expect((await app.inject({ url: '/analysis/market/00000000-0000-4000-8000-000000000000' })).statusCode).toBe(404);
+    const overview = (await app.inject({ url: '/analysis/overview' })).json();
+    expect(overview.items.map((i: { symbol: string }) => i.symbol)).toContain('XAUUSD');
   });
 });

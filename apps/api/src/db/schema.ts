@@ -306,6 +306,10 @@ export const tradingAccounts = pgTable(
     drawdownType: drawdownType('drawdown_type').notNull().default('static'),
     /** Prop: profit target, % of the size. */
     profitTargetPct: numeric('profit_target_pct', { precision: 6, scale: 2, mode: 'number' }),
+    /** Prop: the maximum drawdown as an amount instead of maxDrawdownPct (one of the two is set). */
+    maxDrawdownAmount: moneyCol('max_drawdown_amount'),
+    /** Prop: the profit target as an amount instead of profitTargetPct. */
+    profitTargetAmount: moneyCol('profit_target_amount'),
     /** CFD leverage 1:n (LEVERAGE_OPTIONS); only used to show margins. */
     leverage: smallint('leverage'),
     /** Own daily trade limit; null = the user's default (users.max_trades_per_day). */
@@ -486,6 +490,8 @@ export const basisSnapshots = pgTable(
     futuresPrice: priceCol('futures_price').notNull(),
     difference: priceCol('difference').notNull(),
     cfdQuotedAt: timestamp('cfd_quoted_at', { withTimezone: true }).notNull(),
+    /** Where the CFD price came from: capital (the broker CFD), yahoo (cash index) or gold-api (spot). */
+    cfdSource: text('cfd_source'),
     futuresQuotedAt: timestamp('futures_quoted_at', { withTimezone: true }).notNull(),
     live: boolean('live').notNull(),
     measuredAt: timestamp('measured_at', { withTimezone: true }).notNull().defaultNow(),
@@ -596,7 +602,10 @@ export const strategyRules = pgTable(
   (t) => [index('strategy_rules_strategy_idx').on(t.strategyId)],
 );
 
-/** Price history imported from CSV (TradingView/MT5), used for swing and equal high/low detection. */
+/**
+ * Price history for the analysis (swings, equal highs/lows): fetched from Capital.com for the
+ * instruments in CAPITAL_EPICS (H1, H4, D1, bid prices). Futures use their paired CFD's rows.
+ */
 export const ohlcCandles = pgTable(
   'ohlc_candles',
   {

@@ -7,6 +7,7 @@ import type { QuoteProvider } from './services/basis.ts';
 import type { CalendarSource } from './services/calendar.ts';
 import type { FxProvider } from './services/fx.ts';
 import type { Mailer } from './services/mailer.ts';
+import type { MarketDataProvider } from './services/market-data.ts';
 import type { NewsHub, NewsSource } from './services/news.ts';
 
 declare module 'fastify' {
@@ -15,6 +16,7 @@ declare module 'fastify' {
     env: Env;
     fx: FxProvider;
     quotes: QuoteProvider;
+    market: MarketDataProvider | null;
     calendar: CalendarSource;
     news: NewsSource;
     newsHub: NewsHub;

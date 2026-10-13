@@ -1,4 +1,5 @@
 import type {
+  AccountListItem,
   AccountSummary,
   AdminInstrument,
   AdminStats,
@@ -7,6 +8,7 @@ import type {
   BasisOverview,
   CalendarRefresh,
   EventHistory,
+  MarketAnalysis,
   CalendarResponse,
   DailySpread,
   Educator,
@@ -24,6 +26,7 @@ import type {
   TradingMonitor,
 } from '@trading/api/types';
 import type {
+  AnalysisResolution,
   BrokerTimezone,
   AdminUpdateUserInput,
   CreateAccountInput,
@@ -265,6 +268,16 @@ export const useEventHistory = (id: string | null) =>
     staleTime: 10 * 60_000,
   });
 
+/** Automatic analysis of one instrument (candles, swings, equal levels, day levels, sentiment); refreshed every minute. */
+export const useMarketAnalysis = (instrumentId: string | null, resolution: AnalysisResolution) =>
+  useQuery({
+    queryKey: ['analysis', 'market', instrumentId, resolution],
+    queryFn: () => api<MarketAnalysis>(`/analysis/market/${instrumentId}${qs({ resolution })}`),
+    enabled: instrumentId != null,
+    refetchInterval: 60_000,
+    placeholderData: (previous) => previous,
+  });
+
 export interface NewsParams {
   categories?: string[];
   currencies?: string[];
@@ -333,7 +346,7 @@ export function useMt5Import() {
 
 // --- Trading accounts ---------------------------------------------------------
 
-export const useAccounts = () => useQuery({ queryKey: ['accounts'], queryFn: () => api<AccountSummary[]>('/accounts') });
+export const useAccounts = () => useQuery({ queryKey: ['accounts'], queryFn: () => api<AccountListItem[]>('/accounts') });
 
 function useInvalidateAccounts() {
   const client = useQueryClient();
@@ -358,7 +371,8 @@ export function useSaveAccount() {
 export function useDeleteAccount() {
   const invalidate = useInvalidateAccounts();
   return useMutation({
-    mutationFn: (id: string) => api<void>(`/accounts/${id}`, { method: 'DELETE' }),
+    mutationFn: ({ id, trades, moveTo }: { id: string; trades: 'keep' | 'move' | 'delete'; moveTo?: string }) =>
+      api<void>(`/accounts/${id}${qs({ trades, moveTo })}`, { method: 'DELETE' }),
     onSuccess: invalidate,
   });
 }

@@ -13,6 +13,17 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   /** How often to measure the CFD/futures difference; 0 turns the scheduler off. */
   BASIS_INTERVAL_HOURS: z.coerce.number().min(0).default(4),
+  /**
+   * Capital.com API (market data for the analysis and the CFD side of the calculator). Without the
+   * key both fall back: the analysis is unavailable and the calculator uses the cash index from Yahoo.
+   * A key from a demo account is enough (and safer: Capital.com keys can always trade).
+   */
+  CAPITAL_ENV: z.enum(['demo', 'live']).default('demo'),
+  CAPITAL_IDENTIFIER: z.string().optional(),
+  CAPITAL_API_KEY: z.string().optional(),
+  CAPITAL_API_PASSWORD: z.string().optional(),
+  /** How often to fetch new candles for the analysis, in minutes; 0 turns it off. */
+  ANALYSIS_INTERVAL_MINUTES: z.coerce.number().min(0).default(15),
   /** How often to fetch the Forex Factory calendar; 0 turns it off. */
   CALENDAR_INTERVAL_HOURS: z.coerce.number().min(0).default(2),
   /**
