@@ -7,8 +7,7 @@ import { eq } from 'drizzle-orm';
 import type { DB } from './db/client.ts';
 import { authAccounts, authSessions, authTwoFactors, authVerifications, users } from './db/schema.ts';
 import type { Env } from './env.ts';
-import { t } from './i18n.ts';
-import { verificationEmail } from './services/emails.ts';
+import { passwordResetEmail, verificationEmail } from './services/emails.ts';
 import { findUsableInvite, finishSignUp } from './services/invites.ts';
 import type { Mailer } from './services/mailer.ts';
 
@@ -60,11 +59,7 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
         const [row] = await db.select({ language: users.language }).from(users).where(eq(users.id, user.id));
         const language = row?.language ?? 'pl';
         const url = `${env.PUBLIC_URL}/nowe-haslo?token=${encodeURIComponent(token)}`;
-        await mailer.send({
-          to: user.email,
-          subject: t(language, 'resetSubject'),
-          text: t(language, 'resetBody', { url }),
-        });
+        await mailer.send(passwordResetEmail({ language, publicUrl: env.PUBLIC_URL, email: user.email, url }));
       },
     },
     emailVerification: {

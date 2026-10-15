@@ -1,8 +1,8 @@
 import { createInviteSchema, idParams } from '@trading/shared';
-import { t } from '../i18n.ts';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { requireRole } from '../plugins/current-user.ts';
+import { invitationEmail } from '../services/emails.ts';
 import { createInvite, deleteInvite, listInvites } from '../services/invites.ts';
 
 export const authRoutes: FastifyPluginAsyncZod = async (app) => {
@@ -58,13 +58,11 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       const url = `${app.env.PUBLIC_URL}/rejestracja?kod=${encodeURIComponent(invite.code)}`;
       const expires = invite.expiresAt
         ? new Intl.DateTimeFormat(language === 'pl' ? 'pl-PL' : 'en-GB', { dateStyle: 'long', timeZone: req.user.timezone }).format(invite.expiresAt)
-        : '—';
+        : null;
       try {
-        await app.mailer.send({
-          to: invite.email,
-          subject: t(language, 'inviteSubject'),
-          text: t(language, 'inviteBody', { inviter: req.user.displayName, url, code: invite.code, expires }),
-        });
+        await app.mailer.send(
+          invitationEmail({ language, publicUrl: app.env.PUBLIC_URL, email: invite.email, url, inviter: req.user.displayName, code: invite.code, expires }),
+        );
         emailed = true;
       } catch (err) {
         req.log.error(err, 'invite e-mail failed');
