@@ -3,20 +3,13 @@ import { Link } from '@tanstack/react-router';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useAuthConfig } from '../../api/auth.ts';
 import { EquityChart } from '../../components/charts/EquityChart.tsx';
+import { LogoMark, Wordmark } from '../../components/ui/Brand.tsx';
 import { InstrumentBadge, InstrumentLogo } from '../../components/ui/InstrumentBadge.tsx';
 import { useLanguage, useSetLanguage, useT } from '../../i18n/index.tsx';
 import { formatAmount, formatNumber } from '../../lib/format.ts';
 import { APP_NAME } from '../../layout/AppShell.tsx';
 import { NavIcon, type NavIconName } from '../../layout/NavIcon.tsx';
 import { SAMPLE_CURVE } from '../dashboard/DashboardPreview.tsx';
-
-const Logo = ({ size = 36 }: { size?: number }) => (
-  <span className="flex shrink-0 items-center justify-center rounded-[10px] bg-accent" style={{ width: size, height: size }}>
-    <svg width={size * 0.55} height={size * 0.55} viewBox="0 0 28 28" fill="none" stroke="var(--on-accent)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M2 14h8l3-8 4 16 3-8h6" />
-    </svg>
-  </span>
-);
 
 /** Instruments in the moving strip under the hero (logos are drawn for the app, see InstrumentBadge). */
 const STRIP = ['EURUSD', 'XAUUSD', 'US100', 'NQ1', 'GBPUSD', 'GC1', 'USDJPY', 'US500', 'ES1', 'AUDUSD', 'US30', 'YM1', 'USDCAD', 'MNQ1'];
@@ -68,8 +61,8 @@ export function LandingPage() {
       <header className="sticky top-0 z-20 bg-bg/85 px-4 pt-4 backdrop-blur md:px-8">
         <div className="card mx-auto flex h-15 max-w-6xl items-center gap-4 rounded-(--radius-control) pr-2 pl-4">
           <span className="flex items-center gap-2.5">
-            <Logo />
-            <span className="text-[15px] font-bold">{APP_NAME}</span>
+            <LogoMark size={36} />
+            <Wordmark className="text-[16px]" />
           </span>
           <nav aria-label={all.nav.main} className="hidden gap-1 text-sm md:flex">
             <a href="#funkcje" className="rounded-[10px] px-3.5 py-2 font-medium text-dim no-underline hover:bg-chip hover:text-ink">
@@ -224,8 +217,8 @@ function HeroApp() {
       <div className="card grid overflow-hidden shadow-(--shadow-pop) sm:grid-cols-[9.5rem_minmax(0,1fr)]">
         <aside aria-hidden className="hidden flex-col gap-1 bg-raised p-3 sm:flex">
           <span className="flex items-center gap-2 px-1.5 pb-3">
-            <Logo size={26} />
-            <span className="truncate text-[13px] font-bold">{APP_NAME}</span>
+            <LogoMark size={26} />
+            <Wordmark className="truncate text-[13px]" />
           </span>
           {menu.map(([icon, label], i) => (
             <span key={icon} className={`flex items-center gap-2.5 rounded-[10px] px-2 py-1.5 text-[12.5px] font-semibold ${i === 0 ? 'bg-panel text-ink shadow-(--shadow)' : 'text-dim'}`}>

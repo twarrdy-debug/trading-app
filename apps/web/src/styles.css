@@ -52,6 +52,8 @@
   --chart-text: #131722;
   --chart-grid: #f0f3fa;
   --chart-border: #e0e3eb;
+  /* Crosshair labels on the axes. */
+  --chart-label: #131722;
   --chart-up: #26a69a;
   --chart-down: #ef5350;
   --chart-accent: #2962ff;
@@ -98,6 +100,7 @@
   --chart-text: #d1d4dc;
   --chart-grid: #1e222d;
   --chart-border: #2a2e39;
+  --chart-label: #363a45;
   --chart-up: #26a69a;
   --chart-down: #ef5350;
   --chart-accent: #2962ff;

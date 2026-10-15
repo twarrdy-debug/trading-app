@@ -305,13 +305,18 @@ export const tradeStatsQuerySchema = z.object({
 // --- Import from trading platforms ----------------------------------------
 
 /**
- * Text fields sent next to the report file (multipart). `symbolMap` maps broker symbols the app
- * could not match (e.g. "GER40.cash") to instruments; `commit=false` only previews.
+ * Text fields sent next to the report file (multipart): an MT5 history report or Tradovate's
+ * Position History CSV. `symbolMap` maps broker symbols the app could not match (e.g.
+ * "GER40.cash") to instruments; `commit=false` only previews.
  */
 export const mt5ImportFieldsSchema = z.object({
   /** Imported trades are assigned to this account (required). */
   accountId: z.uuid({ error: 'validation.accountRequired' }),
-  timezone: z.enum(BROKER_TIMEZONES).default('broker-ny7'),
+  /** Zone of the times in the file: MT5 server time (default broker-ny7), Tradovate the user's zone by default. */
+  timezone: z
+    .string()
+    .refine((tz) => (BROKER_TIMEZONES as readonly string[]).includes(tz) || isValidTimeZone(tz), 'validation.timezone')
+    .optional(),
   symbolMap: z
     .string()
     .default('{}')
@@ -325,6 +330,11 @@ export const mt5ImportFieldsSchema = z.object({
     })
     .pipe(z.record(z.string(), z.uuid())),
   commit: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /** Also import trades that look like ones entered by hand (same instrument, direction and account, opened within 15 minutes). */
+  includeSimilar: z
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),

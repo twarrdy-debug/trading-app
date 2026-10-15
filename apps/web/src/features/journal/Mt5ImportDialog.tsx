@@ -11,7 +11,11 @@ import { currencyLabel, formatAmount, formatDateTime, formatNumber } from '../..
 import { instrumentOptions } from '../../lib/instruments.ts';
 
 const TIMEZONE_KEY = 'mt5-timezone';
+const TRADOVATE_TIMEZONE_KEY = 'tradovate-timezone';
 const SYMBOL_MAP_KEY = 'mt5-symbol-map';
+
+/** Tradovate's export is a CSV; MT5 reports are HTML or .xlsx. */
+const isCsv = (file: File | null) => !!file && /\.csv$/i.test(file.name);
 
 /** Per-browser conveniences: the broker's server zone and symbol assignments are reused next time. */
 function load<T>(key: string, fallback: T): T {
@@ -35,6 +39,7 @@ const STATUS_TONE: Record<Mt5ImportRow['status'], string> = {
   ready: 'bg-buy-soft text-buy',
   imported: 'bg-buy-soft text-buy',
   duplicate: 'bg-chip text-dim',
+  similar: 'bg-warn-bg text-ink',
   unknownSymbol: 'bg-warn-bg text-ink',
   invalidSize: 'bg-sell-soft text-sell',
   wrongMarket: 'bg-sell-soft text-sell',
@@ -65,6 +70,9 @@ export function Mt5ImportDialog({
     const stored = load<string>(TIMEZONE_KEY, 'broker-ny7');
     return (BROKER_TIMEZONES as readonly string[]).includes(stored) ? (stored as BrokerTimezone) : 'broker-ny7';
   });
+  // Tradovate writes times in the zone set in the platform: the user's own by default.
+  const [csvTimezone, setCsvTimezone] = useState<string>(() => load<string>(TRADOVATE_TIMEZONE_KEY, userTimezone));
+  const [includeSimilar, setIncludeSimilar] = useState(false);
   const [symbolMap, setSymbolMap] = useState<Record<string, string>>(() => load(SYMBOL_MAP_KEY, {}));
   const [preview, setPreview] = useState<Mt5Import | null>(null);
   /** Remounts the file input, so choosing another file starts empty. */
@@ -74,7 +82,10 @@ export function Mt5ImportDialog({
 
   useEffect(() => ref.current?.showModal(), []);
 
-  const request = (commit: boolean, map = symbolMap, zone = timezone, account = accountId) => {
+  const csv = isCsv(file);
+  const zoneFor = (zone: string) => (csv ? csvTimezone : zone);
+
+  const request = (commit: boolean, map = symbolMap, zone: string = zoneFor(timezone), account = accountId, similar = includeSimilar) => {
     if (!file) return;
     // Imported trades need an account, like every trade.
     if (!account) {
@@ -85,7 +96,7 @@ export function Mt5ImportDialog({
     // Only assignments for symbols in this report are sent.
     const relevant = Object.fromEntries(Object.entries(map).filter(([, id]) => instruments.some((i) => i.id === id)));
     run.mutate(
-      { file, timezone: zone, symbolMap: relevant, commit, accountId: account },
+      { file, timezone: zone, symbolMap: relevant, commit, accountId: account, includeSimilar: similar },
       {
         onSuccess: (result) => {
           if (commit) {
@@ -109,11 +120,23 @@ export function Mt5ImportDialog({
     request(false, next);
   };
 
-  const changeTimezone = (zone: BrokerTimezone) => {
-    setTimezone(zone);
-    save(TIMEZONE_KEY, zone);
+  const changeTimezone = (zone: string) => {
+    if (csv) {
+      setCsvTimezone(zone);
+      save(TRADOVATE_TIMEZONE_KEY, zone);
+    } else {
+      setTimezone(zone as BrokerTimezone);
+      save(TIMEZONE_KEY, zone);
+    }
     if (preview) request(false, symbolMap, zone);
   };
+
+  const zoneOptions = csv
+    ? [...new Set([userTimezone, ...BROKER_TIMEZONES.filter((z) => z !== 'broker-ny7')])].map((zone) => ({
+        value: zone,
+        label: zone === userTimezone ? t.yourZone(zone) : (t.timezones[zone as BrokerTimezone] ?? zone),
+      }))
+    : BROKER_TIMEZONES.map((zone) => ({ value: zone, label: t.timezones[zone] }));
 
   // Symbols that needed a manual assignment: unknown now, or assigned by hand earlier.
   const mappable = preview
@@ -135,6 +158,13 @@ export function Mt5ImportDialog({
               {t.title}
             </h2>
             <p className="m-0 max-w-2xl text-[13px] text-dim">{t.intro}</p>
+            <ul className="m-0 flex max-w-2xl list-none flex-col gap-1 p-0 text-[13px] text-dim">
+              {t.sources.map(([name, how]) => (
+                <li key={name}>
+                  <span className="font-semibold text-ink">{name}:</span> {how}
+                </li>
+              ))}
+            </ul>
           </div>
           <Button size="sm" variant="ghost" onClick={onClose}>
             {all.common.close}
@@ -146,7 +176,7 @@ export function Mt5ImportDialog({
             <input
               key={fileInputKey}
               type="file"
-              accept=".html,.htm,.xlsx,text/html,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              accept=".html,.htm,.xlsx,.csv,text/html,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               onChange={(e) => {
                 setFile(e.target.files?.[0] ?? null);
                 setPreview(null);
@@ -156,11 +186,7 @@ export function Mt5ImportDialog({
             />
           </Field>
           <Field label={t.serverTime}>
-            <Select
-              value={timezone}
-              onChange={changeTimezone}
-              options={BROKER_TIMEZONES.map((zone) => ({ value: zone, label: t.timezones[zone] }))}
-            />
+            <Select value={zoneFor(timezone)} onChange={changeTimezone} options={zoneOptions} />
             <span className="text-xs text-dim">{t.serverTimeHint}</span>
           </Field>
           {accounts.length > 0 ? (
@@ -169,7 +195,7 @@ export function Mt5ImportDialog({
                 value={accountId}
                 onChange={(id) => {
                   setAccountId(id);
-                  if (file) request(false, symbolMap, timezone, id);
+                  if (file) request(false, symbolMap, zoneFor(timezone), id);
                 }}
                 options={[...(accountId ? [] : [{ value: '', label: all.form.chooseAccount }]), ...accounts.map((a) => ({ value: a.id, label: a.name }))]}
               />
@@ -203,6 +229,7 @@ export function Mt5ImportDialog({
               {preview.account && <span className="mr-2 font-semibold">{t.account(preview.account, currencyLabel(preview.currency) || null)}</span>}
               <span className="rounded-md bg-buy-soft px-2 py-1 font-semibold text-buy">{t.ready(s.ready)}</span>
               {s.duplicate > 0 && <span className="rounded-md bg-chip px-2 py-1 font-semibold text-dim">{t.duplicate(s.duplicate)}</span>}
+              {s.similar > 0 && <span className="rounded-md bg-warn-bg px-2 py-1 font-semibold">{t.similar(s.similar)}</span>}
               {s.unknownSymbol > 0 && <span className="rounded-md bg-warn-bg px-2 py-1 font-semibold">{t.unknown(s.unknownSymbol)}</span>}
               {s.invalidSize > 0 && <span className="rounded-md bg-sell-soft px-2 py-1 font-semibold text-sell">{t.invalid(s.invalidSize)}</span>}
               {s.wrongMarket > 0 && <span className="rounded-md bg-sell-soft px-2 py-1 font-semibold text-sell">{t.wrongMarket(s.wrongMarket)}</span>}
@@ -214,6 +241,22 @@ export function Mt5ImportDialog({
                   <li key={w}>{w}</li>
                 ))}
               </ul>
+            )}
+
+            {s.similar > 0 && (
+              <label className="flex items-start gap-2 text-[13px]">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-4 accent-(--accent)"
+                  checked={includeSimilar}
+                  disabled={run.isPending}
+                  onChange={(e) => {
+                    setIncludeSimilar(e.target.checked);
+                    request(false, symbolMap, zoneFor(timezone), accountId, e.target.checked);
+                  }}
+                />
+                <span>{t.includeSimilar}</span>
+              </label>
             )}
 
             {mappable.length > 0 && (
@@ -268,7 +311,14 @@ export function Mt5ImportDialog({
                           {p.direction === 'long' ? all.table.long : all.table.short}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-right">{formatNumber(p.volume)}</td>
+                      <td className="px-3 py-2 text-right">
+                        {formatNumber(p.volume)}
+                        {(p.entries > 1 || p.parts > 1) && (
+                          <span className="block font-sans text-[11px] whitespace-nowrap text-dim">
+                            {[p.entries > 1 && t.entries(p.entries), p.parts > 1 && t.parts(p.parts)].filter(Boolean).join(' · ')}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-3 py-2 whitespace-nowrap">{formatDateTime(p.openedAt, userTimezone)}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{formatDateTime(p.closedAt, userTimezone)}</td>
                       <td className={`px-3 py-2 text-right ${p.profit >= 0 ? 'text-buy' : 'text-sell'}`}>{formatAmount(p.profit, preview.currency)}</td>
@@ -283,7 +333,7 @@ export function Mt5ImportDialog({
               </table>
             </div>
 
-            <p className="m-0 text-xs text-dim">{t.feesNote}</p>
+            <p className="m-0 text-xs text-dim">{preview.format === 'tradovate' ? t.tradovateNote : t.feesNote}</p>
 
             <div className="flex flex-wrap justify-end gap-3">
               <Button

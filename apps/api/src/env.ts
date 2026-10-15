@@ -11,8 +11,8 @@ const envSchema = z.object({
   DATABASE_URL: z.string().default('./.data/pglite'),
   UPLOAD_DIR: z.string().default('./.data/uploads'),
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
-  /** How often to measure the CFD/futures difference; 0 turns the scheduler off. */
-  BASIS_INTERVAL_HOURS: z.coerce.number().min(0).default(4),
+  /** How often to measure the CFD/futures difference, in hours (0.25 = every 15 minutes); 0 turns the scheduler off. */
+  BASIS_INTERVAL_HOURS: z.coerce.number().min(0).default(0.25),
   /**
    * Capital.com API (market data for the analysis and the CFD side of the calculator). Without the
    * key both fall back: the analysis is unavailable and the calculator uses the cash index from Yahoo.
@@ -54,8 +54,8 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
-  /** Sender of e-mails (password reset, invitations), e.g. `Dziennik tradera <noreply@twardy.it>`. */
-  MAIL_FROM: z.string().default('Dziennik tradera <no-reply@localhost>'),
+  /** Sender of e-mails (password reset, invitations), e.g. `AlphaLogFX <noreply@alphalogfx.com>`. */
+  MAIL_FROM: z.string().default('AlphaLogFX <no-reply@localhost>'),
   /**
    * SMTP server as a URL, e.g. `smtps://resend:<API key>@smtp.resend.com:465`. Without it e-mails
    * are written to the log (development).

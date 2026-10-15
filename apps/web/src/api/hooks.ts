@@ -312,7 +312,7 @@ export const useNews = (p: NewsParams) =>
     refetchInterval: 60_000,
   });
 
-/** Preview (commit = false) or import of an MT5 history report. */
+/** Preview (commit = false) or import of an MT5 history report or a Tradovate Position History. */
 export function useMt5Import() {
   const invalidate = useInvalidateTrades();
   return useMutation({
@@ -322,16 +322,20 @@ export function useMt5Import() {
       symbolMap,
       commit,
       accountId,
+      includeSimilar,
     }: {
       file: File;
-      timezone: BrokerTimezone;
+      /** Omitted: MT5 server time GMT+2/+3, Tradovate the user's zone. */
+      timezone?: BrokerTimezone | (string & {});
       symbolMap: Record<string, string>;
       commit: boolean;
       accountId?: string;
+      includeSimilar?: boolean;
     }) => {
       const body = new FormData();
       // Text fields go first: the API reads them before the file.
-      body.append('timezone', timezone);
+      if (timezone) body.append('timezone', timezone);
+      if (includeSimilar) body.append('includeSimilar', 'true');
       if (accountId) body.append('accountId', accountId);
       body.append('symbolMap', JSON.stringify(symbolMap));
       body.append('commit', String(commit));

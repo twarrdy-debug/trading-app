@@ -1,4 +1,4 @@
-import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, passwordProblems } from '@trading/shared';
+import { APP_NAME, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, passwordProblems } from '@trading/shared';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
@@ -8,6 +8,7 @@ import type { DB } from './db/client.ts';
 import { authAccounts, authSessions, authTwoFactors, authVerifications, users } from './db/schema.ts';
 import type { Env } from './env.ts';
 import { t } from './i18n.ts';
+import { verificationEmail } from './services/emails.ts';
 import { findUsableInvite, finishSignUp } from './services/invites.ts';
 import type { Mailer } from './services/mailer.ts';
 
@@ -16,14 +17,16 @@ import type { Mailer } from './services/mailer.ts';
  * tables (`users` is the Better Auth user). Mounted under /auth (the web app calls /api/auth).
  * Registration follows REGISTRATION: with `invite`, sign-up needs `inviteCode` from an admin.
  * Passwords follow `passwordProblems()` (shared/password.ts). Two-factor sign-in (authenticator app
- * codes, with backup codes) is optional per user, under /auth/two-factor/*.
+ * codes, with backup codes) is optional per user, under /auth/two-factor/*. A new account must be
+ * activated with the e-mailed link (`/aktywacja?token=…` in the web app) before it can sign in;
+ * signing in to an inactive account sends a fresh link.
  */
 /** Endpoints that set a new password from `newPassword`. */
 const PASSWORD_PATHS = new Set(['/reset-password', '/change-password']);
 
 export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mailer }) {
   return betterAuth({
-    appName: 'Trading journal',
+    appName: APP_NAME,
     baseURL: env.PUBLIC_URL,
     basePath: '/auth',
     secret: env.AUTH_SECRET,
@@ -49,6 +52,7 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
       minPasswordLength: PASSWORD_MIN_LENGTH,
       maxPasswordLength: PASSWORD_MAX_LENGTH,
       autoSignIn: true,
+      requireEmailVerification: true,
       disableSignUp: env.REGISTRATION === 'closed',
       revokeSessionsOnPasswordReset: true,
       resetPasswordTokenExpiresIn: 60 * 60,
@@ -63,6 +67,29 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
         });
       },
     },
+    emailVerification: {
+      sendOnSignUp: true,
+      sendOnSignIn: true,
+      // The link signs the new user in, so it lands in the app (and its introduction) at once.
+      autoSignInAfterVerification: true,
+      expiresIn: 60 * 60 * 24,
+      sendVerificationEmail: async ({ user, token }) => {
+        const [row] = await db.select({ language: users.language }).from(users).where(eq(users.id, user.id));
+        // The web app's page confirms the token through /api/auth/verify-email and opens the app.
+        const url = `${env.PUBLIC_URL}/aktywacja?token=${encodeURIComponent(token)}`;
+        await mailer.send(verificationEmail({ language: row?.language ?? 'pl', publicUrl: env.PUBLIC_URL, name: user.name, email: user.email, url }));
+      },
+    },
+    databaseHooks: {
+      user: {
+        create: {
+          // Only a real sign-up: an address already taken gets the same answer but creates nobody.
+          after: async (user, ctx) => {
+            if (ctx?.path === '/sign-up/email') await finishSignUp(db, user.id, (ctx.body ?? {}) as Record<string, unknown>, env.REGISTRATION === 'invite');
+          },
+        },
+      },
+    },
     rateLimit: {
       enabled: env.NODE_ENV === 'production',
       window: 60,
@@ -71,6 +98,7 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
         '/sign-in/email': { window: 60, max: 5 },
         '/sign-up/email': { window: 60, max: 5 },
         '/request-password-reset': { window: 60, max: 3 },
+        '/send-verification-email': { window: 60, max: 3 },
       },
     },
     plugins: [
@@ -96,11 +124,6 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
         if (ctx.path !== '/sign-up/email' || env.REGISTRATION !== 'invite') return;
         const invite = await findUsableInvite(db, ctx.body?.inviteCode, ctx.body?.email);
         if (!invite) throw new APIError('BAD_REQUEST', { message: 'Invalid or used invite code', code: 'INVALID_INVITE' });
-      }),
-      after: createAuthMiddleware(async (ctx) => {
-        if (ctx.path !== '/sign-up/email') return;
-        const created = ctx.context.newSession;
-        if (created) await finishSignUp(db, created.user.id, (ctx.body ?? {}) as Record<string, unknown>, env.REGISTRATION === 'invite');
       }),
     },
   });

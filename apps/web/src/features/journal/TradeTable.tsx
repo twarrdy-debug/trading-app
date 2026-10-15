@@ -343,6 +343,11 @@ export function TradeTable({
                           MT5
                         </span>
                       )}
+                      {t.externalId?.startsWith('tradovate:') && (
+                        <span title={labels.importedTradovate} className="rounded-md bg-chip px-1.5 py-px text-[10px] font-bold">
+                          TDV
+                        </span>
+                      )}
                     </span>
                     {closed && (
                       <span>

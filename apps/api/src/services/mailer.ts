@@ -1,8 +1,16 @@
 import nodemailer from 'nodemailer';
 
+/** One message: always plain text, and an HTML version for the designed e-mails (services/emails.ts). */
+export interface MailMessage {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+}
+
 /** Outgoing e-mail. Swap the transport (SMTP, Resend, SES…) without touching the callers. */
 export interface Mailer {
-  send(message: { to: string; subject: string; text: string }): Promise<void>;
+  send(message: MailMessage): Promise<void>;
 }
 
 /** Until an e-mail provider is configured: writes the message (with its links) to the server log. */
@@ -19,8 +27,8 @@ export const logMailer = (log: (msg: string) => void): Mailer => ({
 export function smtpMailer(url: string, from: string): Mailer {
   const transport = nodemailer.createTransport(url);
   return {
-    async send({ to, subject, text }) {
-      await transport.sendMail({ from, to, subject, text });
+    async send({ to, subject, text, html }) {
+      await transport.sendMail({ from, to, subject, text, ...(html ? { html } : {}) });
     },
   };
 }

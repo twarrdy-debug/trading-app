@@ -1,12 +1,12 @@
 import { LANGUAGES } from '@trading/shared';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { useId, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { AuthError, authApi, useAuthConfig, useResetSession } from '../../api/auth.ts';
 import { Button } from '../../components/ui/Button.tsx';
 import { Field, Input } from '../../components/ui/Field.tsx';
 import { isStrongPassword, PasswordRules } from '../../components/ui/PasswordRules.tsx';
 import { useLanguage, useSetLanguage, useT } from '../../i18n/index.tsx';
-import { APP_NAME } from '../../layout/AppShell.tsx';
+import { LogoMark, Wordmark } from '../../components/ui/Brand.tsx';
 
 const query = () => new URLSearchParams(window.location.search);
 
@@ -28,15 +28,8 @@ function AuthLayout({ title, children, footer }: { title: string; children: Reac
       <div className="flex w-full max-w-[420px] flex-col gap-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <span className="flex size-9 items-center justify-center rounded-[10px] bg-accent">
-              <svg width="20" height="20" viewBox="0 0 28 28" fill="none" stroke="var(--on-accent)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M2 14h8l3-8 4 16 3-8h6" />
-              </svg>
-            </span>
-            <div className="flex flex-col">
-              <span className="text-[15px] font-bold">{APP_NAME}</span>
-              <span className="text-xs text-dim">{all.auth.tagline}</span>
-            </div>
+            <LogoMark size={36} />
+            <Wordmark className="text-[17px]" />
           </div>
           <div role="group" aria-label={all.settings.language} className="flex gap-1 text-xs">
             {LANGUAGES.map((l) => (
@@ -247,8 +240,6 @@ export function RegisterPage() {
   const t = useT().auth;
   const language = useLanguage();
   const errorText = useErrorText();
-  const navigate = useNavigate();
-  const resetSession = useResetSession();
   const { data: config } = useAuthConfig();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -256,6 +247,8 @@ export function RegisterPage() {
   const [inviteCode, setInviteCode] = useState(() => query().get('kod') ?? '');
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  /** The account exists and waits for the e-mailed activation link. */
+  const [sentTo, setSentTo] = useState<string | null>(null);
   const rulesId = useId();
 
   const submit = async (e: FormEvent) => {
@@ -272,8 +265,7 @@ export function RegisterPage() {
         language,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
-      await resetSession();
-      await navigate({ to: '/' });
+      setSentTo(email.trim());
     } catch (err) {
       setErrors([errorText(err)]);
     } finally {
@@ -289,6 +281,14 @@ export function RegisterPage() {
       </Link>
     </>
   );
+
+  if (sentTo) {
+    return (
+      <AuthLayout title={t.checkMailTitle} footer={footer}>
+        <CheckMail email={sentTo} />
+      </AuthLayout>
+    );
+  }
 
   if (config?.registration === 'closed') {
     return (
@@ -321,6 +321,94 @@ export function RegisterPage() {
           {busy ? t.signingUp : t.signUp}
         </Button>
       </form>
+    </AuthLayout>
+  );
+}
+
+/** After signing up: where the activation link went, and a way to send it again. */
+function CheckMail({ email }: { email: string }) {
+  const t = useT().auth;
+  const errorText = useErrorText();
+  const [state, setState] = useState<'idle' | 'busy' | 'sent'>('idle');
+  const [errors, setErrors] = useState<string[]>([]);
+
+  const resend = async () => {
+    setState('busy');
+    setErrors([]);
+    try {
+      await authApi.resendActivation(email);
+      setState('sent');
+    } catch (err) {
+      setErrors([errorText(err)]);
+      setState('idle');
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <span aria-hidden className="flex size-14 items-center justify-center self-center rounded-[18px] bg-warn-bg text-accent-ink">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="5" width="18" height="14" rx="2.5" />
+          <path d="M4 7l8 6 8-6" />
+        </svg>
+      </span>
+      <p className="m-0 text-sm">{t.checkMail(email)}</p>
+      <p className="m-0 text-[13px] text-dim">{t.checkSpam}</p>
+      <Errors lines={errors} />
+      {state === 'sent' ? (
+        <p role="status" className="m-0 rounded-(--radius-control) bg-buy-soft p-3 text-sm text-buy">
+          {t.resent}
+        </p>
+      ) : (
+        <Button onClick={resend} disabled={state === 'busy'}>
+          {t.resend}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** The e-mailed activation link lands here: activates the account, signs in and opens the app. */
+export function ActivatePage() {
+  const t = useT().auth;
+  const navigate = useNavigate();
+  const resetSession = useResetSession();
+  const [failed, setFailed] = useState(false);
+  // React runs effects twice in development; the token works only once.
+  const started = useRef(false);
+
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    const token = query().get('token');
+    if (!token) return setFailed(true);
+    authApi
+      .activate(token)
+      .then(async () => {
+        await resetSession();
+        await navigate({ to: '/' });
+      })
+      .catch(() => setFailed(true));
+  }, [navigate, resetSession]);
+
+  return (
+    <AuthLayout
+      title={t.activateTitle}
+      footer={
+        <Link to="/logowanie" className={linkClass}>
+          {t.backToSignIn}
+        </Link>
+      }
+    >
+      {failed ? (
+        <p role="alert" className="m-0 rounded-(--radius-control) bg-sell-soft p-3 text-sm text-sell">
+          {t.activateFailed}
+        </p>
+      ) : (
+        <p role="status" className="m-0 text-sm text-dim">
+          {t.activating}
+        </p>
+      )}
     </AuthLayout>
   );
 }

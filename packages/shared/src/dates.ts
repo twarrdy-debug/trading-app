@@ -51,7 +51,7 @@ export const BROKER_TIMEZONES = ['broker-ny7', 'UTC', 'Europe/London', 'Europe/W
 export type BrokerTimezone = (typeof BROKER_TIMEZONES)[number];
 
 /** Instant of a platform server time ("2026-09-26T14:30:00"). */
-export function brokerTimeToUtc(localDateTime: string, zone: BrokerTimezone): Date {
+export function brokerTimeToUtc(localDateTime: string, zone: BrokerTimezone | (string & {})): Date {
   if (zone !== 'broker-ny7') return zonedTimeToUtc(localDateTime, zone);
   const newYork = new Date(Date.parse(`${localDateTime}Z`) - 7 * 3_600_000).toISOString().slice(0, 19);
   return zonedTimeToUtc(newYork, 'America/New_York');

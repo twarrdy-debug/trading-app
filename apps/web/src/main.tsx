@@ -3,7 +3,7 @@ import { createRootRoute, createRoute, createRouter, RouterProvider } from '@tan
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ApiError } from './api/client.ts';
-import { ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage } from './features/auth/AuthPages.tsx';
+import { ActivatePage, ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage } from './features/auth/AuthPages.tsx';
 import { CalculatorPage } from './features/calculator/CalculatorPage.tsx';
 import { CalendarPage } from './features/calendar/CalendarPage.tsx';
 import { JournalPage } from './features/journal/JournalPage.tsx';
@@ -30,6 +30,7 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: '/rejestracja', component: RegisterPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/reset-hasla', component: ForgotPasswordPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/nowe-haslo', component: ResetPasswordPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/aktywacja', component: ActivatePage }),
   appRoute.addChildren([
     createRoute({ getParentRoute: () => appRoute, path: '/', component: DashboardPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/dziennik', component: JournalPage }),

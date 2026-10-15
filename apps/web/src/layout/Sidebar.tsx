@@ -1,11 +1,13 @@
 import type { PublicUser } from '@trading/api/types';
+import { APP_NAME } from '@trading/shared';
 import { Link } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
+import { LogoMark, Wordmark } from '../components/ui/Brand.tsx';
 import { useT, type Messages } from '../i18n/index.tsx';
 import { NavIcon, type NavIconName } from './NavIcon.tsx';
 import { SessionClock, ThemeIcon } from './SessionClock.tsx';
 
-export const APP_NAME = '[NAZWA]';
+export { APP_NAME };
 
 export const NAV = [
   { to: '/', label: 'dashboard', icon: 'dashboard' },
@@ -25,12 +27,8 @@ const ADMIN_ITEM = { to: '/admin', label: 'admin', icon: 'admin' } as const;
 export function Logo({ withName = true }: { withName?: boolean }) {
   return (
     <Link to="/" className="flex min-w-0 items-center gap-2.5 text-ink no-underline">
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-[10px] bg-accent">
-        <svg width="18" height="18" viewBox="0 0 28 28" fill="none" stroke="var(--on-accent)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M2 14h8l3-8 4 16 3-8h6" />
-        </svg>
-      </span>
-      {withName && <span className="truncate text-[15px] font-bold">{APP_NAME}</span>}
+      <LogoMark size={36} />
+      {withName ? <Wordmark className="truncate text-[16px]" /> : <span className="sr-only">{APP_NAME}</span>}
     </Link>
   );
 }

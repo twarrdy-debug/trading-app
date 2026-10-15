@@ -162,7 +162,7 @@ export function MarketPanel() {
     const closes = candles.map((c) => c.close);
     const atr = a.atr ?? 0;
     const overlays: ChartLineSeries[] = on.ema
-      ? settings.emas.map((period, i) => ({ key: `ema${period}`, label: `EMA ${period}`, color: EMA_COLORS[i % EMA_COLORS.length]!, values: ema(closes, period), width: 2 }))
+      ? settings.emas.map((period, i) => ({ key: `ema${period}`, label: `EMA ${period}`, color: EMA_COLORS[i % EMA_COLORS.length]!, values: ema(closes, period), width: 1 }))
       : [];
     const panes: ChartPane[] = [];
     const rsiValues = rsi(closes);
@@ -194,7 +194,7 @@ export function MarketPanel() {
     }
     if (on.sessions && INTRADAY.includes(resolution)) {
       for (const s of sessionLevels(candles, 2))
-        boxes.push({ from: s.start, to: s.open ? null : s.end, top: s.high, bottom: s.low, color: `chart-${s.session}`, fill: 0.05, label: t.sessionNames[s.session], dashed: true });
+        boxes.push({ from: s.start, to: s.open ? null : s.end, top: s.high, bottom: s.low, color: `chart-${s.session}`, fill: 0.05, label: t.sessionNames[s.session], dashed: true, labelAt: 'above' });
     }
     if (on.fvg) for (const z of standing(findFvgs(candles, atr * 0.15), 6)) boxes.push({ from: z.time, to: null, top: z.top, bottom: z.bottom, color: 'chart-fvg', label: z.direction === 'bull' ? 'FVG ↑' : 'FVG ↓' });
     const structure = findStructure(candles, STRENGTH[resolution]);
@@ -356,7 +356,7 @@ export function MarketPanel() {
                 )}
                 {a?.fetchError && <span className="px-1 text-xs text-warn">{t.stale}</span>}
                 {isPending && !a ? (
-                  <div className="h-[640px] animate-pulse rounded-xl opacity-30" style={{ background: 'var(--chart-grid)' }} />
+                  <div className="h-[clamp(520px,74vh,920px)] animate-pulse rounded-xl opacity-30" style={{ background: 'var(--chart-grid)' }} />
                 ) : chart ? (
                   <TradingChart
                     candles={chart.candles}
@@ -369,6 +369,7 @@ export function MarketPanel() {
                     timeZone={timezone}
                     resetKey={`${selected?.id}:${resolution}:${chart.panes.map((p) => p.key).join(',')}`}
                     ariaLabel={t.chartAria(selected?.symbol ?? '', resolution)}
+                    watermark={`${selected?.symbol ?? ''} · ${resolution}`}
                   />
                 ) : (
                   <p className="m-0 py-16 text-center text-sm opacity-70">{t.noData}</p>
@@ -426,13 +427,59 @@ export function MarketPanel() {
                 )}
 
                 {a && a.lastPrice != null && a.atr != null && <LevelList analysis={a} price={price} unit={unit} />}
-                <p className="m-0 px-1 text-[11.5px] text-dim">{t.zonesHelp}</p>
+                <Glossary />
               </div>
             </div>
           )}
         </>
       )}
     </div>
+  );
+}
+
+const GLOSSARY_KEY = 'analysis-glossary-open';
+
+/** Short explanations of the zones and levels on the chart; open until folded (remembered per browser). */
+function Glossary() {
+  const t = useT().analysis;
+  const [open] = useState(() => {
+    try {
+      return localStorage.getItem(GLOSSARY_KEY) !== 'false';
+    } catch {
+      return true;
+    }
+  });
+  return (
+    <details
+      open={open}
+      onToggle={(e) => {
+        try {
+          localStorage.setItem(GLOSSARY_KEY, String(e.currentTarget.open));
+        } catch {
+          // Not remembered.
+        }
+      }}
+      className="card group px-4 py-3.5"
+    >
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-[13px] font-semibold [&::-webkit-details-marker]:hidden">
+        {t.glossaryTitle}
+        <span aria-hidden className="text-dim transition group-open:rotate-180">
+          ▾
+        </span>
+      </summary>
+      <dl className="m-0 mt-3 flex flex-col gap-2.5">
+        {t.glossary.map(([tag, name, text]) => (
+          <div key={tag} className="flex flex-col gap-0.5">
+            <dt className="flex items-baseline gap-2 text-[13px]">
+              <span className="rounded-md bg-chip px-1.5 py-0.5 text-[10.5px] font-extrabold">{tag}</span>
+              <span className="font-semibold">{name}</span>
+            </dt>
+            <dd className="m-0 text-xs leading-snug text-dim">{text}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="m-0 mt-3 text-[11.5px] text-dim">{t.glossaryNote}</p>
+    </details>
   );
 }
 

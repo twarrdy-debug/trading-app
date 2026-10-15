@@ -9,6 +9,8 @@ export interface MarketDataProvider {
   fetchCandles(epic: string, resolution: AnalysisResolution, options: { max?: number; from?: Date }): Promise<Candle[]>;
   /** Mid price (between bid and ask) and when it was quoted. */
   fetchQuote(epic: string): Promise<{ price: number; time: Date }>;
+  /** Mid price of the one-minute candle at `at` (the last one at or before it). */
+  fetchQuoteAt(epic: string, at: Date): Promise<{ price: number; time: Date }>;
   /** Share of the source's clients long and short on each market, in %. */
   fetchSentiment(epics: string[]): Promise<{ epic: string; long: number; short: number }[]>;
 }
@@ -101,6 +103,19 @@ export function capitalProvider(config: { env: 'demo' | 'live'; identifier: stri
       return {
         price: Math.round(((last.closePrice.bid + last.closePrice.ask) / 2) * 100) / 100,
         time: new Date(`${last.snapshotTimeUTC}Z`),
+      };
+    },
+    async fetchQuoteAt(epic, at) {
+      // A few minutes around the moment, as Capital.com reads from/to: UTC without a zone suffix.
+      const iso = (d: Date) => d.toISOString().slice(0, 19);
+      const params = new URLSearchParams({ resolution: 'MINUTE', max: '10', from: iso(new Date(at.getTime() - 5 * 60_000)), to: iso(new Date(at.getTime() + 60_000)) });
+      const body = await get<{ prices: CapitalPrice[] }>(`/prices/${encodeURIComponent(epic)}?${params}`);
+      const minute = Math.floor(at.getTime() / 60_000) * 60_000;
+      const candle = body.prices.filter((p) => Date.parse(`${p.snapshotTimeUTC}Z`) <= minute).at(-1) ?? body.prices[0];
+      if (!candle) throw new Error(`Capital.com ${epic}: no prices at ${iso(at)}`);
+      return {
+        price: Math.round(((candle.closePrice.bid + candle.closePrice.ask) / 2) * 100) / 100,
+        time: new Date(`${candle.snapshotTimeUTC}Z`),
       };
     },
     async fetchSentiment(epics) {

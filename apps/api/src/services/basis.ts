@@ -14,6 +14,11 @@ export type QuoteSource = { provider: 'capital' | 'yahoo' | 'gold-api'; symbol: 
 
 export interface QuoteProvider {
   fetchQuote(source: QuoteSource): Promise<Quote>;
+  /**
+   * The price at a past moment, where the source has history (Capital.com): the CFD is read at the
+   * futures quote's own minute, since the free futures feed is about 10 minutes late.
+   */
+  fetchQuoteAt?(source: QuoteSource, at: Date): Promise<Quote>;
 }
 
 /**
@@ -33,6 +38,10 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /** Live quotes; Capital.com ones need its market data provider (without it they fail and the next source is used). */
 export const createQuoteProvider = (market: MarketDataProvider | null): QuoteProvider => ({
+  async fetchQuoteAt({ provider, symbol }, at) {
+    if (provider !== 'capital' || !market) throw new Error(`${provider} has no price history`);
+    return market.fetchQuoteAt(symbol, at);
+  },
   async fetchQuote({ provider, symbol }) {
     if (provider === 'capital') {
       if (!market) throw new Error('Capital.com not configured');
@@ -61,11 +70,15 @@ export const createQuoteProvider = (market: MarketDataProvider | null): QuotePro
 
 export const liveQuoteProvider = createQuoteProvider(null);
 
-/** The first CFD source that answers, and which one it was. */
-async function firstQuote(quotes: QuoteProvider, sources: QuoteSource[]): Promise<{ quote: Quote; source: QuoteSource }> {
+/**
+ * The first CFD source that answers, and which one it was. With `at` (the futures quote's time) a
+ * source with history is read at that minute, so both prices come from the same moment.
+ */
+async function firstQuote(quotes: QuoteProvider, sources: QuoteSource[], at?: Date): Promise<{ quote: Quote; source: QuoteSource }> {
   let error: unknown;
   for (const source of sources) {
     try {
+      if (at && quotes.fetchQuoteAt && source.provider === 'capital') return { quote: await quotes.fetchQuoteAt(source, at), source };
       return { quote: await quotes.fetchQuote(source), source };
     } catch (err) {
       error = err;
@@ -91,8 +104,9 @@ export async function measureBasis(db: DB, quotes: QuoteProvider, pairKey: strin
   let cfdSource: QuoteSource;
   let futures: Quote;
   try {
-    let first: { quote: Quote; source: QuoteSource };
-    [first, futures] = await Promise.all([firstQuote(quotes, sources.cfd), quotes.fetchQuote(sources.futures)]);
+    // Futures first: the CFD is then read at the futures quote's minute (the futures feed is late).
+    futures = await quotes.fetchQuote(sources.futures);
+    const first = await firstQuote(quotes, sources.cfd, futures.time);
     cfd = first.quote;
     cfdSource = first.source;
   } catch (err) {
