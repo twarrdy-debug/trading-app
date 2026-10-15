@@ -5,6 +5,7 @@ import {
   DEFAULT_CHECKLIST_ITEMS,
   idParams,
   levelFiltersSchema,
+  marketAnalysisQuerySchema,
   toLocalDate,
   updateChecklistItemSchema,
   updateChecklistSchema,
@@ -23,6 +24,7 @@ import {
 import type { DB } from '../db/client.ts';
 import { badRequest, notFound } from '../errors.ts';
 import type { CurrentUser } from '../plugins/current-user.ts';
+import { analysisOverview, marketAnalysis } from '../services/market-analysis.ts';
 
 const HIGHER_TIMEFRAMES = ['H4', 'D1', 'W1', 'MN'] as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -53,6 +55,21 @@ async function eventsForDay(db: DB, user: CurrentUser, instrumentId: string, dat
 }
 
 export const analysisRoutes: FastifyPluginAsyncZod = async (app) => {
+  /**
+   * Automatic analysis of one instrument from market data: candles, swings, equal highs and lows,
+   * the previous day's and week's levels, ATR and client sentiment. Not investment advice.
+   */
+  app.get(
+    '/analysis/market/:id',
+    { schema: { tags: ['analiza'], params: idParams, querystring: marketAnalysisQuerySchema }, config: { rateLimit: { max: 60, timeWindow: '1 minute' } } },
+    (req) => marketAnalysis(app.db, app.market, req.params.id, req.query.resolution),
+  );
+
+  /** One line per favourite instrument (or every instrument with data): price, nearest equal levels, sentiment. */
+  app.get('/analysis/overview', { schema: { tags: ['analiza'] }, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, (req) =>
+    analysisOverview(app.db, app.market, req.user),
+  );
+
   const assertInstrument = async (id: string) => {
     const [row] = await app.db.select({ id: instruments.id }).from(instruments).where(eq(instruments.id, id));
     if (!row) throw badRequest('unknownInstrument');

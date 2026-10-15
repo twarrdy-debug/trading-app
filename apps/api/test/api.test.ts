@@ -11,6 +11,7 @@ import { loadEnv } from '../src/env.ts';
 import type { QuoteProvider, QuoteSource } from '../src/services/basis.ts';
 import type { CalendarSource, FfEvent } from '../src/services/calendar.ts';
 import type { FxProvider } from '../src/services/fx.ts';
+import type { MarketDataProvider } from '../src/services/market-data.ts';
 import { parseFjApiNews, refreshNews, type FeedItem, type NewsSource } from '../src/services/news.ts';
 
 /** Offline stand-in for the ECB feed; counts calls to check caching. */
@@ -43,6 +44,32 @@ const calendar: CalendarSource = { fetchWeek: async () => ffWeek };
 let feed: FeedItem[] = [];
 const news: NewsSource = { fetchLatest: async () => feed };
 
+/**
+ * Offline market data: candles oscillating around 4100 (a peak every 12 candles at the same price,
+ * so equal highs and lows), ending on 12 Oct 2026; records the requests.
+ */
+const marketCalls: string[] = [];
+const market: MarketDataProvider = {
+  async fetchCandles(epic, resolution, { from }) {
+    marketCalls.push(`${epic}:${resolution}:${from ? 'from' : 'full'}`);
+    const step = resolution === 'D1' ? 86_400_000 : resolution === 'H4' ? 4 * 3_600_000 : 3_600_000;
+    const end = Date.parse('2026-10-12T00:00:00Z');
+    return Array.from({ length: 60 }, (_, i) => {
+      const mid = 4100 + 15 * Math.sin((i * 2 * Math.PI) / 12);
+      return { time: new Date(end - (59 - i) * step).toISOString(), open: mid, high: Math.round((mid + 3) * 100) / 100, low: Math.round((mid - 3) * 100) / 100, close: mid };
+    });
+  },
+  async fetchQuote() {
+    throw new Error('offline');
+  },
+  async fetchQuoteAt() {
+    throw new Error('offline');
+  },
+  async fetchSentiment(epics) {
+    return epics.map((epic) => ({ epic, long: 70, short: 30 }));
+  },
+};
+
 let app: App;
 let database: Database;
 let uploadDir: string;
@@ -54,7 +81,7 @@ beforeAll(async () => {
   database = createDatabase(env.DATABASE_URL);
   await database.migrate();
   await seed(database.db, env.DEV_USER_EMAIL);
-  app = await buildApp({ db: database.db, env, fx, quotes, calendar, news, logger: false });
+  app = await buildApp({ db: database.db, env, fx, quotes, market, calendar, news, logger: false });
 
   const instruments = (await app.inject({ url: '/instruments' })).json<{ id: string; symbol: string }[]>();
   for (const i of instruments) ids[i.symbol] = i.id;
@@ -1039,6 +1066,74 @@ describe('MT5 import', () => {
   });
 });
 
+describe('Tradovate import', () => {
+  const csv = readFileSync(new URL('../../../packages/shared/test/fixtures/tradovate-position-history.csv', import.meta.url));
+  let trader: Record<string, string>;
+  let accountId: string;
+
+  const importFile = (fields: Record<string, string> = {}) => {
+    const body = multipart({ accountId, ...fields }, { name: 'Position History.csv', content: csv });
+    return app.inject({ method: 'POST', url: '/trades/import/mt5', payload: body.payload, headers: { ...body.headers, ...trader } });
+  };
+
+  beforeAll(async () => {
+    const user = (await post('/educators', { displayName: 'Tradovate trader' })).json();
+    trader = { 'x-user-id': user.id };
+    await app.inject({ method: 'PATCH', url: '/me', headers: trader, payload: { timezone: 'Europe/Warsaw' } });
+    accountId = (
+      await app.inject({
+        method: 'POST',
+        url: '/accounts',
+        payload: { name: 'Lucid', type: 'prop', market: 'futures', size: 50_000, maxDrawdownPct: 4 },
+        headers: trader,
+      })
+    ).json().id;
+  });
+
+  it('rebuilds trades in the user\'s time zone and skips one entered by hand', async () => {
+    // Entered by hand: the long of 12.10 opened at 13:01 Warsaw time (Tradovate: 13:05:48).
+    await app.inject({
+      method: 'POST',
+      url: '/trades',
+      headers: trader,
+      payload: {
+        instrumentId: ids.MGC1,
+        accountId,
+        direction: 'long',
+        openedAt: '2026-10-12T11:01:00.000Z',
+        closedAt: '2026-10-12T12:07:00.000Z',
+        entryPrice: 4196.8,
+        exitPrice: 4194.7,
+        positionSize: 4,
+      },
+    });
+    const preview = (await importFile()).json();
+    expect(preview).toMatchObject({ format: 'tradovate', account: 'DEMO0001', timezone: 'Europe/Warsaw', summary: { total: 9, ready: 8, similar: 1 } });
+    expect(preview.positions[0]).toMatchObject({
+      instrumentSymbol: 'MGC1',
+      direction: 'long',
+      volume: 4,
+      entries: 2,
+      openPrice: 4196.8,
+      openedAt: '2026-10-12T11:05:48.000Z',
+      status: 'similar',
+    });
+
+    const done = (await importFile({ commit: 'true' })).json();
+    expect(done.summary).toMatchObject({ imported: 8 });
+    const list = (await app.inject({ url: '/trades?limit=50', headers: trader })).json();
+    expect(list.total).toBe(9);
+    // Long of 3 closed in three parts: (16.8 + 20.9 + 23.5) points × $10 per micro contract.
+    const parts = list.items.find((t: { externalId: string | null }) => t.externalId === 'tradovate:DEMO0001:695384440709');
+    expect(parts).toMatchObject({ positionSize: 3, entryPrice: 4165.7, pnlAccount: 612, closedAt: '2026-10-14T02:55:19.000Z' });
+    expect(parts.parts).toHaveLength(3);
+
+    expect((await importFile({ commit: 'true' })).json().summary).toMatchObject({ imported: 0, duplicate: 8 });
+    // On request the trade entered by hand is imported too.
+    expect((await importFile({ commit: 'true', includeSimilar: 'true' })).json().summary).toMatchObject({ imported: 1 });
+  });
+});
+
 describe('dashboard stats', () => {
   it('reports days with counts and discipline, and win/loss/breakeven streaks', async () => {
     const user = (await post('/educators', { displayName: 'Dashboard trader' })).json();
@@ -1508,6 +1603,40 @@ describe('trading accounts', () => {
     expect((await as('GET', '/accounts')).json()[0].prop).toMatchObject({ drawdownType: 'static', floor: 9000 });
   });
 
+  it('takes prop limits as amounts', async () => {
+    const created = await as('POST', '/accounts', { name: 'Apex 50k', type: 'prop', market: 'cfd', size: 50_000, maxDrawdownAmount: 2_500, profitTargetAmount: 3_000 });
+    expect(created.statusCode).toBe(201);
+    const apex = created.json();
+    const view = async () => (await as('GET', '/accounts')).json().find((a: { id: string }) => a.id === apex.id);
+    expect((await view()).prop).toMatchObject({ limit: 2500, maxDrawdownPct: 5, drawdownUnit: 'amount', target: { amount: 3000, pct: 6, unit: 'amount' } });
+    // Switching to % clears the amount.
+    await as('PATCH', `/accounts/${apex.id}`, { maxDrawdownPct: 4, maxDrawdownAmount: null });
+    expect((await view()).prop).toMatchObject({ limit: 2000, drawdownUnit: 'pct' });
+    expect((await as('POST', '/accounts', { name: 'Too much', type: 'prop', market: 'cfd', size: 1_000, maxDrawdownAmount: 1_000 })).statusCode).toBe(400);
+    await as('DELETE', `/accounts/${apex.id}`);
+  });
+
+  it('moves or deletes the trades of a deleted account when asked', async () => {
+    const account = async (body: object) => (await as('POST', '/accounts', body)).json() as { id: string };
+    const target = await account({ name: 'Target', type: 'live', size: 5_000 });
+    const futures = await account({ name: 'Futures prop', type: 'prop', market: 'futures', size: 50_000, maxDrawdownPct: 5 });
+    const moving = await account({ name: 'Moving', type: 'live', size: 5_000 });
+    await gold('2026-09-08', 4001, { accountId: moving.id });
+    const count = async (id: string) => (await as('GET', '/accounts')).json().find((a: { id: string }) => a.id === id)?.tradeCount;
+    expect(await count(moving.id)).toBe(1);
+
+    expect((await as('DELETE', `/accounts/${moving.id}?trades=move`)).statusCode).toBe(400);
+    // Gold is a CFD here; the futures prop account does not take it.
+    expect((await as('DELETE', `/accounts/${moving.id}?trades=move&moveTo=${futures.id}`)).json().error).toContain('Futures prop');
+    expect((await as('DELETE', `/accounts/${moving.id}?trades=move&moveTo=${target.id}`)).statusCode).toBe(204);
+    expect(await count(target.id)).toBe(1);
+
+    const tradeId = (await as('GET', `/trades?account=${target.id}`)).json().items[0].id;
+    expect((await as('DELETE', `/accounts/${target.id}?trades=delete`)).statusCode).toBe(204);
+    expect((await as('GET', `/trades/${tradeId}`)).statusCode).toBe(404);
+    await as('DELETE', `/accounts/${futures.id}`);
+  });
+
   it('keeps the trades when an account is deleted', async () => {
     expect((await as('DELETE', `/accounts/${live.id}`)).statusCode).toBe(204);
     expect((await as('GET', '/accounts')).json()).toHaveLength(1);
@@ -1569,7 +1698,7 @@ describe('leverage', () => {
 describe('authentication', () => {
   let authApp: App;
   let authDb: Database;
-  const sent: { to: string; subject: string; text: string }[] = [];
+  const sent: { to: string; subject: string; text: string; html?: string }[] = [];
   const origin = 'http://localhost:5173';
 
   /** Keeps the session cookie between requests, like a browser. */
@@ -1587,6 +1716,22 @@ describe('authentication', () => {
       }
       return res;
     };
+  }
+
+  type Client = ReturnType<typeof browser>;
+
+  /** The activation link from the last e-mail sent to `email`. */
+  const activationLink = (email: string) => {
+    const mail = sent.filter((m) => m.to === email).at(-1)!;
+    const token = decodeURIComponent(mail.text.match(/\/aktywacja\?token=([^\s]+)/)![1]!);
+    return `/auth/verify-email?token=${encodeURIComponent(token)}`;
+  };
+
+  /** Signs up and opens the e-mailed activation link, like a new user does: then signed in. */
+  async function signUpAndActivate(client: Client, payload: Record<string, string>) {
+    const res = await client('POST', '/auth/sign-up/email', payload);
+    if (res.statusCode === 200) expect((await client('GET', activationLink(payload.email!))).statusCode).toBe(200);
+    return res;
   }
 
   /** A fresh session cookie of the admin (signed in by an earlier test). */
@@ -1635,7 +1780,7 @@ describe('authentication', () => {
     expect(without.statusCode).toBe(400);
     expect(without.json().code).toBe('INVALID_INVITE');
 
-    const signUp = await newcomer('POST', '/auth/sign-up/email', {
+    const signUp = await signUpAndActivate(newcomer, {
       name: 'Jan',
       email: 'jan@example.com',
       password: 'Jan-password-1!',
@@ -1668,13 +1813,48 @@ describe('authentication', () => {
     expect((await newcomer('GET', '/me')).statusCode).toBe(401);
   });
 
+  it('needs the e-mailed link before a new account can sign in', async () => {
+    const { code } = (await authApp.inject({ method: 'POST', url: '/invites', headers: { cookie: await ownerCookie() }, payload: {} })).json();
+    const user = browser();
+    const payload = { name: 'Nowy', email: 'nowy@example.com', password: 'Nowy-password-1!', inviteCode: code, language: 'pl' };
+    const res = await user('POST', '/auth/sign-up/email', payload);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().token).toBeNull();
+    expect((await user('GET', '/me')).statusCode).toBe(401);
+
+    // The e-mail: designed HTML with a plain-text part, in the new user's language.
+    const mail = sent.at(-1)!;
+    expect(mail).toMatchObject({ to: 'nowy@example.com', subject: expect.stringMatching(/^Aktywuj konto/) });
+    expect(mail.html).toContain('Potwierdź swój adres e-mail');
+    expect(mail.text).toMatch(/http:\/\/localhost:5173\/aktywacja\?token=/);
+
+    // Signing in before activating is refused and sends a fresh link.
+    const before = sent.length;
+    const early = await user('POST', '/auth/sign-in/email', { email: 'nowy@example.com', password: 'Nowy-password-1!' });
+    expect(early.statusCode).toBe(403);
+    expect(early.json().code).toBe('EMAIL_NOT_VERIFIED');
+    expect(sent.length).toBe(before + 1);
+
+    // The link activates the account and signs in; it works only once, and a forged one not at all.
+    expect((await user('GET', activationLink('nowy@example.com'))).statusCode).toBe(200);
+    expect((await user('GET', '/me')).json()).toMatchObject({ email: 'nowy@example.com', onboarded: false });
+    expect((await browser()('GET', '/auth/verify-email?token=forged')).statusCode).toBe(401);
+    expect((await browser()('POST', '/auth/sign-in/email', { email: 'nowy@example.com', password: 'Nowy-password-1!' })).statusCode).toBe(200);
+
+    // Signing up again with a taken address looks the same but creates nothing and keeps the invite.
+    const { code: fresh } = (await authApp.inject({ method: 'POST', url: '/invites', headers: { cookie: await ownerCookie() }, payload: {} })).json();
+    expect((await browser()('POST', '/auth/sign-up/email', { ...payload, inviteCode: fresh })).statusCode).toBe(200);
+    const invites = (await authApp.inject({ url: '/invites', headers: { cookie: await ownerCookie() } })).json();
+    expect(invites.find((i: { code: string }) => i.code === fresh)).toMatchObject({ usedBy: null });
+  });
+
   it('e-mails invitations bound to an address, and seeds no second admin', async () => {
     const admin = browser();
     await admin('POST', '/auth/sign-in/email', { email: 'owner@example.com', password: 'Owner-password-1!' });
     const invite = (await admin('POST', '/invites', { email: 'Ewa@Example.com', role: 'user' })).json();
     expect(invite).toMatchObject({ email: 'ewa@example.com', emailed: true });
     const mail = sent.at(-1)!;
-    expect(mail).toMatchObject({ to: 'ewa@example.com', subject: 'Zaproszenie do dziennika tradera' });
+    expect(mail).toMatchObject({ to: 'ewa@example.com', subject: 'Zaproszenie do AlphaLogFX' });
     expect(mail.text).toContain(`/rejestracja?kod=${invite.code}`);
     // Without an address nothing is sent.
     const before = sent.length;
@@ -1700,7 +1880,7 @@ describe('authentication', () => {
 
     for (const name of ['Adam', 'Basia']) {
       const user = browser();
-      const res = await user('POST', '/auth/sign-up/email', { name, email: `${name.toLowerCase()}@group.example`, password: 'Group-password-1!', inviteCode: 'Dixigroup26' });
+      const res = await signUpAndActivate(user, { name, email: `${name.toLowerCase()}@group.example`, password: 'Group-password-1!', inviteCode: 'Dixigroup26' });
       expect(res.statusCode).toBe(200);
       expect((await user('GET', '/me')).json()).toMatchObject({ displayName: name, role: 'user', onboarded: false });
     }
@@ -1733,7 +1913,7 @@ describe('authentication', () => {
       expect(res.statusCode).toBe(400);
       expect(res.json().code).toBe('PASSWORD_TOO_WEAK');
     }
-    expect((await user('POST', '/auth/sign-up/email', { name: 'Strong', email: 'weak@example.com', password: 'Zażółć gęślą!', inviteCode: code })).statusCode).toBe(200);
+    expect((await signUpAndActivate(user, { name: 'Strong', email: 'weak@example.com', password: 'Zażółć gęślą!', inviteCode: code })).statusCode).toBe(200);
     const change = await user('POST', '/auth/change-password', { currentPassword: 'Zażółć gęślą!', newPassword: 'weakweakweak' });
     expect(change.json().code).toBe('PASSWORD_TOO_WEAK');
     const { setLogin } = await import('../src/services/credentials.ts');
@@ -1746,7 +1926,7 @@ describe('authentication', () => {
     const user = browser();
     const { code } = (await authApp.inject({ method: 'POST', url: '/invites', headers: { cookie: await ownerCookie() }, payload: {} })).json();
     const password = 'Second-factor-1!';
-    await user('POST', '/auth/sign-up/email', { name: 'Tfa', email: 'tfa@example.com', password, inviteCode: code });
+    await signUpAndActivate(user, { name: 'Tfa', email: 'tfa@example.com', password, inviteCode: code });
 
     // Turning it on needs the password and returns the authenticator link and backup codes.
     expect((await user('POST', '/auth/two-factor/enable', { password: 'wrong-Password-1!' })).statusCode).toBe(400);
@@ -1806,5 +1986,65 @@ describe('request limits', () => {
     } finally {
       await limited.close();
     }
+  });
+});
+
+describe('basis measured at one moment', () => {
+  it('reads the CFD at the futures quote minute when the source has history', async () => {
+    const { measureBasis } = await import('../src/services/basis.ts');
+    const futuresTime = new Date(Date.now() - 10 * 60_000); // the free futures feed is ten minutes late
+    const asked: Date[] = [];
+    const quotesAt: QuoteProvider = {
+      async fetchQuote(source) {
+        if (source.provider === 'capital') return { price: 9999, time: new Date() }; // the live price: must not be used
+        if (source.symbol === 'GC=F') return { price: 4179.9, time: futuresTime };
+        throw new Error('unused');
+      },
+      async fetchQuoteAt(_source, at) {
+        asked.push(at);
+        return { price: 4158, time: at };
+      },
+    };
+    const result = await measureBasis(database.db, quotesAt, 'gold');
+    expect(result.status).toBe('saved');
+    expect(asked[0]!.getTime()).toBe(futuresTime.getTime());
+    expect(result.status === 'saved' && result.snapshot).toMatchObject({ cfdPrice: 4158, difference: 21.9, cfdSource: 'capital', live: true });
+  });
+});
+
+describe('market analysis', () => {
+  it('fetches candles once, finds equal highs and lows and day levels, with sentiment', async () => {
+    const res = await app.inject({ url: `/analysis/market/${ids.XAUUSD}?resolution=H4` });
+    expect(res.statusCode).toBe(200);
+    const a = res.json();
+    expect(a.source).toMatchObject({ epic: 'GOLD', via: null });
+    expect(a.candles.length).toBe(60);
+    expect(a.swings.filter((s: { kind: string }) => s.kind === 'high').length).toBeGreaterThan(2);
+    const highs = a.equalLevels.find((l: { kind: string }) => l.kind === 'highs');
+    expect(highs.touches.length).toBeGreaterThan(2);
+    expect(highs.swept).toBe(false);
+    expect(a.dayLevels.pdh).not.toBeNull();
+    expect(a.sentiment).toMatchObject({ long: 70, short: 30 });
+    expect(marketCalls).toEqual(expect.arrayContaining(['GOLD:H4:full', 'GOLD:D1:full']));
+
+    // Within a few minutes the stored candles are used without asking the source again.
+    const before = marketCalls.length;
+    await app.inject({ url: `/analysis/market/${ids.XAUUSD}?resolution=H4` });
+    expect(marketCalls.length).toBe(before);
+  });
+
+  it('gives futures the paired CFD analysis, shifted by the measured difference', async () => {
+    const gold = (await app.inject({ url: `/analysis/market/${ids.XAUUSD}?resolution=H4` })).json();
+    const futures = (await app.inject({ url: `/analysis/market/${ids.GC1}?resolution=H4` })).json();
+    expect(futures.source).toMatchObject({ epic: 'GOLD', via: 'XAUUSD' });
+    const shift = futures.offset?.difference ?? 0;
+    expect(futures.lastPrice).toBeCloseTo(gold.lastPrice + shift, 4);
+  });
+
+  it('validates the request and lists favourites in the overview', async () => {
+    expect((await app.inject({ url: `/analysis/market/${ids.XAUUSD}?resolution=M1` })).statusCode).toBe(400);
+    expect((await app.inject({ url: '/analysis/market/00000000-0000-4000-8000-000000000000' })).statusCode).toBe(404);
+    const overview = (await app.inject({ url: '/analysis/overview' })).json();
+    expect(overview.items.map((i: { symbol: string }) => i.symbol)).toContain('XAUUSD');
   });
 });

@@ -145,9 +145,6 @@ export function TradesPage() {
             options={[...PERIODS.map((p) => ({ value: p, label: all.dashboard.periods[p] })), ...(period ? [] : [{ value: 'custom', label: all.table.customRange }])]}
           />
         </div>
-        <Button size="md" variant="primary" onClick={newTrade}>
-          + {all.table.newTrade}
-        </Button>
       </div>
 
       {notice && (
@@ -174,8 +171,9 @@ export function TradesPage() {
           <h2 className="m-0 text-[15px] font-bold">{all.composer.title}</h2>
           <span className="hidden text-xs text-dim md:inline">{tt.composerHint}</span>
           <div className="grow" />
-          <Button size="sm" variant="ghost" aria-expanded={composerOpen} onClick={() => setComposerOpen(!composerOpen)}>
-            {composerOpen ? tt.collapse : tt.expand}
+          {/* Opens the form if it was folded and starts an empty one. */}
+          <Button size="sm" variant="primary" onClick={newTrade} className="whitespace-nowrap">
+            + {all.table.newTrade}
           </Button>
         </header>
         {composerOpen && (

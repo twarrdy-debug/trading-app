@@ -8,7 +8,7 @@ import { Field, Input, toggleClass } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { Segments } from '../../components/ui/Stat.tsx';
 import { useT } from '../../i18n/index.tsx';
-import { APP_NAME } from '../../layout/AppShell.tsx';
+import { LogoMark, Wordmark } from '../../components/ui/Brand.tsx';
 import { AccountsManager } from '../account/AccountsManager.tsx';
 import { FavoriteInstrumentsPicker } from '../settings/FavoriteInstruments.tsx';
 
@@ -54,12 +54,8 @@ export function Onboarding({ user }: { user: PublicUser }) {
   return (
     <div className="flex min-h-full flex-col">
       <header className="flex items-center gap-3 px-4 pt-5 md:px-8">
-        <span className="flex size-9 items-center justify-center rounded-[10px] bg-accent">
-          <svg width="20" height="20" viewBox="0 0 28 28" fill="none" stroke="var(--on-accent)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M2 14h8l3-8 4 16 3-8h6" />
-          </svg>
-        </span>
-        <span className="text-[15px] font-bold">{APP_NAME}</span>
+        <LogoMark size={36} />
+        <Wordmark className="text-[16px]" />
         <div className="grow" />
         {step !== 'done' && (
           <Button size="sm" variant="ghost" onClick={finish} disabled={onboarding.isPending}>

@@ -2,6 +2,7 @@ import { CFD_FUTURES_PAIRS } from '@trading/shared';
 import { and, desc, eq } from 'drizzle-orm';
 import type { DB } from '../db/client.ts';
 import { basisSnapshots } from '../db/schema.ts';
+import type { MarketDataProvider } from './market-data.ts';
 
 export interface Quote {
   price: number;
@@ -9,28 +10,43 @@ export interface Quote {
   time: Date;
 }
 
-export type QuoteSource = { provider: 'yahoo' | 'gold-api'; symbol: string };
+export type QuoteSource = { provider: 'capital' | 'yahoo' | 'gold-api'; symbol: string };
 
 export interface QuoteProvider {
   fetchQuote(source: QuoteSource): Promise<Quote>;
+  /**
+   * The price at a past moment, where the source has history (Capital.com): the CFD is read at the
+   * futures quote's own minute, since the free futures feed is about 10 minutes late.
+   */
+  fetchQuoteAt?(source: QuoteSource, at: Date): Promise<Quote>;
 }
 
 /**
- * Reference prices for each pair. CFDs follow the cash index (or spot gold), futures the
- * front-month contract. These are unofficial free sources, good for personal use; switch to
- * a licensed feed before offering the app to other users.
+ * Reference prices for each pair. The CFD side is the broker CFD price from Capital.com when it is
+ * configured, otherwise the cash index (or spot gold); the futures side is the front-month
+ * contract. These are unofficial free sources, good for personal use; switch to a licensed feed
+ * before offering the app to other users.
  */
-export const BASIS_SOURCES: Record<string, { cfd: QuoteSource; futures: QuoteSource }> = {
-  nasdaq: { cfd: { provider: 'yahoo', symbol: '^NDX' }, futures: { provider: 'yahoo', symbol: 'NQ=F' } },
-  sp500: { cfd: { provider: 'yahoo', symbol: '^GSPC' }, futures: { provider: 'yahoo', symbol: 'ES=F' } },
-  dow: { cfd: { provider: 'yahoo', symbol: '^DJI' }, futures: { provider: 'yahoo', symbol: 'YM=F' } },
-  gold: { cfd: { provider: 'gold-api', symbol: 'XAU' }, futures: { provider: 'yahoo', symbol: 'GC=F' } },
+export const BASIS_SOURCES: Record<string, { cfd: QuoteSource[]; futures: QuoteSource }> = {
+  nasdaq: { cfd: [{ provider: 'capital', symbol: 'US100' }, { provider: 'yahoo', symbol: '^NDX' }], futures: { provider: 'yahoo', symbol: 'NQ=F' } },
+  sp500: { cfd: [{ provider: 'capital', symbol: 'US500' }, { provider: 'yahoo', symbol: '^GSPC' }], futures: { provider: 'yahoo', symbol: 'ES=F' } },
+  dow: { cfd: [{ provider: 'capital', symbol: 'US30' }, { provider: 'yahoo', symbol: '^DJI' }], futures: { provider: 'yahoo', symbol: 'YM=F' } },
+  gold: { cfd: [{ provider: 'capital', symbol: 'GOLD' }, { provider: 'gold-api', symbol: 'XAU' }], futures: { provider: 'yahoo', symbol: 'GC=F' } },
 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-export const liveQuoteProvider: QuoteProvider = {
+/** Live quotes; Capital.com ones need its market data provider (without it they fail and the next source is used). */
+export const createQuoteProvider = (market: MarketDataProvider | null): QuoteProvider => ({
+  async fetchQuoteAt({ provider, symbol }, at) {
+    if (provider !== 'capital' || !market) throw new Error(`${provider} has no price history`);
+    return market.fetchQuoteAt(symbol, at);
+  },
   async fetchQuote({ provider, symbol }) {
+    if (provider === 'capital') {
+      if (!market) throw new Error('Capital.com not configured');
+      return market.fetchQuote(symbol);
+    }
     const signal = AbortSignal.timeout(8_000);
     if (provider === 'gold-api') {
       const res = await fetch(`https://api.gold-api.com/price/${symbol}`, { signal });
@@ -50,7 +66,26 @@ export const liveQuoteProvider: QuoteProvider = {
     if (!meta) throw new Error(`Yahoo ${symbol}: brak danych`);
     return { price: round2(meta.regularMarketPrice), time: new Date(meta.regularMarketTime * 1000) };
   },
-};
+});
+
+export const liveQuoteProvider = createQuoteProvider(null);
+
+/**
+ * The first CFD source that answers, and which one it was. With `at` (the futures quote's time) a
+ * source with history is read at that minute, so both prices come from the same moment.
+ */
+async function firstQuote(quotes: QuoteProvider, sources: QuoteSource[], at?: Date): Promise<{ quote: Quote; source: QuoteSource }> {
+  let error: unknown;
+  for (const source of sources) {
+    try {
+      if (at && quotes.fetchQuoteAt && source.provider === 'capital') return { quote: await quotes.fetchQuoteAt(source, at), source };
+      return { quote: await quotes.fetchQuote(source), source };
+    } catch (err) {
+      error = err;
+    }
+  }
+  throw error;
+}
 
 /** Quotes further apart than this are not the same moment. */
 const MAX_QUOTE_GAP_MS = 20 * 60_000;
@@ -66,9 +101,14 @@ export async function measureBasis(db: DB, quotes: QuoteProvider, pairKey: strin
   if (!sources) return { pairKey, status: 'error', message: `unknown pair ${pairKey}` };
 
   let cfd: Quote;
+  let cfdSource: QuoteSource;
   let futures: Quote;
   try {
-    [cfd, futures] = await Promise.all([quotes.fetchQuote(sources.cfd), quotes.fetchQuote(sources.futures)]);
+    // Futures first: the CFD is then read at the futures quote's minute (the futures feed is late).
+    futures = await quotes.fetchQuote(sources.futures);
+    const first = await firstQuote(quotes, sources.cfd, futures.time);
+    cfd = first.quote;
+    cfdSource = first.source;
   } catch (err) {
     return { pairKey, status: 'error', message: (err as Error).message };
   }
@@ -96,6 +136,7 @@ export async function measureBasis(db: DB, quotes: QuoteProvider, pairKey: strin
       futuresPrice: futures.price,
       difference: Math.round((futures.price - cfd.price) * 100) / 100,
       cfdQuotedAt: cfd.time,
+      cfdSource: cfdSource.provider,
       futuresQuotedAt: futures.time,
       live,
       measuredAt: now,

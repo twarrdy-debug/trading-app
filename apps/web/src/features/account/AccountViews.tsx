@@ -60,7 +60,7 @@ export function AccountTiles({ account, currency }: { account: AccountOverview; 
   const propTiles = prop && (
     <>
       <Stat
-        label={t.limitUsed(`${pct(prop.maxDrawdownPct)}${prop.drawdownType === 'eod' ? ` ${t.eod}` : ''}`)}
+        label={t.limitUsed(`${prop.drawdownUnit === 'amount' ? money(prop.limit) : pct(prop.maxDrawdownPct)}${prop.drawdownType === 'eod' ? ` ${t.eod}` : ''}`)}
         value={pct(prop.usedPct)}
         tone={danger ? 'sell' : 'ink'}
         visual={<Gauge percent={prop.usedPct} tone={danger ? 'sell' : 'accent'} />}
@@ -68,7 +68,7 @@ export function AccountTiles({ account, currency }: { account: AccountOverview; 
       />
       {prop.target && (
         <Stat
-          label={t.target(pct(prop.target.pct))}
+          label={t.target(prop.target.unit === 'amount' ? money(prop.target.amount) : pct(prop.target.pct))}
           value={pct(prop.target.progressPct)}
           tone={prop.target.reached ? 'buy' : 'ink'}
           visual={<Gauge percent={prop.target.progressPct} tone={prop.target.reached ? 'buy' : 'accent'} />}
@@ -122,7 +122,7 @@ export function AccountPanel({ account, currency }: { account: AccountOverview; 
         {prop ? (
           <div className="flex flex-col gap-2">
             <div className="flex items-baseline justify-between text-[13px]">
-              <span className="font-semibold">{`${t.ddLimit} · ${pct(prop.maxDrawdownPct)}${prop.drawdownType === 'eod' ? ` ${t.eod}` : ''}`}</span>
+              <span className="font-semibold">{`${t.ddLimit} · ${prop.drawdownUnit === 'amount' ? money(prop.limit) : pct(prop.maxDrawdownPct)}${prop.drawdownType === 'eod' ? ` ${t.eod}` : ''}`}</span>
               <span className={`font-mono ${danger ? 'text-sell' : ''}`}>{pct(prop.usedPct)}</span>
             </div>
             <div className="h-2 rounded-full bg-grid" role="meter" aria-valuenow={prop.usedPct} aria-valuemin={0} aria-valuemax={100} aria-label={t.ddLimit}>
@@ -134,10 +134,10 @@ export function AccountPanel({ account, currency }: { account: AccountOverview; 
             {prop.target && (
               <>
                 <div className="mt-2 flex items-baseline justify-between text-[13px]">
-                  <span className="font-semibold">{t.target(pct(prop.target.pct))}</span>
+                  <span className="font-semibold">{t.target(prop.target.unit === 'amount' ? money(prop.target.amount) : pct(prop.target.pct))}</span>
                   <span className={`font-mono ${prop.target.reached ? 'text-buy' : ''}`}>{pct(prop.target.progressPct)}</span>
                 </div>
-                <div className="h-2 rounded-full bg-grid" role="meter" aria-valuenow={prop.target.progressPct} aria-valuemin={0} aria-valuemax={100} aria-label={t.target(pct(prop.target.pct))}>
+                <div className="h-2 rounded-full bg-grid" role="meter" aria-valuenow={prop.target.progressPct} aria-valuemin={0} aria-valuemax={100} aria-label={t.target(prop.target.unit === 'amount' ? money(prop.target.amount) : pct(prop.target.pct))}>
                   <div className="h-2 rounded-full bg-buy" style={{ width: `${prop.target.progressPct}%` }} />
                 </div>
                 <span className={`text-[13px] ${prop.target.reached ? 'font-semibold text-buy' : 'text-dim'}`}>
@@ -182,7 +182,7 @@ export function AccountCards({ accounts, currency }: { accounts: AccountOverview
             {a.prop ? (
               <div className="flex flex-col gap-1.5">
                 <div className="flex justify-between text-xs">
-                  <span className="text-dim">{t.limitUsed(`${pct(a.prop.maxDrawdownPct)}${a.prop.drawdownType === 'eod' ? ` ${t.eod}` : ''}`)}</span>
+                  <span className="text-dim">{t.limitUsed(`${a.prop.drawdownUnit === 'amount' ? formatAmount(a.prop.limit, currency, false) : pct(a.prop.maxDrawdownPct)}${a.prop.drawdownType === 'eod' ? ` ${t.eod}` : ''}`)}</span>
                   <span className={`font-mono ${danger ? 'text-sell' : ''}`}>{pct(a.prop.usedPct)}</span>
                 </div>
                 <div className="h-1.5 rounded-full bg-grid">
@@ -191,7 +191,7 @@ export function AccountCards({ accounts, currency }: { accounts: AccountOverview
                 {a.prop.target && (
                   <>
                     <div className="flex justify-between text-xs">
-                      <span className="text-dim">{t.target(pct(a.prop.target.pct))}</span>
+                      <span className="text-dim">{t.target(a.prop.target.unit === 'amount' ? formatAmount(a.prop.target.amount, currency, false) : pct(a.prop.target.pct))}</span>
                       <span className={`font-mono ${a.prop.target.reached ? 'text-buy' : ''}`}>{pct(a.prop.target.progressPct)}</span>
                     </div>
                     <div className="h-1.5 rounded-full bg-grid">

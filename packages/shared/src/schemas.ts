@@ -25,6 +25,7 @@ import {
   TRADE_SOURCES,
 } from './enums.ts';
 import { BROKER_TIMEZONES } from './dates.ts';
+import { ANALYSIS_RESOLUTIONS } from './analysis.ts';
 
 /**
  * Custom validation messages are message keys; the API translates them into the user's
@@ -132,6 +133,9 @@ const accountFields = z.object({
   drawdownType: z.enum(DRAWDOWN_TYPES).optional(),
   /** Prop firm profit target, % of the starting balance. */
   profitTargetPct: z.number().min(0.1).max(1000).nullable().optional(),
+  /** The same limits as amounts in the account currency, as prop firms often state them; when set, the % is null. */
+  maxDrawdownAmount: z.number().positive().max(1_000_000_000).nullable().optional(),
+  profitTargetAmount: z.number().positive().max(1_000_000_000).nullable().optional(),
   /** CFD leverage (1:n), used to show the margin of a position. */
   leverage: z
     .number()
@@ -149,12 +153,21 @@ const accountFields = z.object({
 const propRules = (a: Partial<z.infer<typeof accountFields>>, ctx: z.RefinementCtx) => {
   if (a.type !== 'prop') return;
   if (!a.market) ctx.addIssue({ code: 'custom', path: ['market'], message: 'validation.propMarket' });
-  if (a.maxDrawdownPct == null) ctx.addIssue({ code: 'custom', path: ['maxDrawdownPct'], message: 'validation.propDrawdown' });
+  if (a.maxDrawdownPct == null && a.maxDrawdownAmount == null) ctx.addIssue({ code: 'custom', path: ['maxDrawdownPct'], message: 'validation.propDrawdown' });
 };
 
 export const createAccountSchema = accountFields.superRefine(propRules);
 /** Partial; the API checks the prop rules on the account as it will be after the change. */
 export const updateAccountSchema = accountFields.partial();
+
+/** Market analysis of one instrument: candles at this resolution (H4 by default). */
+export const marketAnalysisQuerySchema = z.object({ resolution: z.enum(ANALYSIS_RESOLUTIONS).default('H4') });
+
+/** Deleting an account: keep its trades without an account, move them to another account, or delete them. */
+export const deleteAccountQuerySchema = z.object({
+  trades: z.enum(['keep', 'move', 'delete']).default('keep'),
+  moveTo: z.uuid().optional(),
+});
 
 /** Which trades to show: one account (uuid), trades without an account (`none`), or all when omitted. */
 const accountFilter = z.union([z.uuid(), z.literal('none')]).optional();
@@ -292,13 +305,18 @@ export const tradeStatsQuerySchema = z.object({
 // --- Import from trading platforms ----------------------------------------
 
 /**
- * Text fields sent next to the report file (multipart). `symbolMap` maps broker symbols the app
- * could not match (e.g. "GER40.cash") to instruments; `commit=false` only previews.
+ * Text fields sent next to the report file (multipart): an MT5 history report or Tradovate's
+ * Position History CSV. `symbolMap` maps broker symbols the app could not match (e.g.
+ * "GER40.cash") to instruments; `commit=false` only previews.
  */
 export const mt5ImportFieldsSchema = z.object({
   /** Imported trades are assigned to this account (required). */
   accountId: z.uuid({ error: 'validation.accountRequired' }),
-  timezone: z.enum(BROKER_TIMEZONES).default('broker-ny7'),
+  /** Zone of the times in the file: MT5 server time (default broker-ny7), Tradovate the user's zone by default. */
+  timezone: z
+    .string()
+    .refine((tz) => (BROKER_TIMEZONES as readonly string[]).includes(tz) || isValidTimeZone(tz), 'validation.timezone')
+    .optional(),
   symbolMap: z
     .string()
     .default('{}')
@@ -312,6 +330,11 @@ export const mt5ImportFieldsSchema = z.object({
     })
     .pipe(z.record(z.string(), z.uuid())),
   commit: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /** Also import trades that look like ones entered by hand (same instrument, direction and account, opened within 15 minutes). */
+  includeSimilar: z
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),

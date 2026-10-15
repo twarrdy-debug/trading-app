@@ -237,6 +237,8 @@ export function CalculatorPage() {
   ];
   const targetSymbol = target === 'cfd' ? PAIR.cfd : FUT;
   const sourceSymbol = levelsSide === 'cfd' ? PAIR.cfd : FUT;
+  // Where the CFD price came from: the broker CFD (Capital.com) or the cash index / spot gold.
+  const reference = snapshot?.cfdSource === 'capital' ? t.referenceCapital : (t.reference[PAIR.key] ?? '');
   const history = [...(measured?.history ?? [])].sort((a, b) => a.measuredAt.localeCompare(b.measuredAt));
 
   /** Swapping keeps the converted price, so the other market can be read back at once. */
@@ -266,12 +268,14 @@ export function CalculatorPage() {
         <div className="flex min-w-0 flex-col gap-3 p-5 sm:p-6">
           <span className="eyebrow">{t.relative(FUT, PAIR.cfd)}</span>
           {difference != null ? (
-            <span className="text-[40px] leading-none font-bold tracking-tight tabular-nums">
-              {formatNumber(difference, true)}{' '}
-              <span className="text-lg font-semibold text-dim">
-                {t.points}
-                {basis && basisMode !== 'offset' && ` · ${formatNumber((basis.futuresPrice / basis.cfdPrice - 1) * 100, true)}%`}
+            // The points are what the calculator uses; the % only sits beside them, small.
+            <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="text-[40px] leading-none font-bold tracking-tight tabular-nums">
+                {formatNumber(difference, true)} <span className="text-lg font-semibold text-dim">{t.points}</span>
               </span>
+              {basis && basisMode !== 'offset' && (
+                <span className="rounded-full bg-chip px-2 py-0.5 font-mono text-xs font-semibold text-dim">{formatNumber((basis.futuresPrice / basis.cfdPrice - 1) * 100, true)}%</span>
+              )}
             </span>
           ) : (
             <span className="text-sm text-dim">{basisMode === 'auto' ? t.noMeasurements : t.basisFirst}</span>
@@ -294,18 +298,12 @@ export function CalculatorPage() {
 
         <div className="flex min-w-0 flex-col gap-4 border-t border-line p-5 sm:p-6 lg:border-t-0 lg:border-l">
           {basisMode === 'auto' && snapshot && (
-            <div className="flex flex-col gap-1.5">
-              <dl className="m-0 grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-1 font-mono text-[13px]">
-                <dt className="text-dim">{PAIR.cfd}</dt>
-                <dd className="m-0 text-right font-semibold">{formatMoney(snapshot.cfdPrice, false)}</dd>
-                <dd className="m-0 text-right text-dim">{shortTime(snapshot.cfdQuotedAt)}</dd>
-                <dt className="text-dim">{FUT}</dt>
-                <dd className="m-0 text-right font-semibold">{formatMoney(snapshot.futuresPrice, false)}</dd>
-                <dd className="m-0 text-right text-dim">{shortTime(snapshot.futuresQuotedAt)}</dd>
-              </dl>
-              <span className={`text-xs ${snapshot.live ? 'text-dim' : 'font-medium text-accent-ink'}`}>
-                {snapshot.live ? t.measuredAt(shortTime(snapshot.measuredAt), PAIR.cfd, t.reference[PAIR.key] ?? '') : t.marketClosed(PAIR.cfd, t.reference[PAIR.key] ?? '')}
-              </span>
+            // Only when the prices were compared: the difference is what the calculator uses, not the prices.
+            <div className="flex flex-col gap-1">
+              <span className="eyebrow">{t.comparedTitle}</span>
+              <span className="text-[15px] font-semibold">{t.comparedAt(shortTime(snapshot.futuresQuotedAt))}</span>
+              <span className="text-xs text-dim">{t.comparedSources(PAIR.cfd, reference, FUT)}</span>
+              {!snapshot.live && <span className="text-xs font-medium text-accent-ink">{t.closedNote}</span>}
             </div>
           )}
 

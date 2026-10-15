@@ -8,4 +8,8 @@ export * from './sessions.ts';
 export * from './instruments.ts';
 export * from './schemas.ts';
 export * from './mt5-report.ts';
+export * from './tradovate-report.ts';
+export * from './app.ts';
 export * from './password.ts';
+export * from './analysis.ts';
+export * from './indicators.ts';

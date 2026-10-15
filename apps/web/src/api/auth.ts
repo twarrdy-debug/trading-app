@@ -43,6 +43,14 @@ export const authApi = {
   signUp: (input: { name: string; email: string; password: string; inviteCode?: string; language: string; timezone: string }) =>
     authCall('/sign-up/email', input),
   signOut: () => authCall('/sign-out', {}),
+  /** Sends the activation link again (for an account that is not active yet). */
+  resendActivation: (email: string) => authCall('/send-verification-email', { email }),
+  /** Activates the account from the e-mailed link; the response also signs the user in. */
+  activate: async (token: string) => {
+    const res = await fetch(`/api/auth/verify-email?token=${encodeURIComponent(token)}`);
+    const data = (await res.json().catch(() => ({}))) as { code?: string };
+    if (!res.ok) throw new AuthError(data.code ?? 'UNKNOWN');
+  },
   requestReset: (email: string) => authCall('/request-password-reset', { email, redirectTo: '/nowe-haslo' }),
   resetPassword: (token: string, newPassword: string) => authCall('/reset-password', { token, newPassword }),
   /** Signed in only; other sessions are revoked, this one gets a fresh cookie. */

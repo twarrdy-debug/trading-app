@@ -1,6 +1,6 @@
 # systemd unit for the API. Copy to /etc/systemd/system/trading-app.service.
 [Unit]
-Description=Trading journal API
+Description=AlphaLogFX API
 After=network-online.target postgresql.service
 Wants=network-online.target postgresql.service
 

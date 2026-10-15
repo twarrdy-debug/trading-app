@@ -34,7 +34,8 @@ import { signalRoutes } from './routes/signals.ts';
 import { spreadRoutes } from './routes/spreads.ts';
 import { strategyRoutes } from './routes/strategies.ts';
 import { tradeRoutes } from './routes/trades.ts';
-import { liveQuoteProvider, type QuoteProvider } from './services/basis.ts';
+import { createQuoteProvider, type QuoteProvider } from './services/basis.ts';
+import { capitalProvider, type MarketDataProvider } from './services/market-data.ts';
 import { forexFactorySource, type CalendarSource } from './services/calendar.ts';
 import { frankfurterProvider, type FxProvider } from './services/fx.ts';
 import { logMailer, smtpMailer, type Mailer } from './services/mailer.ts';
@@ -46,7 +47,8 @@ export async function buildApp({
   db,
   env,
   fx = frankfurterProvider,
-  quotes = liveQuoteProvider,
+  quotes,
+  market,
   calendar = forexFactorySource,
   news = financialJuiceSource,
   mailer,
@@ -57,6 +59,8 @@ export async function buildApp({
   env: Env;
   fx?: FxProvider;
   quotes?: QuoteProvider;
+  /** Market data for the analysis and the calculator's CFD side; defaults to Capital.com when its key is set, else none. */
+  market?: MarketDataProvider | null;
   calendar?: CalendarSource;
   news?: NewsSource;
   /** Defaults to SMTP_URL, or to writing e-mails to the log when it is not set. */
@@ -74,7 +78,14 @@ export async function buildApp({
   app.decorate('db', db);
   app.decorate('env', env);
   app.decorate('fx', fx);
-  app.decorate('quotes', quotes);
+  const marketData =
+    market !== undefined
+      ? market
+      : env.CAPITAL_API_KEY && env.CAPITAL_IDENTIFIER && env.CAPITAL_API_PASSWORD
+        ? capitalProvider({ env: env.CAPITAL_ENV, identifier: env.CAPITAL_IDENTIFIER, apiKey: env.CAPITAL_API_KEY, password: env.CAPITAL_API_PASSWORD })
+        : null;
+  app.decorate('market', marketData);
+  app.decorate('quotes', quotes ?? createQuoteProvider(marketData));
   app.decorate('calendar', calendar);
   app.decorate('news', news);
   app.decorate('newsHub', new NewsHub());
