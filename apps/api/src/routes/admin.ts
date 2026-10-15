@@ -1,10 +1,11 @@
-import { adminUpdateUserSchema, idParams, updateInstrumentSchema } from '@trading/shared';
+import { adminUpdateUserSchema, idParams, updateInstrumentSchema, whatsNewSchema } from '@trading/shared';
 import { eq } from 'drizzle-orm';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { users } from '../db/schema.ts';
 import { badRequest } from '../errors.ts';
 import { requireRole } from '../plugins/current-user.ts';
 import { appStats, deleteUser, listAllInstruments, listUsers, resetTwoFactor, revokeSessions, systemStatus, updateInstrument, updateUser } from '../services/admin.ts';
+import { sendWhatsNew } from '../services/digests.ts';
 import { refreshNews } from '../services/news.ts';
 
 const tags = ['admin'];
@@ -42,6 +43,11 @@ export const adminRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get('/admin/system', { schema: { tags } }, () => systemStatus({ db: app.db, newsHub: app.newsHub, env: app.env }));
 
   /** Polls the news feed now (outside the schedule). */
+  /** "What's new" e-mail: a test to yourself, or to every user who has it on (once per version). */
+  app.post('/admin/whats-new', { schema: { tags, body: whatsNewSchema }, config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, (req) =>
+    sendWhatsNew(app.db, app.env, app.mailer, req.user, req.body, (msg) => app.log.info(msg)),
+  );
+
   app.post('/admin/news/refresh', { schema: { tags }, config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, () => refreshNews(app.db, app.news, app.newsHub));
 
   app.get('/admin/instruments', { schema: { tags } }, () => listAllInstruments(app.db));

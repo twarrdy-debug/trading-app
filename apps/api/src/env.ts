@@ -54,6 +54,8 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
+  /** How often to check for due regular e-mails (week ahead, day summary), in minutes; 0 = off. */
+  DIGEST_INTERVAL_MINUTES: z.coerce.number().min(0).default(10),
   /** Sender of e-mails (password reset, invitations), e.g. `AlphaLogFX <noreply@alphalogfx.com>`. */
   MAIL_FROM: z.string().default('AlphaLogFX <no-reply@localhost>'),
   /**

@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm';
 import type { DB } from './db/client.ts';
 import { authAccounts, authSessions, authTwoFactors, authVerifications, users } from './db/schema.ts';
 import type { Env } from './env.ts';
-import { passwordResetEmail, verificationEmail } from './services/emails.ts';
+import { passwordResetEmail, verificationEmail, welcomeEmail } from './services/emails.ts';
 import { findUsableInvite, finishSignUp } from './services/invites.ts';
 import type { Mailer } from './services/mailer.ts';
 
@@ -73,6 +73,13 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
         // The web app's page confirms the token through /api/auth/verify-email and opens the app.
         const url = `${env.PUBLIC_URL}/aktywacja?token=${encodeURIComponent(token)}`;
         await mailer.send(verificationEmail({ language: row?.language ?? 'pl', publicUrl: env.PUBLIC_URL, name: user.name, email: user.email, url }));
+      },
+      // The welcome e-mail goes once the account is active; a failure must not undo the activation.
+      afterEmailVerification: async (user) => {
+        const [row] = await db.select({ language: users.language }).from(users).where(eq(users.id, user.id));
+        await mailer
+          .send(welcomeEmail({ language: row?.language ?? 'pl', publicUrl: env.PUBLIC_URL, email: user.email, name: user.name }))
+          .catch((error: Error) => console.error(`Welcome e-mail to ${user.id} failed: ${error.message}`));
       },
     },
     databaseHooks: {

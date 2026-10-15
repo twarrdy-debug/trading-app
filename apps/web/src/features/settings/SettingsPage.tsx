@@ -37,6 +37,7 @@ const SECTIONS = [
   { slug: 'konta', key: 'accounts' },
   { slug: 'instrumenty', key: 'instruments' },
   { slug: 'alerty', key: 'alerts' },
+  { slug: 'maile', key: 'emails' },
 ] as const;
 type SectionKey = (typeof SECTIONS)[number]['key'];
 
@@ -135,7 +136,37 @@ function Section({ section, user, save }: { section: SectionKey; user: PublicUse
           <KeywordAlertsFields keywords={user.settings.newsKeywords} />
         </Card>
       );
+    case 'emails':
+      return <EmailsSection user={user} save={save} />;
   }
+}
+
+/** The regular e-mails, each on or off (the same as the link in the e-mail). */
+function EmailsSection({ user, save }: { user: PublicUser; save: Save }) {
+  const t = useT().settings;
+  const s = user.settings;
+  const rows = [
+    { key: 'emailWeekAhead', label: t.emailWeekAhead, help: t.emailWeekAheadHelp },
+    { key: 'emailDaySummary', label: t.emailDaySummary, help: t.emailDaySummaryHelp },
+    { key: 'emailUpdates', label: t.emailUpdates, help: t.emailUpdatesHelp },
+  ] as const;
+  return (
+    <Card>
+      {rows.map((row) => (
+        <Row key={row.key} label={row.label} help={row.help}>
+          <Segmented<'on' | 'off'>
+            label={row.label}
+            value={s[row.key] ? 'on' : 'off'}
+            onChange={(v) => save({ [row.key]: v === 'on' })}
+            options={[
+              { value: 'on', label: t.emailOn },
+              { value: 'off', label: t.emailOff },
+            ]}
+          />
+        </Row>
+      ))}
+    </Card>
+  );
 }
 
 /** Favourite instruments as toggle pills (shared with the introduction). */

@@ -117,8 +117,27 @@ export const users = pgTable('users', {
   image: text('image'),
   /** Better Auth two-factor plugin: sign-in also asks for a code from an authenticator app. */
   twoFactorEnabled: boolean('two_factor_enabled').notNull().default(false),
+  /** E-mails the user can turn off (settings or the link in each one): week ahead, day summary, what's new. */
+  emailWeekAhead: boolean('email_week_ahead').notNull().default(true),
+  emailDaySummary: boolean('email_day_summary').notNull().default(true),
+  emailUpdates: boolean('email_updates').notNull().default(true),
   ...timestamps,
 });
+
+/** E-mails sent to a user, one row per kind × key (a week, a day, a version), so none goes twice. */
+export const emailLog = pgTable(
+  'email_log',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    key: text('key').notNull(),
+    sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('email_log_user_kind_key_idx').on(t.userId, t.kind, t.key)],
+);
 
 // --- Authentication (Better Auth, see src/auth.ts) ----------------------------
 

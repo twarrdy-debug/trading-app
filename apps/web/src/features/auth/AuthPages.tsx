@@ -1,7 +1,8 @@
-import { LANGUAGES } from '@trading/shared';
+import { LANGUAGES, type EmailSubscription } from '@trading/shared';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { AuthError, authApi, useAuthConfig, useResetSession } from '../../api/auth.ts';
+import { api } from '../../api/client.ts';
 import { Button } from '../../components/ui/Button.tsx';
 import { Field, Input } from '../../components/ui/Field.tsx';
 import { isStrongPassword, PasswordRules } from '../../components/ui/PasswordRules.tsx';
@@ -407,6 +408,43 @@ export function ActivatePage() {
       ) : (
         <p role="status" className="m-0 text-sm text-dim">
           {t.activating}
+        </p>
+      )}
+    </AuthLayout>
+  );
+}
+
+/** `/wypisz?u=…&k=…&s=…`: the signed unsubscribe link from a regular e-mail; no sign-in needed. */
+export function UnsubscribePage() {
+  const t = useT().auth;
+  const [state, setState] = useState<{ done: EmailSubscription } | 'working' | 'failed'>('working');
+  const started = useRef(false);
+
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    const params = query();
+    api<{ kind: EmailSubscription }>('/email/unsubscribe', { method: 'POST', json: { u: params.get('u'), k: params.get('k'), s: params.get('s') } })
+      .then(({ kind }) => setState({ done: kind }))
+      .catch(() => setState('failed'));
+  }, []);
+
+  return (
+    <AuthLayout
+      title={t.unsubTitle}
+      footer={
+        <Link to="/ustawienia/$section" params={{ section: 'maile' }} className={linkClass}>
+          {t.unsubSettings}
+        </Link>
+      }
+    >
+      {state === 'failed' ? (
+        <p role="alert" className="m-0 rounded-(--radius-control) bg-sell-soft p-3 text-sm text-sell">
+          {t.unsubFailed}
+        </p>
+      ) : (
+        <p role="status" className="m-0 text-sm text-dim">
+          {state === 'working' ? t.unsubWorking : t.unsubDone[state.done]}
         </p>
       )}
     </AuthLayout>

@@ -6,6 +6,8 @@ export interface MailMessage {
   subject: string;
   text: string;
   html?: string;
+  /** One-click unsubscribe (List-Unsubscribe headers) for the e-mails a user can turn off. */
+  unsubscribeUrl?: string;
 }
 
 /** Outgoing e-mail. Swap the transport (SMTP, Resend, SES…) without touching the callers. */
@@ -27,8 +29,15 @@ export const logMailer = (log: (msg: string) => void): Mailer => ({
 export function smtpMailer(url: string, from: string): Mailer {
   const transport = nodemailer.createTransport(url);
   return {
-    async send({ to, subject, text, html }) {
-      await transport.sendMail({ from, to, subject, text, ...(html ? { html } : {}) });
+    async send({ to, subject, text, html, unsubscribeUrl }) {
+      await transport.sendMail({
+        from,
+        to,
+        subject,
+        text,
+        ...(html ? { html } : {}),
+        ...(unsubscribeUrl ? { list: { unsubscribe: unsubscribeUrl }, headers: { 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } } : {}),
+      });
     },
   };
 }

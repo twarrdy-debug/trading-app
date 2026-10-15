@@ -93,8 +93,46 @@ export const updateSettingsSchema = z
       .array(z.enum(DASHBOARD_WIDGETS))
       .max(DASHBOARD_WIDGETS.length)
       .transform((ids) => [...new Set(ids)]),
+    /** E-mails that can be turned off (the activation, password and welcome ones always go). */
+    emailWeekAhead: z.boolean(),
+    emailDaySummary: z.boolean(),
+    emailUpdates: z.boolean(),
   })
   .partial();
+
+/** E-mails a user can unsubscribe from with the link in each of them. */
+export const EMAIL_SUBSCRIPTIONS = ['weekAhead', 'daySummary', 'updates'] as const;
+export type EmailSubscription = (typeof EMAIL_SUBSCRIPTIONS)[number];
+
+/** The one-click unsubscribe link's fields (signed by the server, no session needed). */
+export const unsubscribeSchema = z.object({
+  u: z.uuid(),
+  k: z.enum(EMAIL_SUBSCRIPTIONS),
+  s: z.string().min(16).max(128),
+});
+
+export const WHATS_NEW_ICONS = ['import', 'book', 'chart', 'swap', 'check'] as const;
+
+/** Admin: a "what's new" e-mail about a release. */
+export const whatsNewSchema = z.object({
+  version: z.string().trim().min(1).max(20),
+  title: z.string().trim().min(3).max(120),
+  intro: z.string().trim().min(3).max(400),
+  items: z
+    .array(
+      z.object({
+        kind: z.enum(['new', 'fix']),
+        icon: z.enum(WHATS_NEW_ICONS),
+        title: z.string().trim().min(2).max(80),
+        text: z.string().trim().min(3).max(300),
+      }),
+    )
+    .min(1)
+    .max(8),
+  /** True: only to the admin sending it, to check how it looks. */
+  test: z.boolean().default(false),
+});
+export type WhatsNewInput = z.infer<typeof whatsNewSchema>;
 
 // --- Invitations -------------------------------------------------------------
 

@@ -5,11 +5,13 @@ import { strToU8, zipSync } from 'fflate';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp, type App } from '../src/app.ts';
 import { createDatabase, type Database } from '../src/db/client.ts';
-import { authTwoFactors } from '../src/db/schema.ts';
+import { authTwoFactors, economicEvents, users } from '../src/db/schema.ts';
 import { seed } from '../src/db/seed-data.ts';
 import { loadEnv } from '../src/env.ts';
 import type { QuoteProvider, QuoteSource } from '../src/services/basis.ts';
 import type { CalendarSource, FfEvent } from '../src/services/calendar.ts';
+import { runDigests, sendWhatsNew } from '../src/services/digests.ts';
+import type { MailMessage } from '../src/services/mailer.ts';
 import type { FxProvider } from '../src/services/fx.ts';
 import type { MarketDataProvider } from '../src/services/market-data.ts';
 import { parseFjApiNews, refreshNews, type FeedItem, type NewsSource } from '../src/services/news.ts';
@@ -1838,6 +1840,10 @@ describe('authentication', () => {
     // The link activates the account and signs in; it works only once, and a forged one not at all.
     expect((await user('GET', activationLink('nowy@example.com'))).statusCode).toBe(200);
     expect((await user('GET', '/me')).json()).toMatchObject({ email: 'nowy@example.com', onboarded: false });
+    // Then the welcome e-mail, once.
+    const welcome = sent.filter((m) => m.to === 'nowy@example.com' && m.subject === 'Witaj w AlphaLogFX');
+    expect(welcome).toHaveLength(1);
+    expect(welcome[0]!.html).toContain('Cześć Nowy');
     expect((await browser()('GET', '/auth/verify-email?token=forged')).statusCode).toBe(401);
     expect((await browser()('POST', '/auth/sign-in/email', { email: 'nowy@example.com', password: 'Nowy-password-1!' })).statusCode).toBe(200);
 
@@ -2046,5 +2052,75 @@ describe('market analysis', () => {
     expect((await app.inject({ url: '/analysis/market/00000000-0000-4000-8000-000000000000' })).statusCode).toBe(404);
     const overview = (await app.inject({ url: '/analysis/overview' })).json();
     expect(overview.items.map((i: { symbol: string }) => i.symbol)).toContain('XAUUSD');
+  });
+});
+
+describe('regular e-mails', () => {
+  it('sends the day summary and the week ahead once each, and unsubscribes with the signed link', async () => {
+    const env = loadEnv({ NODE_ENV: 'test', DATABASE_URL: 'memory://', UPLOAD_DIR: uploadDir });
+    const [user] = await database.db
+      .insert(users)
+      .values({ email: 'digest@example.com', displayName: 'Digest', emailVerified: true, timezone: 'Europe/Warsaw', language: 'pl', accountCurrency: 'USD' })
+      .returning();
+    const headers = { 'x-user-id': user!.id };
+    await app.inject({ method: 'PUT', url: `/instruments/${ids.XAUUSD}/favorite`, headers });
+    const trade = await post(
+      '/trades',
+      { instrumentId: ids.XAUUSD, direction: 'long', openedAt: '2026-10-14T10:00:00+02:00', entryPrice: 4100, exitPrice: 4120, stopLoss: 4090, positionSize: 1, emotionKeys: ['calm'] },
+      headers,
+    );
+    expect(trade.statusCode).toBe(201);
+    await database.db.insert(economicEvents).values([
+      { externalId: 'd1', title: 'CPI m/m', currency: 'USD', impact: 'high', eventTime: new Date('2026-10-15T12:30:00Z'), forecast: '0.3%' },
+      { externalId: 'w1', title: 'Fed Chair Speaks', currency: 'USD', impact: 'high', eventTime: new Date('2026-10-19T14:00:00Z') },
+      { externalId: 'w2', title: 'Crude Oil Inventories', currency: 'USD', impact: 'medium', eventTime: new Date('2026-10-21T14:30:00Z'), previous: '-1.2M' },
+      { externalId: 'w3', title: 'Bank Holiday', currency: 'USD', impact: 'low', eventTime: new Date('2026-10-20T08:00:00Z') },
+      { externalId: 'w4', title: 'German ZEW', currency: 'EUR', impact: 'high', eventTime: new Date('2026-10-20T09:00:00Z') },
+    ]);
+
+    const sent: MailMessage[] = [];
+    const mailer = { send: async (m: MailMessage) => void sent.push(m) };
+    const mine = () => sent.filter((m) => m.to === 'digest@example.com');
+
+    // 21:00 in Warsaw: not yet. 22:30: the summary, once.
+    await runDigests(database.db, env, mailer, () => {}, new Date('2026-10-14T19:00:00Z'));
+    expect(mine()).toHaveLength(0);
+    await runDigests(database.db, env, mailer, () => {}, new Date('2026-10-14T20:30:00Z'));
+    await runDigests(database.db, env, mailer, () => {}, new Date('2026-10-14T20:45:00Z'));
+    expect(mine()).toHaveLength(1);
+    const day = mine()[0]!;
+    expect(day.subject).toBe('Podsumowanie dnia 14.10: +$2000,00');
+    expect(day.html).toContain('CPI m/m');
+    expect(day.text).toContain('XAUUSD');
+    expect(day.unsubscribeUrl).toMatch(/\/api\/email\/unsubscribe\?u=/);
+
+    // Sunday from 18:00: the coming week's high and medium USD events, not low ones or EUR.
+    await runDigests(database.db, env, mailer, () => {}, new Date('2026-10-18T16:30:00Z'));
+    const week = mine().find((m) => m.subject.startsWith('Nadchodzący tydzień'))!;
+    expect(week.subject).toBe('Nadchodzący tydzień: 19–23 października');
+    expect(week.html).toContain('Fed Chair Speaks');
+    expect(week.html).toContain('Crude Oil Inventories');
+    expect(week.html).not.toContain('Bank Holiday');
+    expect(week.html).not.toContain('German ZEW');
+
+    // The link from the e-mail turns it off without signing in; a forged one does nothing.
+    const query = Object.fromEntries(new URL(week.unsubscribeUrl!).searchParams);
+    expect((await app.inject({ method: 'POST', url: '/email/unsubscribe', payload: { ...query, s: 'x'.repeat(43) } })).statusCode).toBe(400);
+    const oneClick = await app.inject({
+      method: 'POST',
+      url: `/email/unsubscribe?${new URL(week.unsubscribeUrl!).searchParams}`,
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: 'List-Unsubscribe=One-Click',
+    });
+    expect(oneClick.statusCode).toBe(200);
+    expect((await app.inject({ url: '/me', headers })).json().settings).toMatchObject({ emailWeekAhead: false, emailDaySummary: true });
+
+    // What's new goes once per version to everyone who has it on.
+    const input = { version: '9', title: 'Testowa wersja', intro: 'Krótko o zmianach.', items: [{ kind: 'new' as const, icon: 'check' as const, title: 'Nowość', text: 'Opis nowości.' }], test: false };
+    await sendWhatsNew(database.db, env, mailer, user!, input, () => {});
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await sendWhatsNew(database.db, env, mailer, user!, input, () => {});
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(mine().filter((m) => m.subject.includes('Testowa wersja'))).toHaveLength(1);
   });
 });

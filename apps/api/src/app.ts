@@ -27,6 +27,7 @@ import { analysisRoutes } from './routes/analysis.ts';
 import { authRoutes } from './routes/auth.ts';
 import { basisRoutes } from './routes/basis.ts';
 import { calendarRoutes } from './routes/calendar.ts';
+import { emailRoutes } from './routes/email.ts';
 import { newsRoutes } from './routes/news.ts';
 import { meRoutes } from './routes/me.ts';
 import { referenceRoutes } from './routes/reference.ts';
@@ -158,6 +159,7 @@ export async function buildApp({
   await app.register(analysisRoutes);
   await app.register(strategyRoutes);
   await app.register(adminRoutes);
+  await app.register(emailRoutes);
 
   return app;
 }

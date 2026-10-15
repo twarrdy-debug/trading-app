@@ -26,6 +26,9 @@ export const toPublicUser = (u: CurrentUser, authenticated = true) => ({
     lossAlertMode: u.lossAlertMode,
     newsKeywords: u.newsKeywords,
     dashboardHidden: u.dashboardHidden as DashboardWidget[],
+    emailWeekAhead: u.emailWeekAhead,
+    emailDaySummary: u.emailDaySummary,
+    emailUpdates: u.emailUpdates,
   },
 });
 

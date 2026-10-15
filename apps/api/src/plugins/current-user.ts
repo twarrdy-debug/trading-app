@@ -17,8 +17,8 @@ declare module 'fastify' {
   }
 }
 
-/** Reachable without a session: health, API docs, auth endpoints and their config. */
-const PUBLIC_PREFIXES = ['/health', '/docs', '/auth/', '/auth-config'];
+/** Reachable without a session: health, API docs, auth endpoints and their config, the signed unsubscribe link. */
+const PUBLIC_PREFIXES = ['/health', '/docs', '/auth/', '/auth-config', '/email/unsubscribe'];
 
 /**
  * Resolves the acting user from the Better Auth session cookie. Without a session the request is

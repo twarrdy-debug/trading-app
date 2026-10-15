@@ -6,6 +6,7 @@ import { AdminInstruments } from './AdminInstruments.tsx';
 import { AdminStats } from './AdminStats.tsx';
 import { AdminSystem } from './AdminSystem.tsx';
 import { AdminUsers } from './AdminUsers.tsx';
+import { AdminWhatsNew } from './AdminWhatsNew.tsx';
 
 /** URL slug → section; the slugs are Polish like the other paths. */
 const SECTIONS = [
@@ -14,6 +15,7 @@ const SECTIONS = [
   { slug: 'system', key: 'system' },
   { slug: 'instrumenty', key: 'instruments' },
   { slug: 'zaproszenia', key: 'invites' },
+  { slug: 'co-nowego', key: 'whatsNew' },
 ] as const;
 
 /** Administration for the admin role: users, statistics, system status, instruments, invitations. */
@@ -55,6 +57,7 @@ export function AdminPage() {
           {current.key === 'stats' && <AdminStats />}
           {current.key === 'system' && <AdminSystem timezone={me.settings.timezone} />}
           {current.key === 'instruments' && <AdminInstruments />}
+          {current.key === 'whatsNew' && <AdminWhatsNew />}
           {current.key === 'invites' && (
             <section className="card p-5">
               <InvitesManager timezone={me.settings.timezone} />

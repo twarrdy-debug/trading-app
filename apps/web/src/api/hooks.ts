@@ -39,6 +39,7 @@ import type {
   UpdateAccountInput,
   UpdateSettingsInput,
   UpdateStrategyInput,
+  WhatsNewInput,
 } from '@trading/shared';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, qs } from './client.ts';
@@ -473,6 +474,13 @@ export function useAdminUserAction() {
             ? api<{ reset: boolean }>(`/admin/users/${id}/two-factor/reset`, { method: 'POST' })
             : api<{ deleted: boolean }>(`/admin/users/${id}`, { method: 'DELETE' }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['admin'] }),
+  });
+}
+
+/** Admin: the "what's new" e-mail, as a test to yourself or to everyone. */
+export function useSendWhatsNew() {
+  return useMutation({
+    mutationFn: (input: WhatsNewInput) => api<{ recipients: number }>('/admin/whats-new', { method: 'POST', json: input }),
   });
 }
 
