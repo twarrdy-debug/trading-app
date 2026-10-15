@@ -1373,7 +1373,7 @@ export const en: Messages = {
     intro: 'The app recognises the file by itself:',
     sources: [
       ['MetaTrader 5', 'History → pick the period → right-click → Report → HTML or Open XML.'],
-      ['Tradovate', 'Account Reports → Position History → download CSV.'],
+      ['Tradovate', 'Account Reports → Position History or Performance → download CSV.'],
     ],
     file: 'Report file',
     serverTime: 'Time zone in the file',

@@ -2,19 +2,19 @@ import {
   brokerTimeToUtc,
   computeTradeMetrics,
   decodeReportText,
-  isTradovatePositionHistory,
+  isTradovateReport,
   matchBrokerSymbol,
   MAX_PARTS,
   parseMt5Html,
   parseMt5Rows,
-  parseTradovatePositionHistory,
+  parseTradovateReport,
   type Direction,
   type Mt5ImportFields,
   type Mt5Report,
   type TradePartInput,
   type TradovateTrade,
 } from '@trading/shared';
-import { and, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNull, like, lte } from 'drizzle-orm';
 import { instruments, trades } from '../db/schema.ts';
 import { badRequest } from '../errors.ts';
 import { t } from '../i18n.ts';
@@ -25,12 +25,12 @@ import { isZip, xlsxRows } from './xlsx.ts';
 
 type Report = { format: 'mt5'; report: Mt5Report } | { format: 'tradovate'; trades: TradovateTrade[] };
 
-/** MT5 account history report (HTML in UTF-16 or Open XML .xlsx) or Tradovate's Position History CSV. */
+/** MT5 account history report (HTML in UTF-16 or Open XML .xlsx) or Tradovate's Position History or Performance CSV. */
 function readReport(bytes: Uint8Array): Report {
   try {
     if (isZip(bytes)) return { format: 'mt5', report: parseMt5Rows(xlsxRows(bytes)) };
     const text = decodeReportText(bytes);
-    if (isTradovatePositionHistory(text)) return { format: 'tradovate', trades: parseTradovatePositionHistory(text) };
+    if (isTradovateReport(text)) return { format: 'tradovate', trades: parseTradovateReport(text) };
     if (/<t[dr]\b/i.test(text)) return { format: 'mt5', report: parseMt5Html(text) };
   } catch {
     // A broken archive or unreadable text: reported below as an unsupported file.
@@ -134,7 +134,7 @@ export async function importMt5(ctx: TradeContext, user: CurrentUser, bytes: Uin
   const timezone = fields.timezone ?? (file.format === 'tradovate' ? user.timezone : 'broker-ny7');
   const positions = file.format === 'mt5' ? mt5Positions(file.report, timezone) : tradovatePositions(file.trades, timezone);
   if (positions.length === 0) throw badRequest('mt5NoPositions');
-  const platformAccount = file.format === 'mt5' ? file.report.account : (file.trades[0]?.account ?? null);
+  const platformAccount = file.format === 'mt5' ? file.report.account : file.trades[0]?.account || null;
   const currency = file.format === 'mt5' ? file.report.currency : (file.trades[0]?.currency ?? null);
 
   const list = await ctx.db.select().from(instruments).where(eq(instruments.active, true));
@@ -147,6 +147,20 @@ export async function importMt5(ctx: TradeContext, user: CurrentUser, bytes: Uin
         .where(and(eq(trades.userId, user.id), inArray(trades.externalId, positions.map((p) => p.externalId))))
     ).map((r) => r.externalId),
   );
+  // Tradovate fill ids are unique across accounts, and the Performance export has no account
+  // number: a trade counts as imported when its first fill is, whichever export brought it in.
+  const tradovateFills =
+    file.format === 'tradovate'
+      ? new Set(
+          (
+            await ctx.db
+              .select({ externalId: trades.externalId })
+              .from(trades)
+              .where(and(eq(trades.userId, user.id), like(trades.externalId, 'tradovate:%')))
+          ).map((r) => r.externalId!.split(':').at(-1)),
+        )
+      : new Set<string>();
+  const imported = (externalId: string) => existing.has(externalId) || (file.format === 'tradovate' && tradovateFills.has(externalId.split(':').at(-1)));
 
   // Trades entered by hand in the file's period, to spot the same trade imported again.
   // A loop, not Math.min(...times): a huge file would overflow the call stack.
@@ -176,7 +190,7 @@ export async function importMt5(ctx: TradeContext, user: CurrentUser, bytes: Uin
     const similar =
       !!instrument &&
       manual.some((m) => m.instrumentId === instrument.id && m.direction === p.direction && Math.abs(m.openedAt.getTime() - Date.parse(p.openedAt)) <= SIMILAR_MS);
-    const status = (existing.has(p.externalId)
+    const status = (imported(p.externalId)
       ? 'duplicate'
       : !instrument
         ? 'unknownSymbol'
@@ -233,7 +247,7 @@ export async function importMt5(ctx: TradeContext, user: CurrentUser, bytes: Uin
           notes:
             file.format === 'mt5'
               ? t(user.language, 'mt5Note', { position: row.position, profit: row.profit.toFixed(2), currency: currency ?? '' }).trim()
-              : t(user.language, 'tradovateNote', { account: platformAccount ?? '', entries: row.entries, profit: row.profit.toFixed(2), currency: currency ?? '' }),
+              : t(user.language, 'tradovateNote', { account: platformAccount ? t(user.language, 'tradovateAccount', { account: platformAccount }) : '', entries: row.entries, profit: row.profit.toFixed(2), currency: currency ?? '' }),
           source: 'own',
           emotionKeys: [],
           accountId: account.id,

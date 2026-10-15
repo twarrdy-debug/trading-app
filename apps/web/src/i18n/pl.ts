@@ -1390,7 +1390,7 @@ export const pl = {
     intro: 'Aplikacja sama rozpozna plik:',
     sources: [
       ['MetaTrader 5', 'Historia → zaznacz okres → prawy przycisk → Raport → HTML albo Open XML.'],
-      ['Tradovate', 'Account Reports → Position History → pobierz CSV.'],
+      ['Tradovate', 'Account Reports → Position History albo Performance → pobierz CSV.'],
     ] as [string, string][],
     file: 'Plik raportu',
     serverTime: 'Strefa czasu w pliku',

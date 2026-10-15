@@ -1,13 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { isTradovatePositionHistory, matchBrokerSymbol, parseCsv, parseTradovatePositionHistory, parseTradovateTime } from '../src/index.ts';
+import { isTradovateReport, matchBrokerSymbol, parseCsv, parseTradovateNumber, parseTradovateReport, parseTradovateTime } from '../src/index.ts';
 
 const csv = readFileSync(new URL('./fixtures/tradovate-position-history.csv', import.meta.url), 'utf8');
 
 describe('Tradovate Position History', () => {
   it('recognises the export', () => {
-    expect(isTradovatePositionHistory(csv)).toBe(true);
-    expect(isTradovatePositionHistory('day_label;opened_at\n1;2')).toBe(false);
+    expect(isTradovateReport(csv)).toBe(true);
+    expect(isTradovateReport('day_label;opened_at\n1;2')).toBe(false);
   });
 
   it('reads CSV cells and US dates', () => {
@@ -16,7 +16,7 @@ describe('Tradovate Position History', () => {
   });
 
   it('rebuilds trades from paired fills: scale-ins, exits in parts and both directions', () => {
-    const trades = parseTradovatePositionHistory(csv);
+    const trades = parseTradovateReport(csv);
     expect(trades.map((t) => [t.direction, t.size, t.profit])).toEqual([
       ['long', 4, -84],
       ['short', 3, 408],
@@ -55,9 +55,30 @@ describe('Tradovate Position History', () => {
       '3,2,1,99,101,20,10/01/2026 10:10:00,10/01/2026 10:05:00,NQZ6,A',
     ].join('\n');
     // Sell 2 at 10:05 closes the long of 1 and opens a short of 1, bought back at 10:10.
-    expect(parseTradovatePositionHistory(text).map((t) => [t.direction, t.size, t.entryPrice, t.profit])).toEqual([
+    expect(parseTradovateReport(text).map((t) => [t.direction, t.size, t.entryPrice, t.profit])).toEqual([
       ['long', 1, 100, 10],
       ['short', 1, 101, 20],
     ]);
+  });
+});
+
+describe('Tradovate Performance', () => {
+  const performance = readFileSync(new URL('./fixtures/tradovate-performance.csv', import.meta.url), 'utf8');
+
+  it('reads dollar amounts with losses in parentheses', () => {
+    expect(parseTradovateNumber('$(68.00)')).toBe(-68);
+    expect(parseTradovateNumber('$1,408.50')).toBe(1408.5);
+    expect(parseTradovateNumber('-$12.00')).toBe(-12);
+    expect(parseTradovateNumber('')).toBeNull();
+  });
+
+  it('is recognised and gives the same trades as Position History for the same fills', () => {
+    expect(isTradovateReport(performance)).toBe(true);
+    const fromPerformance = parseTradovateReport(performance);
+    const fromHistory = parseTradovateReport(csv);
+    // Same first fills, sizes, prices, exits and results; no account number, amounts in dollars.
+    const shape = (t: (typeof fromHistory)[number]) => [t.id, t.direction, t.size, t.entryPrice, t.exits, t.profit];
+    expect(fromPerformance.slice(0, fromHistory.length).map(shape)).toEqual(fromHistory.map(shape));
+    expect(fromPerformance[0]).toMatchObject({ account: '', contract: 'MGCZ6', currency: 'USD' });
   });
 });

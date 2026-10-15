@@ -1134,6 +1134,16 @@ describe('Tradovate import', () => {
     // On request the trade entered by hand is imported too.
     expect((await importFile({ commit: 'true', includeSimilar: 'true' })).json().summary).toMatchObject({ imported: 1 });
   });
+
+  it('reads the Performance export too, without importing the same fills twice', async () => {
+    const performance = readFileSync(new URL('../../../packages/shared/test/fixtures/tradovate-performance.csv', import.meta.url));
+    const body = multipart({ accountId, commit: 'true' }, { name: 'Performance.csv', content: performance });
+    const res = (await app.inject({ method: 'POST', url: '/trades/import/mt5', payload: body.payload, headers: { ...body.headers, ...trader } })).json();
+    // The first nine came in from Position History (no account number here, matched by fill id).
+    expect(res).toMatchObject({ format: 'tradovate', account: null, summary: { duplicate: 9 } });
+    expect(res.summary.imported).toBe(res.summary.total - 9);
+    expect(res.summary.imported).toBeGreaterThan(0);
+  });
 });
 
 describe('dashboard stats', () => {

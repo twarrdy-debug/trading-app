@@ -140,11 +140,12 @@ const pl = {
   strategyRulesOrder: 'Podaj wszystkie argumenty strategii w nowej kolejności',
   accountMarketMismatch: 'Konto {account} jest na {market}, a {symbol} to inny rynek',
   accountRequired: 'Przypisz transakcję do konta. Nie masz jeszcze konta? Dodaj je w Ustawienia → Konta handlowe.',
-  mt5UnsupportedFile: 'Nie rozpoznano pliku. Wybierz raport historii z MT5 (HTML lub Open XML .xlsx) albo Position History z Tradovate (CSV)',
+  mt5UnsupportedFile: 'Nie rozpoznano pliku. Wybierz raport historii z MT5 (HTML lub Open XML .xlsx) albo Position History lub Performance z Tradovate (CSV)',
   mt5NoPositions: 'W pliku nie ma zamkniętych pozycji. Sprawdź, czy wybrano okres z transakcjami',
   mt5CurrencyMismatch: 'Raport jest w {report}, a waluta konta w aplikacji to {account}. Wynik zostanie przeliczony po kursie',
   mt5Note: 'Import z MT5, pozycja #{position}. Wynik w MT5: {profit} {currency}',
-  tradovateNote: 'Import z Tradovate, konto {account}, wejść: {entries}. Wynik w Tradovate bez prowizji: {profit} {currency}',
+  tradovateAccount: ', konto {account}',
+  tradovateNote: 'Import z Tradovate{account}, wejść: {entries}. Wynik w Tradovate bez prowizji: {profit} {currency}',
 } as const;
 
 export type MessageKey = keyof typeof pl;
@@ -283,11 +284,12 @@ const en: Record<MessageKey, string> = {
   strategyRulesOrder: 'Send all of the strategy\'s rules in their new order',
   accountMarketMismatch: 'The {account} account trades {market}, and {symbol} is another market',
   accountRequired: 'Assign the trade to an account. No account yet? Add one in Settings → Trading accounts.',
-  mt5UnsupportedFile: 'File not recognised. Choose an MT5 history report (HTML or Open XML .xlsx) or a Tradovate Position History (CSV)',
+  mt5UnsupportedFile: 'File not recognised. Choose an MT5 history report (HTML or Open XML .xlsx) or a Tradovate Position History or Performance export (CSV)',
   mt5NoPositions: 'The file has no closed positions. Check that the chosen period has trades',
   mt5CurrencyMismatch: 'The report is in {report} and your account currency in the app is {account}. Results will be converted at the exchange rate',
   mt5Note: 'Imported from MT5, position #{position}. MT5 result: {profit} {currency}',
-  tradovateNote: 'Imported from Tradovate, account {account}, entries: {entries}. Tradovate result before commissions: {profit} {currency}',
+  tradovateAccount: ', account {account}',
+  tradovateNote: 'Imported from Tradovate{account}, entries: {entries}. Tradovate result before commissions: {profit} {currency}',
 };
 
 const MESSAGES: Record<Language, Record<MessageKey, string>> = { pl, en };

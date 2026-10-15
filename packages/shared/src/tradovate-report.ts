@@ -1,7 +1,9 @@
 import type { Direction } from './enums.ts';
 
 /**
- * Reader for Tradovate's "Position History" CSV (Account Reports → Position History → download).
+ * Reader for Tradovate's CSV exports of paired fills: "Position History" (Account Reports →
+ * Position History) and "Performance" (Account Reports → Performance; camelCase headers, no
+ * account column, losses written as `$(68.00)`). Columns are found by name, so either works.
  * Each row is one buy fill paired with one sell fill (FIFO), not a trade: a position built with
  * several entries or closed in parts spans several rows, and one "Position ID" covers a whole day
  * on a contract. Trades are rebuilt from the fills: ordered in time, a trade runs from flat back
@@ -34,7 +36,43 @@ export interface TradovateTrade {
   currency: string | null;
 }
 
-const HEADERS = ['Buy Fill ID', 'Sell Fill ID', 'Paired Qty', 'Buy Price', 'Sell Price', 'Bought Timestamp', 'Sold Timestamp', 'Contract'];
+/** Each field under its name in Position History and in Performance. */
+const COLUMNS = {
+  buyId: ['Buy Fill ID', 'buyFillId'],
+  sellId: ['Sell Fill ID', 'sellFillId'],
+  qty: ['Paired Qty', 'qty'],
+  buyPrice: ['Buy Price', 'buyPrice'],
+  sellPrice: ['Sell Price', 'sellPrice'],
+  boughtAt: ['Bought Timestamp', 'boughtTimestamp'],
+  soldAt: ['Sold Timestamp', 'soldTimestamp'],
+  contract: ['Contract', 'symbol'],
+  product: ['Product'],
+  pnl: ['P/L', 'pnl'],
+  account: ['Account'],
+  currency: ['Currency'],
+} as const;
+type Column = keyof typeof COLUMNS;
+const REQUIRED: Column[] = ['buyId', 'sellId', 'qty', 'buyPrice', 'sellPrice', 'boughtAt', 'soldAt', 'contract'];
+
+/** Column positions by field, or null when a required one is missing. */
+function columnsOf(header: string[]) {
+  const names = header.map((h) => h.trim().replace(/^\uFEFF/, ''));
+  const found = {} as Partial<Record<Column, number>>;
+  for (const [field, aliases] of Object.entries(COLUMNS) as [Column, readonly string[]][]) {
+    const index = names.findIndex((n) => aliases.includes(n));
+    if (index >= 0) found[field] = index;
+  }
+  return REQUIRED.every((f) => found[f] != null) ? found : null;
+}
+
+/** "1,234.50", "$408.00", "$(68.00)" or "-68" → a number (parentheses are a loss); null if none. */
+export function parseTradovateNumber(raw: string): number | null {
+  const text = raw.trim();
+  const negative = /\(.*\)|-/.test(text);
+  const value = Number(text.replace(/[$(),\s-]/g, ''));
+  if (text === '' || !Number.isFinite(value)) return null;
+  return negative ? -value : value;
+}
 
 /** Splits CSV text into rows of cells (quotes, doubled quotes and CRLF handled). */
 export function parseCsv(text: string, delimiter = ','): string[][] {
@@ -67,11 +105,10 @@ export function parseCsv(text: string, delimiter = ','): string[][] {
   return rows;
 }
 
-/** True when the text looks like Tradovate's Position History export. */
-export function isTradovatePositionHistory(text: string): boolean {
+/** True when the text looks like Tradovate's Position History or Performance export. */
+export function isTradovateReport(text: string): boolean {
   const header = parseCsv(text.slice(0, 2000).split(/\r?\n/)[0] ?? '')[0] ?? [];
-  const names = new Set(header.map((h) => h.trim().replace(/^﻿/, '')));
-  return HEADERS.every((h) => names.has(h));
+  return columnsOf(header) != null;
 }
 
 /** "10/12/2026 14:36:23" (month first, as Tradovate writes it) → "2026-10-12T14:36:23". */
@@ -85,34 +122,33 @@ export function parseTradovateTime(raw: string | undefined): string | null {
 
 const round = (n: number) => Math.round(n * 1e6) / 1e6;
 
-/** Rebuilds trades (flat → flat) from the Position History rows. */
-export function parseTradovatePositionHistory(text: string): TradovateTrade[] {
-  const [header, ...rows] = parseCsv(text.replace(/^﻿/, ''));
-  if (!header) return [];
-  const col = new Map(header.map((h, i) => [h.trim(), i]));
-  const get = (row: string[], name: string) => row[col.get(name) ?? -1]?.trim() ?? '';
-  const num = (row: string[], name: string) => {
-    const value = Number(get(row, name).replace(/,/g, ''));
-    return Number.isFinite(value) ? value : null;
-  };
+/** Rebuilds trades (flat → flat) from the paired-fill rows of either export. */
+export function parseTradovateReport(text: string): TradovateTrade[] {
+  const [header, ...rows] = parseCsv(text.replace(/^\uFEFF/, ''));
+  const col = header ? columnsOf(header) : null;
+  if (!col) return [];
+  const get = (row: string[], field: Column) => (col[field] == null ? '' : (row[col[field]!]?.trim() ?? ''));
+  const num = (row: string[], field: Column) => parseTradovateNumber(get(row, field));
 
   // Fills per account × contract; a fill paired with several others appears in several rows.
   const books = new Map<string, { account: string; contract: string; currency: string | null; fills: Map<string, TradovateFill>; pnl: Map<string, number> }>();
   for (const row of rows) {
-    const qty = num(row, 'Paired Qty');
-    const buyPrice = num(row, 'Buy Price');
-    const sellPrice = num(row, 'Sell Price');
-    const boughtAt = parseTradovateTime(get(row, 'Bought Timestamp'));
-    const soldAt = parseTradovateTime(get(row, 'Sold Timestamp'));
-    const buyId = get(row, 'Buy Fill ID');
-    const sellId = get(row, 'Sell Fill ID');
-    if (!qty || buyPrice == null || sellPrice == null || !boughtAt || !soldAt || !buyId || !sellId) continue;
-    const account = get(row, 'Account');
-    const contract = get(row, 'Contract') || get(row, 'Product');
+    const qty = num(row, 'qty');
+    const buyPrice = num(row, 'buyPrice');
+    const sellPrice = num(row, 'sellPrice');
+    const boughtAt = parseTradovateTime(get(row, 'boughtAt'));
+    const soldAt = parseTradovateTime(get(row, 'soldAt'));
+    const buyId = get(row, 'buyId');
+    const sellId = get(row, 'sellId');
+    if (!qty || buyPrice == null || sellPrice == null || !boughtAt || !soldAt || !/^\d+$/.test(buyId) || !/^\d+$/.test(sellId)) continue;
+    // Performance has no account column; its amounts are in dollars.
+    const account = get(row, 'account');
+    const contract = get(row, 'contract') || get(row, 'product');
     const key = `${account}|${contract}`;
     let book = books.get(key);
     if (!book) {
-      book = { account, contract, currency: get(row, 'Currency') || null, fills: new Map(), pnl: new Map() };
+      const currency = get(row, 'currency') || (get(row, 'pnl').includes('$') ? 'USD' : null);
+      book = { account, contract, currency, fills: new Map(), pnl: new Map() };
       books.set(key, book);
     }
     const add = (id: string, side: 'buy' | 'sell', price: number, time: string) => {
@@ -124,7 +160,7 @@ export function parseTradovatePositionHistory(text: string): TradovateTrade[] {
     add(sellId, 'sell', sellPrice, soldAt);
     // P/L is booked on the pair's later fill, which is always the closing one.
     const closing = boughtAt > soldAt || (boughtAt === soldAt && BigInt(buyId) > BigInt(sellId)) ? buyId : sellId;
-    book.pnl.set(closing, (book.pnl.get(closing) ?? 0) + (num(row, 'P/L') ?? 0));
+    book.pnl.set(closing, (book.pnl.get(closing) ?? 0) + (num(row, 'pnl') ?? 0));
   }
 
   const trades: TradovateTrade[] = [];
