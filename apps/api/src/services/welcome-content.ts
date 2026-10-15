@@ -84,7 +84,7 @@ export const WELCOME: Record<Language, WelcomeCopy> = {
           'Codzienna ocena: limit, stop loss, emocje i serie strat',
         ],
         link: 'Zobacz monitor',
-        path: '/',
+        path: '/dashboard',
       },
       {
         kicker: 'Kalkulator CFD → futures',
@@ -175,7 +175,7 @@ export const WELCOME: Record<Language, WelcomeCopy> = {
           'A daily score: limit, stop loss, emotions and losing streaks',
         ],
         link: 'See the monitor',
-        path: '/',
+        path: '/dashboard',
       },
       {
         kicker: 'CFD → futures calculator',

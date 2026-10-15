@@ -12,7 +12,7 @@ import { LogoMark, Wordmark } from '../../components/ui/Brand.tsx';
 const query = () => new URLSearchParams(window.location.search);
 
 /** Only same-app paths, so a crafted link cannot send the user elsewhere after signing in. */
-const safeNext = (value: string | null) => (value && value.startsWith('/') && !value.startsWith('//') ? value : '/');
+const safeNext = (value: string | null) => (value && value.startsWith('/') && !value.startsWith('//') ? value : '/dashboard');
 
 function useErrorText() {
   const t = useT().auth;
@@ -387,7 +387,7 @@ export function ActivatePage() {
       .activate(token)
       .then(async () => {
         await resetSession();
-        await navigate({ to: '/' });
+        await navigate({ to: '/dashboard' });
       })
       .catch(() => setFailed(true));
   }, [navigate, resetSession]);

@@ -352,6 +352,7 @@ export const en: Messages = {
     ctaOpen: 'Create an account',
     ctaInvite: 'I have an invitation',
     ctaSignIn: 'Sign in',
+    openApp: 'Open the app',
     inviteNote: 'Access is by invitation. You get a code from the administrator.',
     facts: [
       { value: 'CFD and futures', label: 'forex, gold, indices' },

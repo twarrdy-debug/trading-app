@@ -360,6 +360,7 @@ export const pl = {
     ctaOpen: 'Załóż konto',
     ctaInvite: 'Mam zaproszenie',
     ctaSignIn: 'Zaloguj się',
+    openApp: 'Otwórz aplikację',
     inviteNote: 'Dostęp na zaproszenie. Kod otrzymasz od administratora.',
     facts: [
       { value: 'CFD i futures', label: 'forex, złoto, indeksy' },

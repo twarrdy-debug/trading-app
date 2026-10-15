@@ -104,13 +104,8 @@ export function AppShell() {
   useEffect(() => {
     if (!signedOut) return;
     const { pathname, search } = router.state.location;
-    // The bare address shows guests the public page; any other one asks them to sign in.
-    if (pathname === '/') {
-      router.history.replace('/start');
-      return;
-    }
     const next = `${pathname}${search && Object.keys(search).length ? `?${new URLSearchParams(search as Record<string, string>)}` : ''}`;
-    router.history.replace(`/logowanie${next !== '/' ? `?next=${encodeURIComponent(next)}` : ''}`);
+    router.history.replace(`/logowanie${next !== '/dashboard' ? `?next=${encodeURIComponent(next)}` : ''}`);
   }, [signedOut, router]);
 
   // The phone menu closes after moving to another screen, and with Escape.

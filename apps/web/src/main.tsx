@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { createRootRoute, createRoute, createRouter, RouterProvider } from '@tanstack/react-router';
+import { createRootRoute, createRoute, createRouter, redirect, RouterProvider } from '@tanstack/react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ApiError } from './api/client.ts';
@@ -25,7 +25,15 @@ const rootRoute = createRootRoute();
 const appRoute = createRoute({ getParentRoute: () => rootRoute, id: 'app', component: AppShell });
 
 const routeTree = rootRoute.addChildren([
-  createRoute({ getParentRoute: () => rootRoute, path: '/start', component: LandingPage }),
+  // The public page is the bare address, for everyone; `/start` (its old address) still leads there.
+  createRoute({ getParentRoute: () => rootRoute, path: '/', component: LandingPage }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/start',
+    beforeLoad: () => {
+      throw redirect({ to: '/', replace: true });
+    },
+  }),
   createRoute({ getParentRoute: () => rootRoute, path: '/logowanie', component: LoginPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/rejestracja', component: RegisterPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/reset-hasla', component: ForgotPasswordPage }),
@@ -33,7 +41,7 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: '/aktywacja', component: ActivatePage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/wypisz', component: UnsubscribePage }),
   appRoute.addChildren([
-    createRoute({ getParentRoute: () => appRoute, path: '/', component: DashboardPage }),
+    createRoute({ getParentRoute: () => appRoute, path: '/dashboard', component: DashboardPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/dziennik', component: JournalPage }),
     createRoute({
       getParentRoute: () => appRoute,

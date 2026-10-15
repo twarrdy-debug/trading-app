@@ -2,6 +2,7 @@ import { LANGUAGES } from '@trading/shared';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useAuthConfig } from '../../api/auth.ts';
+import { useMe } from '../../api/hooks.ts';
 import { EquityChart } from '../../components/charts/EquityChart.tsx';
 import { LogoMark, Wordmark } from '../../components/ui/Brand.tsx';
 import { InstrumentBadge, InstrumentLogo } from '../../components/ui/InstrumentBadge.tsx';
@@ -34,7 +35,10 @@ function useCountUp(target: number, duration = 1400) {
   return value;
 }
 
-/** Public page for signed-out visitors: what the app does, shown with its own look on sample data. */
+/**
+ * The public page at the bare address: what the app does, shown with its own look on sample data.
+ * A signed-in visitor gets "Open the app" (the dashboard) in place of sign-up and sign-in.
+ */
 export function LandingPage() {
   const all = useT();
   const t = all.landing;
@@ -42,15 +46,21 @@ export function LandingPage() {
   const setLanguage = useSetLanguage();
   const { data: config } = useAuthConfig();
   const registration = config?.registration ?? 'invite';
+  const { data: me } = useMe();
+  const signedIn = me != null;
 
-  const primary =
-    registration === 'closed' ? null : (
+  const primary = signedIn ? (
+    <Link to="/dashboard" className="inline-flex h-12 items-center gap-2 rounded-(--radius-control) bg-accent px-6 text-[15px] font-bold text-on-accent no-underline transition hover:brightness-105">
+      {t.openApp}
+      <span aria-hidden>→</span>
+    </Link>
+  ) : registration === 'closed' ? null : (
       <Link to="/rejestracja" className="inline-flex h-12 items-center gap-2 rounded-(--radius-control) bg-accent px-6 text-[15px] font-bold text-on-accent no-underline transition hover:brightness-105">
         {registration === 'open' ? t.ctaOpen : t.ctaInvite}
         <span aria-hidden>→</span>
       </Link>
     );
-  const signIn = (
+  const signIn = signedIn ? null : (
     <Link to="/logowanie" className="inline-flex h-12 items-center rounded-(--radius-control) border border-line bg-panel px-6 text-[15px] font-semibold text-ink no-underline hover:bg-raised">
       {t.ctaSignIn}
     </Link>
@@ -87,8 +97,11 @@ export function LandingPage() {
             ))}
           </div>
           {/* On phones the hero has its own sign-in button right below. */}
-          <Link to="/logowanie" className="hidden rounded-[10px] px-3.5 py-2 text-sm font-semibold whitespace-nowrap text-ink no-underline hover:bg-chip sm:block">
-            {t.nav.signIn}
+          <Link
+            to={signedIn ? '/dashboard' : '/logowanie'}
+            className="hidden rounded-[10px] px-3.5 py-2 text-sm font-semibold whitespace-nowrap text-ink no-underline hover:bg-chip sm:block"
+          >
+            {signedIn ? t.openApp : t.nav.signIn}
           </Link>
         </div>
       </header>
@@ -111,7 +124,7 @@ export function LandingPage() {
               {primary}
               {signIn}
             </div>
-            {registration === 'invite' && <span className="-mt-2 text-[13px] text-dim">{t.inviteNote}</span>}
+            {!signedIn && registration === 'invite' && <span className="-mt-2 text-[13px] text-dim">{t.inviteNote}</span>}
             <dl className="m-0 grid grid-cols-1 gap-4 pt-2 sm:grid-cols-3">
               {t.facts.map((fact) => (
                 <div key={fact.value} className="flex flex-col gap-0.5">

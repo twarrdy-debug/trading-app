@@ -207,11 +207,11 @@ export function whatsNewEmail(o: { language: Language; publicUrl: string; email:
   const cards =
     card(intro, '32px 36px') +
     card(list, '8px 32px') +
-    `<tr><td align="center" style="padding:4px 0 16px">${button(t(l, 'whatsNewButton'), o.publicUrl)}</td></tr>`;
+    `<tr><td align="center" style="padding:4px 0 16px">${button(t(l, 'whatsNewButton'), `${o.publicUrl}/dashboard`)}</td></tr>`;
   const text =
     `${o.title}\n${t(l, 'whatsNewVersion', { version: o.version, date: o.date })}\n\n${o.intro}\n\n` +
     o.items.map((item) => `• ${item.title} (${t(l, item.kind === 'new' ? 'whatsNewNew' : 'whatsNewFix')}): ${item.text}`).join('\n') +
-    `\n\n${t(l, 'whatsNewButton')}: ${o.publicUrl}\n\n${t(l, 'whatsNewFooter', { app: APP_NAME })}`;
+    `\n\n${t(l, 'whatsNewButton')}: ${o.publicUrl}/dashboard\n\n${t(l, 'whatsNewFooter', { app: APP_NAME })}`;
   return {
     to: o.email,
     subject: t(l, 'whatsNewSubject', { app: APP_NAME, title: o.title }),
@@ -305,7 +305,7 @@ export function welcomeEmail({ language: l, publicUrl, email, name }: { language
     `<div style="font-size:13px;font-weight:700;color:${C.accentInk}"><span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:${C.accent};margin-right:8px;vertical-align:1px"></span>${escape(w.eyebrow)}</div>` +
     `<h1 style="margin:14px 0 14px;font-size:32px;line-height:1.1;font-weight:800;letter-spacing:-0.025em">${escape(w.title(name))}</h1>` +
     `<p style="margin:0 0 22px;font-size:15px;line-height:1.6;color:${C.dim}">${escape(w.lead)}</p>` +
-    `<table role="presentation" cellspacing="0" cellpadding="0"><tr><td style="background:${C.accent};border-radius:12px"><a href="${escape(publicUrl)}" style="display:inline-block;padding:15px 28px;font-family:${FONT};font-size:15px;font-weight:700;color:${C.ink};text-decoration:none">${escape(w.button)} &rarr;</a></td></tr></table>` +
+    `<table role="presentation" cellspacing="0" cellpadding="0"><tr><td style="background:${C.accent};border-radius:12px"><a href="${escape(url('/dashboard'))}" style="display:inline-block;padding:15px 28px;font-family:${FONT};font-size:15px;font-weight:700;color:${C.ink};text-decoration:none">${escape(w.button)} &rarr;</a></td></tr></table>` +
     facts;
 
   // The app window on sample data, as on the landing page.
@@ -381,7 +381,7 @@ export function welcomeEmail({ language: l, publicUrl, email, name }: { language
     `\n\n${w.featuresTitle}\n` +
     w.spotlights.map((sp) => `${sp.title}\n${sp.points.map((p) => `  • ${p}`).join('\n')}${sp.note ? `\n  ${sp.note}` : ''}\n  ${url(sp.path)}`).join('\n\n') +
     `\n\n${w.mailsTitle}\n${w.mails.map((m) => `  • ${m.title}: ${m.text}`).join('\n')}\n${w.mailsLink}: ${url('/ustawienia/maile')}` +
-    `\n\n${w.finalTitle}\n${w.button}: ${publicUrl}\n\n${w.footer}`;
+    `\n\n${w.finalTitle}\n${w.button}: ${url('/dashboard')}\n\n${w.footer}`;
   return {
     to: email,
     subject: w.subject,

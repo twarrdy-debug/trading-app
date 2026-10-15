@@ -10,7 +10,7 @@ import { SessionClock, ThemeIcon } from './SessionClock.tsx';
 export { APP_NAME };
 
 export const NAV = [
-  { to: '/', label: 'dashboard', icon: 'dashboard' },
+  { to: '/dashboard', label: 'dashboard', icon: 'dashboard' },
   { to: '/transakcje', label: 'trades', icon: 'trades' },
   { to: '/dziennik', label: 'journal', icon: 'journal' },
   { to: '/statystyki', label: 'stats', icon: 'stats' },
@@ -26,7 +26,7 @@ const ADMIN_ITEM = { to: '/admin', label: 'admin', icon: 'admin' } as const;
 
 export function Logo({ withName = true }: { withName?: boolean }) {
   return (
-    <Link to="/" className="flex min-w-0 items-center gap-2.5 text-ink no-underline">
+    <Link to="/dashboard" className="flex min-w-0 items-center gap-2.5 text-ink no-underline">
       <LogoMark size={36} />
       {withName ? <Wordmark className="truncate text-[16px]" /> : <span className="sr-only">{APP_NAME}</span>}
     </Link>
@@ -90,7 +90,7 @@ export function Sidebar({ me, collapsed, onToggleCollapsed, onClose, dots, shown
               onClick={onClose}
               className={`group relative flex h-10 items-center gap-3 rounded-[11px] text-sm font-medium text-dim no-underline transition hover:bg-chip hover:text-ink ${collapsed ? 'justify-center' : 'px-3'}`}
               activeProps={{ className: '!bg-chip !font-bold !text-ink' }}
-              activeOptions={{ exact: item.to === '/' }}
+              activeOptions={{ exact: item.to === '/dashboard' }}
             >
               <NavIcon name={item.icon} className="group-data-[status=active]:text-accent-ink" />
               {!collapsed && <span className="truncate">{t.nav[item.label]}</span>}
