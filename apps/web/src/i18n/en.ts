@@ -338,7 +338,7 @@ export const en: Messages = {
     facts: [
       { value: 'CFD and futures', label: 'forex, gold, indices' },
       { value: 'Pip · point · tick', label: 'worked out for you' },
-      { value: 'MT5 import', label: 'your whole history from one report' },
+      { value: 'MT5 and Tradovate', label: 'your whole history from one file' },
     ],
     sample: 'Sample data',
     preview: {
@@ -362,7 +362,7 @@ export const en: Messages = {
         'Statistics by instrument, emotion and trade number of the day',
         'Balance curve with the drawdown floor and the prop profit target',
         'Results calendar, streaks and a discipline score for every day',
-        'MetaTrader 5 history import without duplicates',
+        'MetaTrader 5 and Tradovate history import without duplicates',
       ],
       byInstrument: 'Result by instrument',
     },
@@ -394,6 +394,20 @@ export const en: Messages = {
       entry: 'Entry',
       perContract: (value) => `${value} per contract`,
     },
+    analysis: {
+      kicker: 'Market analysis',
+      title: 'The levels the market sees, before you open a position',
+      text: 'FVGs, order blocks, BOS and CHoCH, equal highs and lows, and the day and week levels, worked out automatically from M5 to D1, with the distance from the price in ATR.',
+      points: [
+        'A chart in TradingView colours with EMA, RSI and MACD',
+        'Futures on their CFD pair\'s data, shifted by the measured difference',
+        'A glossary: every zone explained in two sentences',
+      ],
+      disclaimer: 'This is not investment advice.',
+      levels: 'Nearest levels',
+      price: 'Price',
+      notes: { pwh: 'previous week high', eqh: 'equal highs, touched 3×', pdh: 'previous day high', pdl: 'previous day low', eql: 'equal lows, touched 2×' },
+    },
     moreTitle: 'Plus everything else you need during a session',
     more: {
       calendar: { title: 'Economic calendar', text: 'Day, week and month views, a countdown to key releases and filters by currency or instrument.' },
@@ -405,7 +419,7 @@ export const en: Messages = {
     steps: [
       { title: 'Create an account', text: 'With an invitation code. Pick your language and time zone.' },
       { title: 'Add a trading account', text: 'Live or prop: size, leverage, drawdown limit, profit target and daily limits.' },
-      { title: 'Load your history', text: 'Import a MetaTrader 5 report or log your first trade.' },
+      { title: 'Load your history', text: 'Import a MetaTrader 5 or Tradovate report or log your first trade.' },
     ],
     finalTitle: 'Trade your plan, not your emotions',
     footer: 'data from the accounts you add yourself',

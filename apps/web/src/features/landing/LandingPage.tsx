@@ -136,6 +136,9 @@ export function LandingPage() {
           <Spotlight kicker={t.calculator.kicker} title={t.calculator.title} text={t.calculator.text} points={t.calculator.points}>
             <CalculatorVisual />
           </Spotlight>
+          <Spotlight kicker={t.analysis.kicker} title={t.analysis.title} text={t.analysis.text} points={t.analysis.points} note={t.analysis.disclaimer} flip>
+            <AnalysisVisual />
+          </Spotlight>
 
           <section className="flex flex-col gap-8">
             <h2 className="m-0 max-w-2xl text-3xl font-extrabold tracking-tight text-balance">{t.moreTitle}</h2>
@@ -297,7 +300,24 @@ function InstrumentStrip() {
 }
 
 /** One feature in depth: text and points on one side, a picture of it in the app on the other. */
-function Spotlight({ kicker, title, text, points, flip = false, children }: { kicker: string; title: string; text: string; points: string[]; flip?: boolean; children: ReactNode }) {
+function Spotlight({
+  kicker,
+  title,
+  text,
+  points,
+  note,
+  flip = false,
+  children,
+}: {
+  kicker: string;
+  title: string;
+  text: string;
+  points: string[];
+  /** Small print under the points (the analysis' "not investment advice"). */
+  note?: string;
+  flip?: boolean;
+  children: ReactNode;
+}) {
   return (
     <section className="grid items-center gap-8 lg:grid-cols-2 lg:gap-14">
       <div className={`flex flex-col gap-5 ${flip ? 'lg:order-2' : ''}`}>
@@ -314,6 +334,7 @@ function Spotlight({ kicker, title, text, points, flip = false, children }: { ki
             </li>
           ))}
         </ul>
+        {note && <span className="text-xs text-dim">{note}</span>}
       </div>
       <div className={`landing-reveal ${flip ? 'lg:order-1' : ''}`}>{children}</div>
     </section>
@@ -457,6 +478,33 @@ function CalculatorVisual() {
         {level('SL', '21 410', '21 472,25', t.perContract('−$800'), 'bg-sell-soft')}
         {level('TP', '21 530', '21 592,25', t.perContract('+$1600'), 'bg-buy-soft')}
       </div>
+    </Window>
+  );
+}
+
+function AnalysisVisual() {
+  const t = useT().landing.analysis;
+  const rows: { tag: string; tone: string; note: string; price: string; atr: string }[] = [
+    { tag: 'PWH', tone: 'bg-warn-bg text-warn', note: t.notes.pwh, price: '4 236,8', atr: '+3,1 ATR' },
+    { tag: 'EQH', tone: 'bg-sell-soft text-sell', note: t.notes.eqh, price: '4 204,0', atr: '+1,6 ATR' },
+    { tag: 'PDH', tone: 'bg-warn-bg text-warn', note: t.notes.pdh, price: '4 198,3', atr: '+1,2 ATR' },
+    { tag: t.price, tone: 'bg-chip text-ink', note: 'XAUUSD · H1', price: '4 182,1', atr: '' },
+    { tag: 'PDL', tone: 'bg-warn-bg text-warn', note: t.notes.pdl, price: '4 166,9', atr: '−1,1 ATR' },
+    { tag: 'EQL', tone: 'bg-buy-soft text-buy', note: t.notes.eql, price: '4 151,4', atr: '−2,2 ATR' },
+  ];
+  return (
+    <Window>
+      <span className="text-[15px] font-bold">{t.levels}</span>
+      <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+        {rows.map((row) => (
+          <li key={row.tag} className="grid grid-cols-[3.5rem_minmax(0,1fr)_auto_4.5rem] items-center gap-3 rounded-xl bg-raised px-3 py-2.5">
+            <span className={`rounded-md py-0.5 text-center text-[11px] font-extrabold ${row.tone}`}>{row.tag}</span>
+            <span className="truncate text-[13px] text-dim">{row.note}</span>
+            <span className="font-mono text-sm font-bold">{row.price}</span>
+            <span className="text-right font-mono text-xs text-dim">{row.atr}</span>
+          </li>
+        ))}
+      </ul>
     </Window>
   );
 }

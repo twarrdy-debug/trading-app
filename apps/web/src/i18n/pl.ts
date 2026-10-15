@@ -346,7 +346,7 @@ export const pl = {
     facts: [
       { value: 'CFD i futures', label: 'forex, złoto, indeksy' },
       { value: 'Pips · punkt · tick', label: 'liczone automatycznie' },
-      { value: 'Import z MT5', label: 'cała historia z jednego raportu' },
+      { value: 'MT5 i Tradovate', label: 'cała historia z jednego pliku' },
     ],
     sample: 'Przykładowe dane',
     preview: {
@@ -370,7 +370,7 @@ export const pl = {
         'Statystyki według instrumentu, emocji i kolejnej transakcji dnia',
         'Krzywa salda z granicą drawdownu i celem konta prop',
         'Kalendarz wyników, serie i ocena dyscypliny każdego dnia',
-        'Import historii z MetaTrader 5, bez duplikatów',
+        'Import historii z MetaTrader 5 i Tradovate, bez duplikatów',
       ],
       byInstrument: 'Wynik według instrumentu',
     },
@@ -402,6 +402,20 @@ export const pl = {
       entry: 'Wejście',
       perContract: (value: string) => `${value} na kontrakt`,
     },
+    analysis: {
+      kicker: 'Analiza rynku',
+      title: 'Poziomy, które widzi rynek, zanim otworzysz pozycję',
+      text: 'FVG, order blocki, BOS i CHoCH, równe szczyty i dołki oraz poziomy dnia i tygodnia, wyliczone automatycznie od M5 do D1, z odległością od ceny w ATR.',
+      points: [
+        'Wykres w kolorach TradingView z EMA, RSI i MACD',
+        'Futures na danych pary CFD, przesunięte o zmierzoną różnicę',
+        'Słowniczek: każda strefa wyjaśniona w dwóch zdaniach',
+      ],
+      disclaimer: 'To nie jest porada inwestycyjna.',
+      levels: 'Najbliższe poziomy',
+      price: 'Cena',
+      notes: { pwh: 'szczyt poprzedniego tygodnia', eqh: 'równe szczyty, 3× dotknięte', pdh: 'szczyt poprzedniego dnia', pdl: 'dołek poprzedniego dnia', eql: 'równe dołki, 2× dotknięte' },
+    },
     moreTitle: 'A do tego wszystko, czego potrzebujesz w trakcie sesji',
     more: {
       calendar: { title: 'Kalendarz ekonomiczny', text: 'Dzień, tydzień i miesiąc, odliczanie do ważnych danych i filtr po walucie lub instrumencie.' },
@@ -413,7 +427,7 @@ export const pl = {
     steps: [
       { title: 'Załóż konto', text: 'Z kodem zaproszenia. Wybierz język i strefę czasową.' },
       { title: 'Dodaj konto tradingowe', text: 'Live albo prop: wielkość, dźwignia, limit drawdownu, cel zysku i dzienne limity.' },
-      { title: 'Wczytaj historię', text: 'Zaimportuj raport z MetaTrader 5 albo zapisz pierwszą transakcję.' },
+      { title: 'Wczytaj historię', text: 'Zaimportuj raport z MetaTrader 5 lub Tradovate albo zapisz pierwszą transakcję.' },
     ],
     finalTitle: 'Graj według planu, nie według emocji',
     footer: 'dane z kont, które dodajesz sam',
