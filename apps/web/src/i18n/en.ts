@@ -441,7 +441,8 @@ export const en: Messages = {
       { title: 'Load your history', text: 'Import a MetaTrader 5 or Tradovate report or log your first trade.' },
     ],
     finalTitle: 'Trade your plan, not your emotions',
-    footer: 'data from the accounts you add yourself',
+    risk: 'Trading CFDs and futures carries a high risk of losing capital. AlphaLogFX is a journaling and analysis tool: it does not give investment advice or recommendations.',
+    copyright: (year: number) => `© ${year} AlphaLogFX. All rights reserved.`,
   },
   dashboard: {
     info: {

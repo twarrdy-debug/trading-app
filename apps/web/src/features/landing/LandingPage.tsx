@@ -8,7 +8,6 @@ import { LogoMark, Wordmark } from '../../components/ui/Brand.tsx';
 import { InstrumentBadge, InstrumentLogo } from '../../components/ui/InstrumentBadge.tsx';
 import { useLanguage, useSetLanguage, useT } from '../../i18n/index.tsx';
 import { formatAmount, formatNumber } from '../../lib/format.ts';
-import { APP_NAME } from '../../layout/AppShell.tsx';
 import { NavIcon, type NavIconName } from '../../layout/NavIcon.tsx';
 import { SAMPLE_CURVE } from '../dashboard/DashboardPreview.tsx';
 
@@ -198,8 +197,14 @@ export function LandingPage() {
         </section>
       </main>
 
-      <footer className="mt-auto px-4 pb-8 text-center text-xs text-dim md:px-8">
-        {APP_NAME} · {t.footer}
+      {/* Quiet footer: the mark and name in grey, the risk warning and the copyright. */}
+      <footer className="mt-auto flex flex-col items-center gap-2 px-4 pb-10 text-xs text-dim md:px-8">
+        <span className="flex items-center gap-2 opacity-60 grayscale">
+          <LogoMark size={22} />
+          <Wordmark className="text-sm" />
+        </span>
+        <p className="m-0 max-w-2xl text-center text-[11px] leading-relaxed text-balance">{t.risk}</p>
+        <span>{t.copyright(new Date().getFullYear())}</span>
       </footer>
     </div>
   );

@@ -449,7 +449,8 @@ export const pl = {
       { title: 'Wczytaj historię', text: 'Zaimportuj raport z MetaTrader 5 lub Tradovate albo zapisz pierwszą transakcję.' },
     ],
     finalTitle: 'Graj według planu, nie według emocji',
-    footer: 'dane z kont, które dodajesz sam',
+    risk: 'Handel kontraktami CFD i futures wiąże się z wysokim ryzykiem utraty kapitału. AlphaLogFX to narzędzie do prowadzenia dziennika i analizy: nie udziela porad inwestycyjnych ani rekomendacji.',
+    copyright: (year: number) => `© ${year} AlphaLogFX. Wszelkie prawa zastrzeżone.`,
   },
   dashboard: {
     info: {
