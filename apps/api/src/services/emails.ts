@@ -1,6 +1,7 @@
 import { APP_NAME, type Language } from '@trading/shared';
 import { t } from '../i18n.ts';
 import type { MailMessage } from './mailer.ts';
+import { WELCOME } from './welcome-content.ts';
 
 /**
  * HTML e-mails in the app's "Chmura" look (mockups: https://claude.ai/artifact/9CabE6U4YCtJfP17LmKgus).
@@ -285,48 +286,106 @@ const listCard = (heading: string, right: string, rows: string) =>
 /** The header line's right side ("Sunday, 18.10 · 18:00"). */
 const dateline = (label: string) => `<tr><td style="padding:0 8px 12px;text-align:right;font-size:12px;color:${C.dim}">${escape(label)}</td></tr>`;
 
-/** "Welcome": after the account is activated; three first steps and what the app does. */
+/** "Welcome": after the account is activated. Laid out like the landing page, with more detail. */
 export function welcomeEmail({ language: l, publicUrl, email, name }: { language: Language; publicUrl: string; email: string; name: string }): MailMessage {
-  const p = { app: APP_NAME, name };
-  const bars = [30, 45, 38, 60, 72, 66, 88]
-    .map((h, i) => {
-      const bg = i === 6 ? GREEN : i === 2 || i === 5 ? SOFT.red : SOFT.green;
-      return `<td style="vertical-align:bottom;padding:0 4px"><div style="height:${Math.round(h)}px;background:${bg};border-radius:6px"></div></td>`;
-    })
-    .join('');
-  const hero =
-    `<p style="margin:0 0 14px">${pill(t(l, 'welcomeBadge'), C.accentSoft, '#8a5a00')}</p>` +
-    `<h1 style="margin:0 0 14px;font-size:30px;line-height:1.15;font-weight:800;letter-spacing:-0.02em">${escape(t(l, 'welcomeTitle', p))}</h1>` +
-    `<p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:${C.dim}">${escape(t(l, 'welcomeIntro'))}</p>` +
-    `<table role="presentation" cellspacing="0" cellpadding="0"><tr><td style="background:${C.accent};border-radius:12px"><a href="${escape(publicUrl)}" style="display:inline-block;padding:14px 26px;font-family:${FONT};font-size:15px;font-weight:700;color:${C.ink};text-decoration:none">${escape(t(l, 'welcomeButton'))}</a></td></tr></table>` +
-    `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:28px;background:${C.raised};border:1px solid #e1e6ec;border-radius:14px"><tr><td style="padding:18px 16px 18px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="height:100px"><tr>${bars}</tr></table></td></tr></table>`;
-  const steps = ([1, 2, 3] as const)
+  const w = WELCOME[l];
+  const url = (path: string) => `${publicUrl}${path}`;
+  const arrowLink = (label: string, path: string) =>
+    `<a href="${escape(url(path))}" style="font-size:14px;font-weight:700;color:${C.accentInk};text-decoration:none">${escape(label)} &rarr;</a>`;
+  const check = `<div style="width:20px;height:20px;border-radius:999px;background:${SOFT.green};color:${GREEN};text-align:center;line-height:20px;font-size:11px;font-weight:800">&#10003;</div>`;
+
+  // Hero: eyebrow, slogan, lead, button, the three facts.
+  const facts = `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:28px;border-top:1px solid ${C.ground}"><tr>${w.facts
     .map(
-      (n) =>
-        `<tr><td style="width:30px;padding:9px 16px 9px 0;vertical-align:top"><div style="width:30px;height:30px;border-radius:999px;background:${C.ink};color:#ffffff;text-align:center;font-size:14px;font-weight:800;line-height:30px">${n}</div></td>` +
-        `<td style="padding:9px 0;vertical-align:top"><div style="font-size:15px;font-weight:700">${escape(t(l, `welcomeStep${n}`))}</div><div style="font-size:14px;line-height:1.5;color:${C.dim}">${escape(t(l, `welcomeStep${n}Text`))}</div></td></tr>`,
+      (f, i) =>
+        `<td style="width:33%;padding:16px ${i < 2 ? 12 : 0}px 0 0;vertical-align:top"><div style="font-size:14px;font-weight:800">${escape(f.value)}</div><div style="margin-top:2px;font-size:12px;line-height:1.4;color:${C.dim}">${escape(f.label)}</div></td>`,
+    )
+    .join('')}</tr></table>`;
+  const hero =
+    `<div style="font-size:13px;font-weight:700;color:${C.accentInk}"><span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:${C.accent};margin-right:8px;vertical-align:1px"></span>${escape(w.eyebrow)}</div>` +
+    `<h1 style="margin:14px 0 14px;font-size:32px;line-height:1.1;font-weight:800;letter-spacing:-0.025em">${escape(w.title(name))}</h1>` +
+    `<p style="margin:0 0 22px;font-size:15px;line-height:1.6;color:${C.dim}">${escape(w.lead)}</p>` +
+    `<table role="presentation" cellspacing="0" cellpadding="0"><tr><td style="background:${C.accent};border-radius:12px"><a href="${escape(publicUrl)}" style="display:inline-block;padding:15px 28px;font-family:${FONT};font-size:15px;font-weight:700;color:${C.ink};text-decoration:none">${escape(w.button)} &rarr;</a></td></tr></table>` +
+    facts;
+
+  // The app window on sample data, as on the landing page.
+  const tile = (label: string, value: string, color: string) =>
+    `<td style="width:33%;padding:0 4px;vertical-align:top"><div style="background:${C.panel};border-radius:12px;padding:10px 10px"><div style="font-size:11px;font-weight:600;color:${C.dim};white-space:nowrap">${escape(label)}</div><div style="margin-top:4px;font-size:16px;font-weight:800;white-space:nowrap;color:${color}">${escape(value)}</div></div></td>`;
+  const bars = [22, 30, 26, 38, 46, 41, 54, 62, 57, 70, 78, 92]
+    .map((h, i) => `<td style="vertical-align:bottom;padding:0 2px"><div style="height:${h}px;background:${i === 2 || i === 5 || i === 8 ? '#f3c9ce' : i === 11 ? GREEN : '#bfe5cf'};border-radius:4px"></div></td>`)
+    .join('');
+  const slots = ['+1,8R', '', '']
+    .map((r, i) => `<td style="width:33%;padding:0 3px"><div style="height:30px;line-height:30px;border-radius:8px;text-align:center;font-size:12px;font-weight:700;${i === 0 ? `background:${SOFT.green};color:${GREEN}` : `border:1px dashed #cfd6df;color:${C.dim}`}">${r || '&nbsp;'}</div></td>`)
+    .join('');
+  const preview =
+    `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:${C.raised};border:1px solid #e1e6ec;border-radius:16px"><tr><td style="padding:12px 14px 6px">` +
+    `<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td style="font-size:0;line-height:0"><span style="display:inline-block;width:9px;height:9px;border-radius:999px;background:#f3c9ce;margin-right:5px"></span><span style="display:inline-block;width:9px;height:9px;border-radius:999px;background:#f6e2b4;margin-right:5px"></span><span style="display:inline-block;width:9px;height:9px;border-radius:999px;background:#bfe5cf"></span></td><td style="text-align:right;font-size:11px;font-weight:600;color:${C.dim}">${escape(w.sample)}</td></tr></table>` +
+    `</td></tr><tr><td style="padding:6px 8px 0"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>${tile(w.preview.netPnl, l === 'pl' ? '+$4\u00a0862' : '+$4,862', GREEN)}${tile(w.preview.winRate, '64%', C.ink)}${tile(w.preview.profitFactor, l === 'pl' ? '2,14' : '2.14', GREEN)}</tr></table></td></tr>` +
+    `<tr><td style="padding:12px 14px 0"><div style="background:${C.panel};border-radius:12px;padding:12px 12px 10px"><div style="font-size:11px;font-weight:600;color:${C.dim};padding:0 2px 8px">${escape(w.preview.equity)}</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="height:92px"><tr>${bars}</tr></table></div></td></tr>` +
+    `<tr><td style="padding:12px 14px 14px"><div style="background:${C.panel};border-radius:12px;padding:12px"><div style="font-size:13px;font-weight:800;color:${GREEN}"><span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:${GREEN};margin-right:7px;vertical-align:1px"></span>${escape(w.preview.verdict)} <span style="font-weight:600;color:${C.dim}">· ${escape(w.preview.left)}</span></div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:10px"><tr>${slots}</tr></table></div></td></tr></table>`;
+
+  const steps = w.steps
+    .map(
+      (step, i) =>
+        `<tr><td style="width:34px;padding:12px 16px 12px 0;vertical-align:top;${i ? `border-top:1px solid ${C.ground}` : ''}"><div style="width:34px;height:34px;border-radius:999px;background:${C.ink};color:#ffffff;text-align:center;font-size:15px;font-weight:800;line-height:34px">${i + 1}</div></td>` +
+        `<td style="padding:12px 0;vertical-align:top;${i ? `border-top:1px solid ${C.ground}` : ''}"><div style="font-size:16px;font-weight:800">${escape(step.title)}</div><div style="margin:4px 0 8px;font-size:14px;line-height:1.55;color:${C.dim}">${escape(step.text)}</div>${arrowLink(step.link, step.path)}</td></tr>`,
     )
     .join('');
-  const ICON = ['&#9636;', '&#9719;', '&#8644;', '&#8801;', '&#9638;', '&#8623;'];
-  const features = ([1, 2, 3, 4, 5, 6] as const).map(
-    (n) =>
-      `<div style="background:${C.raised};border-radius:14px;padding:16px"><div style="font-size:18px;line-height:1;color:${C.accentInk}">${ICON[n - 1]}</div><div style="margin-top:8px;font-size:14px;font-weight:700">${escape(t(l, `welcomeF${n}`))}</div><div style="margin-top:4px;font-size:13px;line-height:1.45;color:${C.dim}">${escape(t(l, `welcomeF${n}Text`))}</div></div>`,
-  );
-  const grid = [0, 2, 4]
-    .map((i) => `<tr><td style="width:50%;padding:0 6px 12px 0;vertical-align:top">${features[i]}</td><td style="width:50%;padding:0 0 12px 6px;vertical-align:top">${features[i + 1]}</td></tr>`)
+
+  const spotlight = (sp: (typeof w.spotlights)[number]) =>
+    card(
+      `<div style="font-size:13px;font-weight:700;color:${C.accentInk}">${escape(sp.kicker)}</div>` +
+        `<h2 style="margin:8px 0 10px;font-size:22px;line-height:1.2;font-weight:800;letter-spacing:-0.02em">${escape(sp.title)}</h2>` +
+        `<p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:${C.dim}">${escape(sp.text)}</p>` +
+        `<table role="presentation" width="100%" cellspacing="0" cellpadding="0">${sp.points.map((p) => `<tr><td style="width:20px;padding:5px 12px 5px 0;vertical-align:top">${check}</td><td style="padding:5px 0;font-size:14px;line-height:1.45">${escape(p)}</td></tr>`).join('')}</table>` +
+        (sp.note ? `<p style="margin:10px 0 0;font-size:12px;color:${C.dim}">${escape(sp.note)}</p>` : '') +
+        `<div style="margin-top:16px">${arrowLink(sp.link, sp.path)}</div>`,
+      '28px 32px',
+    );
+
+  const moreCell = (m: (typeof w.more)[number]) =>
+    `<div style="background:${C.raised};border-radius:14px;padding:16px"><div style="font-size:14px;font-weight:800">${escape(m.title)}</div><div style="margin-top:4px;font-size:13px;line-height:1.45;color:${C.dim}">${escape(m.text)}</div></div>`;
+  const more = [0, 2]
+    .map((i) => `<tr><td style="width:50%;padding:0 6px 12px 0;vertical-align:top">${moreCell(w.more[i]!)}</td><td style="width:50%;padding:0 0 12px 6px;vertical-align:top">${moreCell(w.more[i + 1]!)}</td></tr>`)
     .join('');
+
+  const mails = w.mails
+    .map(
+      (m) =>
+        `<tr><td style="width:32px;padding:8px 12px 8px 0;vertical-align:top"><div style="width:32px;height:32px;border-radius:10px;background:${C.accentSoft};color:${C.accentInk};text-align:center;line-height:32px;font-size:16px">&#9993;</div></td><td style="padding:8px 0;vertical-align:top"><div style="font-size:14px;font-weight:700">${escape(m.title)}</div><div style="font-size:13px;line-height:1.45;color:${C.dim}">${escape(m.text)}</div></td></tr>`,
+    )
+    .join('');
+
+  const final =
+    `<tr><td style="padding:0 0 16px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:${C.accent};border-radius:22px"><tr><td style="padding:32px 32px 30px">` +
+    `<div style="font-size:26px;line-height:1.15;font-weight:800;letter-spacing:-0.02em;color:${C.ink}">${escape(w.finalTitle)}</div>` +
+    `<div style="margin:8px 0 20px;font-size:15px;font-weight:600;color:#4a3a12">${escape(w.finalText)}</div>` +
+    `<table role="presentation" cellspacing="0" cellpadding="0"><tr><td style="background:${C.ink};border-radius:12px"><a href="${escape(url('/transakcje'))}" style="display:inline-block;padding:14px 26px;font-family:${FONT};font-size:15px;font-weight:700;color:#ffffff;text-decoration:none">${escape(w.button)} &rarr;</a></td></tr></table>` +
+    `</td></tr></table></td></tr>`;
+
   const cards =
-    card(hero, '36px 36px 32px') +
-    card(`<h2 style="margin:0 0 8px;font-size:18px;font-weight:800">${escape(t(l, 'welcomeStepsTitle'))}</h2><table role="presentation" width="100%" cellspacing="0" cellpadding="0">${steps}</table>`, '28px 32px') +
-    card(`<h2 style="margin:0 0 16px;font-size:18px;font-weight:800">${escape(t(l, 'welcomeFeaturesTitle'))}</h2><table role="presentation" width="100%" cellspacing="0" cellpadding="0">${grid}</table>`, '28px 32px 16px');
+    card(hero + `<div style="height:28px"></div>` + preview, '34px 26px 28px') +
+    card(`<h2 style="margin:0 0 6px;font-size:20px;font-weight:800">${escape(w.stepsTitle)}</h2><table role="presentation" width="100%" cellspacing="0" cellpadding="0">${steps}</table>`, '28px 32px 20px') +
+    `<tr><td style="padding:12px 8px 12px;font-size:20px;font-weight:800">${escape(w.featuresTitle)}</td></tr>` +
+    w.spotlights.map(spotlight).join('') +
+    card(`<h2 style="margin:0 0 16px;font-size:18px;line-height:1.3;font-weight:800">${escape(w.moreTitle)}</h2><table role="presentation" width="100%" cellspacing="0" cellpadding="0">${more}</table>`, '28px 32px 16px') +
+    card(
+      `<h2 style="margin:0 0 8px;font-size:18px;font-weight:800">${escape(w.mailsTitle)}</h2><table role="presentation" width="100%" cellspacing="0" cellpadding="0">${mails}</table><div style="margin-top:10px">${arrowLink(w.mailsLink, '/ustawienia/maile')}</div>`,
+      '28px 32px 24px',
+    ) +
+    final;
+
   const text =
-    `${t(l, 'welcomeTitle', p)}\n\n${t(l, 'welcomeIntro')}\n\n${t(l, 'welcomeStepsTitle')}\n` +
-    ([1, 2, 3] as const).map((n) => `${n}. ${t(l, `welcomeStep${n}`)}: ${t(l, `welcomeStep${n}Text`)}`).join('\n') +
-    `\n\n${t(l, 'welcomeButton')}: ${publicUrl}\n\n${t(l, 'welcomeFooter', p)}`;
+    `${w.title(name)}\n\n${w.lead}\n\n${w.stepsTitle}\n` +
+    w.steps.map((step, i) => `${i + 1}. ${step.title}: ${step.text} ${url(step.path)}`).join('\n') +
+    `\n\n${w.featuresTitle}\n` +
+    w.spotlights.map((sp) => `${sp.title}\n${sp.points.map((p) => `  • ${p}`).join('\n')}${sp.note ? `\n  ${sp.note}` : ''}\n  ${url(sp.path)}`).join('\n\n') +
+    `\n\n${w.mailsTitle}\n${w.mails.map((m) => `  • ${m.title}: ${m.text}`).join('\n')}\n${w.mailsLink}: ${url('/ustawienia/maile')}` +
+    `\n\n${w.finalTitle}\n${w.button}: ${publicUrl}\n\n${w.footer}`;
   return {
     to: email,
-    subject: t(l, 'welcomeSubject', p),
-    html: layout({ language: l, publicUrl, preheader: t(l, 'welcomeIntro'), cards, footer: footer(l, publicUrl, t(l, 'welcomeFooter', p)) }),
+    subject: w.subject,
+    html: layout({ language: l, publicUrl, preheader: w.lead, cards, footer: footer(l, publicUrl, w.footer) }),
     text,
   };
 }
