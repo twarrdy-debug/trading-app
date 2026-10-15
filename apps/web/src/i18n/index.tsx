@@ -10,18 +10,20 @@ export type { Messages };
 const DICTIONARIES: Record<Language, Messages> = { pl, en };
 /** Last used language, so the first paint (before /me loads) is already in the right language. */
 const STORED_LANGUAGE_KEY = 'language';
+/** A first visit is in English (owner's decision, 2026-10-15); a picked or settings language wins after that. */
+const DEFAULT_LANGUAGE: Language = 'en';
 
 function storedLanguage(): Language {
   try {
     const value = localStorage.getItem(STORED_LANGUAGE_KEY);
-    return (LANGUAGES as readonly string[]).includes(value ?? '') ? (value as Language) : 'pl';
+    return (LANGUAGES as readonly string[]).includes(value ?? '') ? (value as Language) : DEFAULT_LANGUAGE;
   } catch {
-    return 'pl';
+    return DEFAULT_LANGUAGE;
   }
 }
 
 const I18nContext = createContext<{ language: Language; t: Messages; setLanguage: (language: Language) => void }>({
-  language: 'pl',
+  language: DEFAULT_LANGUAGE,
   t: pl,
   setLanguage: () => {},
 });
