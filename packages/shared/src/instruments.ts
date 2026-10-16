@@ -27,6 +27,18 @@ const SYMBOL_ALIASES: Record<string, string> = {
   MYM: 'MYM1',
   GC: 'GC1',
   MGC: 'MGC1',
+  // Crypto: a bare coin in a signal means the broker's CFD; exchanges' perpetuals keep their symbol.
+  BTC: 'BTCUSD',
+  XBTUSD: 'BTCUSD',
+  BITCOIN: 'BTCUSD',
+  ETH: 'ETHUSD',
+  ETHEREUM: 'ETHUSD',
+  BTCUSDTPERP: 'BTCUSDT',
+  BTCUSDTSWAP: 'BTCUSDT',
+  BTCUSDTP: 'BTCUSDT',
+  ETHUSDTPERP: 'ETHUSDT',
+  ETHUSDTSWAP: 'ETHUSDT',
+  ETHUSDTP: 'ETHUSDT',
 };
 
 /** Normalizes a symbol as written in a signal ("NQ1!", "nas100") to the stored symbol. */
@@ -35,8 +47,8 @@ export function normalizeSymbol(raw: string): string {
   return SYMBOL_ALIASES[symbol] ?? symbol;
 }
 
-/** Futures month codes, as in NQZ24 or MGCG5. */
-const FUTURES_CONTRACT = /^(M?NQ|M?ES|M?YM|M?GC)[FGHJKMNQUVXZ]\d{1,2}$/;
+/** Futures month codes, as in NQZ24, MGCG5 or MBTZ6 (CME bitcoin and ether: BTC/MBT, ETH/MET). */
+const FUTURES_CONTRACT = /^(M?NQ|M?ES|M?YM|M?GC|MBT|BTC|MET|ETH)[FGHJKMNQUVXZ]\d{1,2}$/;
 
 /**
  * Candidate app symbols for a broker symbol from a platform export (MT5):
@@ -44,12 +56,19 @@ const FUTURES_CONTRACT = /^(M?NQ|M?ES|M?YM|M?GC)[FGHJKMNQUVXZ]\d{1,2}$/;
  */
 export function brokerSymbolCandidates(raw: string): string[] {
   const upper = raw.trim().toUpperCase();
-  const base = upper.split(/[._#@]/)[0] ?? upper;
+  const base = upper.split(/[._#@:]/)[0] ?? upper;
   const noSuffix = base.replace(/(CASH|PRO|ECN|RAW|STD|\+|-|M)$/, '');
+  // Exchanges write pairs as "BTC-USDT-SWAP" (OKX) or "BTC/USDT"; the whole symbol without
+  // separators catches the TradingView ".P" perpetual too ("BTCUSDT.P" → "BTCUSDTP").
+  const compact = upper.split(':')[0]!.replace(/[-/._]/g, '');
   const contract = base.match(FUTURES_CONTRACT)?.[1];
-  const names = [upper, base, noSuffix, ...(contract ? [contract] : [])];
+  // The continuous contract (BTC1) before the bare root, which as a signal word means the CFD.
+  const names = [upper, base, noSuffix, compact, ...(contract ? [`${contract}1`, contract] : [])];
   return [...new Set(names.flatMap((s) => [s, normalizeSymbol(s)]))];
 }
+
+/** The coin of a crypto pair, the unit its size is counted in on an exchange: BTCUSDT → BTC. */
+export const coinOf = (symbol: string) => symbol.replace(/(USDT|USDC|USD)$/, '') || symbol;
 
 /** The instrument a broker symbol most likely refers to, if any. */
 export function matchBrokerSymbol<T extends { symbol: string }>(raw: string, instruments: readonly T[]): T | undefined {
@@ -76,6 +95,9 @@ export const CFD_FUTURES_PAIRS: readonly CfdFuturesPair[] = [
   { key: 'sp500', label: { pl: 'S&P 500', en: 'S&P 500' }, cfd: 'US500', mini: 'ES1', micro: 'MES1', alertPoints: 3 },
   { key: 'dow', label: { pl: 'Dow Jones', en: 'Dow Jones' }, cfd: 'US30', mini: 'YM1', micro: 'MYM1', alertPoints: 30 },
   { key: 'gold', label: { pl: 'Złoto', en: 'Gold' }, cfd: 'XAUUSD', mini: 'GC1', micro: 'MGC1', alertPoints: 2 },
+  // CME bitcoin is 5 BTC (micro 0.1 BTC), ether 50 ETH (micro 0.1 ETH); the CFD is 1 coin a lot.
+  { key: 'bitcoin', label: { pl: 'Bitcoin', en: 'Bitcoin' }, cfd: 'BTCUSD', mini: 'BTC1', micro: 'MBT1', alertPoints: 100 },
+  { key: 'ether', label: { pl: 'Ethereum', en: 'Ethereum' }, cfd: 'ETHUSD', mini: 'ETH1', micro: 'MET1', alertPoints: 8 },
 ];
 
 /** The pair a symbol belongs to, on either side ("NAS100", "NQ1!", "MGC1" …). */

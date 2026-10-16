@@ -5,7 +5,7 @@ import { Button } from '../../components/ui/Button.tsx';
 import { Field, Input } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
-import { currentLocale, formatAmount, formatNumber, formatPrice, formatUnits } from '../../lib/format.ts';
+import { currentLocale, formatAmount, formatNumber, formatPrice, formatSize, formatUnits } from '../../lib/format.ts';
 import { useMedia } from '../../lib/media.ts';
 import { InstrumentBadge } from '../../components/ui/InstrumentBadge.tsx';
 import { instrumentOptions } from '../../lib/instruments.ts';
@@ -253,7 +253,7 @@ export function TradeTable({
               <span className="flex flex-wrap items-center gap-2 text-xs text-dim">
                 {t.partial ? (
                   <span className={`inline-flex items-center rounded-full border px-2 py-0.5 font-sans text-[11px] font-bold whitespace-nowrap ${BADGE.open}`}>
-                    {labels.partial(formatNumber(t.closedSize), formatNumber(t.positionSize))}
+                    {labels.partial(formatSize(t.closedSize), formatSize(t.positionSize))}
                   </span>
                 ) : (
                   <OutcomeBadge outcome={outcome} />
@@ -400,7 +400,7 @@ export function TradeTable({
                   <div className="flex flex-col items-start gap-1">
                     {t.partial ? (
                       <span className={`inline-flex items-center rounded-full border px-2 py-0.5 font-sans text-[11px] font-bold whitespace-nowrap ${BADGE.open}`}>
-                        {labels.partial(formatNumber(t.closedSize), formatNumber(t.positionSize))}
+                        {labels.partial(formatSize(t.closedSize), formatSize(t.positionSize))}
                       </span>
                     ) : (
                       <OutcomeBadge outcome={outcome} />

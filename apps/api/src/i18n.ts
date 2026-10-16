@@ -140,6 +140,9 @@ const pl = {
   strategyRulesLimit: 'Strategia może mieć najwyżej {max} argumentów',
   strategyRulesOrder: 'Podaj wszystkie argumenty strategii w nowej kolejności',
   accountMarketMismatch: 'Konto {account} jest na {market}, a {symbol} to inny rynek',
+  marketCfd: 'CFD',
+  marketFutures: 'futures',
+  marketCrypto: 'giełdzie krypto',
   accountRequired: 'Przypisz transakcję do konta. Nie masz jeszcze konta? Dodaj je w Ustawienia → Konta handlowe.',
   mt5UnsupportedFile: 'Nie rozpoznano pliku. Wybierz raport historii z MT5 (HTML lub Open XML .xlsx) albo Position History lub Performance z Tradovate (CSV)',
   mt5NoPositions: 'W pliku nie ma zamkniętych pozycji. Sprawdź, czy wybrano okres z transakcjami',
@@ -285,6 +288,9 @@ const en: Record<MessageKey, string> = {
   strategyRulesLimit: 'A strategy can have at most {max} rules',
   strategyRulesOrder: 'Send all of the strategy\'s rules in their new order',
   accountMarketMismatch: 'The {account} account trades {market}, and {symbol} is another market',
+  marketCfd: 'CFDs',
+  marketFutures: 'futures',
+  marketCrypto: 'on a crypto exchange',
   accountRequired: 'Assign the trade to an account. No account yet? Add one in Settings → Trading accounts.',
   mt5UnsupportedFile: 'File not recognised. Choose an MT5 history report (HTML or Open XML .xlsx) or a Tradovate Position History or Performance export (CSV)',
   mt5NoPositions: 'The file has no closed positions. Check that the chosen period has trades',
@@ -299,6 +305,10 @@ const MESSAGES: Record<Language, Record<MessageKey, string>> = { pl, en };
 export const isMessageKey = (value: string): value is MessageKey => value in pl;
 
 /** Message in the given language, with {placeholders} filled from `params`. */
+/** A market's name inside a sentence ("the account trades {market}"). */
+export const marketName = (language: Language, market: 'cfd' | 'futures' | 'crypto') =>
+  t(language, market === 'cfd' ? 'marketCfd' : market === 'futures' ? 'marketFutures' : 'marketCrypto');
+
 export function t(language: Language, key: MessageKey, params: Params = {}): string {
   return MESSAGES[language][key].replace(/\{(\w+)\}/g, (whole, name: string) => (name in params ? String(params[name]) : whole));
 }

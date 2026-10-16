@@ -1,4 +1,4 @@
-import type { Direction, Language, MeasureUnit, TradeOutcome } from './enums.ts';
+import type { Direction, Language, Market, MeasureUnit, TradeOutcome } from './enums.ts';
 
 export interface InstrumentSpec {
   measureUnit: MeasureUnit;
@@ -221,8 +221,8 @@ export function exitReason(trade: {
   return null;
 }
 
-/** The smallest size step: 0.01 lot for CFD, one contract for futures. */
-export const sizeStep = (market: 'cfd' | 'futures') => (market === 'futures' ? 1 : 0.01);
+/** The smallest size step: 0.01 lot for CFD, one contract for futures, 0.001 coin on a crypto exchange. */
+export const sizeStep = (market: Market) => (market === 'futures' ? 1 : market === 'crypto' ? 0.001 : 0.01);
 
 /** True when `size` is a whole number of steps (0.07 lot yes, 0.075 no). */
 export const isWholeSteps = (size: number, step: number) => Math.abs(size / step - Math.round(size / step)) < 1e-6;

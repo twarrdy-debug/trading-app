@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Ether: the faceted diamond on a blue disc, drawn for this app in the style of the flags. -->
+  <circle cx="256" cy="256" r="256" fill="#627eea"/>
+  <path fill="#fff" fill-opacity=".6" d="M256 84v128l108 48z"/>
+  <path fill="#fff" d="M256 84 148 260l108-48z"/>
+  <path fill="#fff" fill-opacity=".6" d="M256 343v85l108-152z"/>
+  <path fill="#fff" d="M256 428v-85l-108-67z"/>
+  <path fill="#fff" fill-opacity=".2" d="m256 323 108-63-108-48z"/>
+  <path fill="#fff" fill-opacity=".6" d="m148 260 108 63V212z"/>
+</svg>

@@ -61,7 +61,7 @@ export function AdminInstruments() {
                       </div>
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap">
-                      {i.market === 'cfd' ? 'CFD' : 'Futures'} · {t.assetClasses[i.assetClass] ?? i.assetClass}
+                      {i.market === 'cfd' ? 'CFD' : i.market === 'futures' ? 'Futures' : all.accounts.crypto} · {t.assetClasses[i.assetClass] ?? i.assetClass}
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap">
                       {all.units.name[i.measureUnit]} · <span className="font-mono">{formatPrice(i.unitSize)}</span>
@@ -152,6 +152,7 @@ function InstrumentForm({ instrument, onDone }: { instrument?: AdminInstrument; 
               options={[
                 { value: 'cfd', label: 'CFD' },
                 { value: 'futures', label: 'Futures' },
+                { value: 'crypto', label: all.accounts.crypto },
               ]}
             />
           </Field>

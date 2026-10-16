@@ -41,12 +41,12 @@ interface WelcomeCopy {
 export const WELCOME: Record<Language, WelcomeCopy> = {
   pl: {
     subject: 'Witaj w AlphaLogFX',
-    eyebrow: 'Dla day traderów CFD i futures',
+    eyebrow: 'Dla day traderów CFD, futures i krypto',
     title: (name) => `Cześć ${name}, wznieś swój trading na wyższy poziom`,
     lead: 'Twoje konto jest aktywne. Dziennik z analizą, monitor dyscypliny, kalkulator CFD → futures i analiza rynku w jednej aplikacji. Ty skupiasz się na rynku, a aplikacja liczy wyniki i pilnuje Twoich limitów.',
     button: 'Otwórz aplikację',
     facts: [
-      { value: 'CFD i futures', label: 'forex, złoto, indeksy' },
+      { value: 'CFD, futures i krypto', label: 'forex, złoto, indeksy, BTC i ETH' },
       { value: 'Pips · punkt · tick', label: 'liczone automatycznie' },
       { value: 'MT5 i Tradovate', label: 'cała historia z jednego pliku' },
     ],
@@ -91,7 +91,7 @@ export const WELCOME: Record<Language, WelcomeCopy> = {
         title: 'Sygnał z CFD od razu na futures',
         text: 'Dostajesz poziomy na US100 albo XAUUSD, a grasz NQ lub GC? Kalkulator przeliczy wejście, stop loss i take profity na kontrakt futures według aktualnej różnicy cen.',
         points: [
-          'US100 → NQ/MNQ, US500 → ES/MES, US30 → YM/MYM, XAUUSD → GC/MGC',
+          'US100 → NQ/MNQ, US500 → ES/MES, US30 → YM/MYM, XAUUSD → GC/MGC, BTCUSD → BTC/MBT, ETHUSD → ETH/MET',
           'Różnica mierzona co 15 minut, z alertem, gdy się zmieni',
           'Ceny zaokrąglone do ticka, ryzyko i zysk w dolarach na kontrakt',
         ],
@@ -132,12 +132,12 @@ export const WELCOME: Record<Language, WelcomeCopy> = {
   },
   en: {
     subject: 'Welcome to AlphaLogFX',
-    eyebrow: 'For CFD and futures day traders',
+    eyebrow: 'For CFD, futures and crypto day traders',
     title: (name) => `Hi ${name}, take your trading to the next level`,
     lead: 'Your account is active. A journal with analytics, a discipline monitor, a CFD → futures calculator and market analysis in one app. You focus on the market; the app does the maths and keeps you within your limits.',
     button: 'Open the app',
     facts: [
-      { value: 'CFD and futures', label: 'forex, gold, indices' },
+      { value: 'CFD, futures and crypto', label: 'forex, gold, indices, BTC and ETH' },
       { value: 'Pip · point · tick', label: 'worked out for you' },
       { value: 'MT5 and Tradovate', label: 'your whole history from one file' },
     ],
@@ -182,7 +182,7 @@ export const WELCOME: Record<Language, WelcomeCopy> = {
         title: 'A CFD signal straight onto futures',
         text: 'Getting levels for US100 or XAUUSD but trading NQ or GC? The calculator converts the entry, stop loss and take profits to the futures contract at the current price difference.',
         points: [
-          'US100 → NQ/MNQ, US500 → ES/MES, US30 → YM/MYM, XAUUSD → GC/MGC',
+          'US100 → NQ/MNQ, US500 → ES/MES, US30 → YM/MYM, XAUUSD → GC/MGC, BTCUSD → BTC/MBT, ETHUSD → ETH/MET',
           'The difference measured every 15 minutes, with an alert when it moves',
           'Prices rounded to the tick, risk and reward in dollars per contract',
         ],

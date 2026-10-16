@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { DISCIPLINE_CHECKS, toLocalDate, zonedTimeToUtc, type EmailSubscription, type Language, type WhatsNewInput } from '@trading/shared';
+import { coinOf, DISCIPLINE_CHECKS, toLocalDate, zonedTimeToUtc, type EmailSubscription, type Language, type WhatsNewInput } from '@trading/shared';
 import { and, eq, gte, inArray, isNotNull, isNull, lt } from 'drizzle-orm';
 import type { DB } from '../db/client.ts';
 import { economicEvents, emailLog, favoriteInstruments, instrumentCurrencies, trades, users } from '../db/schema.ts';
@@ -239,7 +239,7 @@ export async function buildDaySummary(db: DB, env: Env, user: CurrentUser, now =
         long: r.direction === 'long',
         side: r.direction === 'long' ? 'Long' : 'Short',
         symbol: r.instrument.symbol,
-        detail: `${size} ${UNIT[l][r.instrument.market === 'futures' ? 'futures' : 'cfd']} · ${price(r.entryPrice)} → ${price(r.exitPrice)}`,
+        detail: `${size} ${r.instrument.market === 'crypto' ? coinOf(r.instrument.symbol) : UNIT[l][r.instrument.market === 'futures' ? 'futures' : 'cfd']} · ${price(r.entryPrice)} → ${price(r.exitPrice)}`,
         pnl: r.pnlAccount == null ? '–' : money(l, r.pnlAccount, currency),
         win: r.outcome === 'win' ? true : r.outcome === 'loss' ? false : null,
         r: r.rMultiple == null ? '' : `${signed(l, r.rMultiple)}R`,

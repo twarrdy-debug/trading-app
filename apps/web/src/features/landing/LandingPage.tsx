@@ -13,7 +13,7 @@ import { NavIcon, type NavIconName } from '../../layout/NavIcon.tsx';
 import { SAMPLE_CURVE } from '../dashboard/DashboardPreview.tsx';
 
 /** Instruments in the moving strip under the hero (logos are drawn for the app, see InstrumentBadge). */
-const STRIP = ['EURUSD', 'XAUUSD', 'US100', 'NQ1', 'GBPUSD', 'GC1', 'USDJPY', 'US500', 'ES1', 'AUDUSD', 'US30', 'YM1', 'USDCAD', 'MNQ1'];
+const STRIP = ['EURUSD', 'XAUUSD', 'US100', 'NQ1', 'BTCUSD', 'GBPUSD', 'GC1', 'USDJPY', 'ETHUSD', 'US500', 'ES1', 'AUDUSD', 'MBT1', 'US30', 'YM1', 'USDCAD', 'ETHUSDT', 'MNQ1'];
 
 const reducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 

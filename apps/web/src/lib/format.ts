@@ -35,6 +35,9 @@ export const formatAmount = (value: number | null | undefined, currency: string 
 /** The currency code shown next to amounts; empty for USD (its amounts carry $ instead). */
 export const currencyLabel = (currency: string | null | undefined) => (currency && currency !== 'USD' ? currency : '');
 
+/** A position size: up to four decimals, so 0.005 BTC on a crypto exchange stays readable. */
+export const formatSize = (value: number | null | undefined) => (value == null ? '—' : number(0, 4).format(value));
+
 export const formatPrice = (value: number | null | undefined) => (value == null ? '—' : number(0, 6).format(value));
 
 export const formatNumber = (value: number | null | undefined, signed = false) =>

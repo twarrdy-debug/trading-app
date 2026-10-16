@@ -63,7 +63,7 @@ describe('MT5 report', () => {
 });
 
 describe('broker symbols', () => {
-  const instruments = ['XAUUSD', 'US100', 'US500', 'US30', 'NQ1', 'MNQ1', 'GC1'].map((symbol) => ({ symbol }));
+  const instruments = ['XAUUSD', 'US100', 'US500', 'US30', 'NQ1', 'MNQ1', 'GC1', 'BTCUSD', 'ETHUSD', 'BTC1', 'MBT1', 'ETH1', 'MET1', 'BTCUSDT', 'ETHUSDT'].map((symbol) => ({ symbol }));
   it.each([
     ['XAUUSD', 'XAUUSD'],
     ['XAUUSDm', 'XAUUSD'],
@@ -75,6 +75,19 @@ describe('broker symbols', () => {
     ['DJ30.', 'US30'],
     ['NQZ26', 'NQ1'],
     ['MNQH7', 'MNQ1'],
+    // Crypto CFDs, CME contracts and exchange perpetuals in the ways platforms write them.
+    ['BTCUSDm', 'BTCUSD'],
+    ['Bitcoin', 'BTCUSD'],
+    ['ETHUSD.cash', 'ETHUSD'],
+    ['MBTZ6', 'MBT1'],
+    ['BTCZ6', 'BTC1'],
+    ['METF7', 'MET1'],
+    ['ETHZ6', 'ETH1'],
+    ['BTCUSDT', 'BTCUSDT'],
+    ['BTCUSDT.P', 'BTCUSDT'],
+    ['BTC-USDT-SWAP', 'BTCUSDT'],
+    ['ETH/USDT:USDT', 'ETHUSDT'],
+    ['ETHUSDTPERP', 'ETHUSDT'],
   ])('%s → %s', (raw, symbol) => {
     expect(matchBrokerSymbol(raw, instruments)?.symbol).toBe(symbol);
   });

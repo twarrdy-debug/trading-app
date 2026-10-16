@@ -1,18 +1,22 @@
 import { useState } from 'react';
 import { Input, toggleClass } from '../../components/ui/Field.tsx';
 import { useT } from '../../i18n/index.tsx';
-import { formatNumber, parseDecimal, toInputNumber } from '../../lib/format.ts';
+import { formatSize, parseDecimal, toInputNumber } from '../../lib/format.ts';
 
 /** One-click sizes. */
 const CFD_SIZES = [0.01, 0.1, 0.5, 1];
 const FUTURES_SIZES = [1, 2, 3, 5];
+/** Crypto exchanges size in coins, down to 0.001. */
+const CRYPTO_SIZES = [0.001, 0.01, 0.1, 1];
 
 /**
  * Step of the "+" button, from the size chosen before any "+" clicks: under 0.1 lot → 0.01, under
- * 1 → 0.1, from 1 → 1 (futures always 1). So 0.05 grows by 0.01, 0.3 by 0.1 and 2 by 1.
+ * 1 → 0.1, from 1 → 1 (futures always 1; on a crypto exchange under 0.01 coin → 0.001). So 0.05
+ * grows by 0.01, 0.3 by 0.1 and 2 by 1.
  */
-const plusStep = (base: number, futures: boolean) => (futures || base >= 1 ? 1 : base >= 0.1 ? 0.1 : 0.01);
-const round2 = (n: number) => Math.round(n * 100) / 100;
+const plusStep = (base: number, futures: boolean, crypto: boolean) =>
+  futures || base >= 1 ? 1 : base >= 0.1 ? 0.1 : base >= 0.01 || !crypto ? 0.01 : 0.001;
+const round4 = (n: number) => Math.round(n * 10_000) / 10_000;
 
 export type RiskMode = 'pct' | 'money';
 
@@ -20,6 +24,8 @@ interface Props {
   value: string;
   onChange: (text: string) => void;
   isFutures: boolean;
+  /** A crypto exchange: sizes in coins from 0.001. */
+  isCrypto?: boolean;
   unitLabel: string;
   /** The risk helper: risk typed as % of the balance or an amount, and the size it gives. */
   riskText: string;
@@ -36,7 +42,7 @@ interface Props {
  * The position size: typed, or from presets, ×2 and "+step"; under it the risk helper, which fills
  * the size from the risk and the stop loss. The size field stays the one source of truth.
  */
-export function PositionSize({ value, onChange, isFutures, unitLabel, riskText, onRiskText, riskMode, onRiskMode, sizedFromRisk, riskBlocker, currencySymbol }: Props) {
+export function PositionSize({ value, onChange, isFutures, isCrypto = false, unitLabel, riskText, onRiskText, riskMode, onRiskMode, sizedFromRisk, riskBlocker, currencySymbol }: Props) {
   const t = useT().composer;
   const current = parseDecimal(value) ?? null;
   // The size the "+" step is based on; "+" clicks leave it as it was.
@@ -45,7 +51,7 @@ export function PositionSize({ value, onChange, isFutures, unitLabel, riskText, 
     onChange(toInputNumber(n));
     if (!keepBase) setBase(n);
   };
-  const step = plusStep(base ?? current ?? 0, isFutures);
+  const step = plusStep(base ?? current ?? 0, isFutures, isCrypto);
   const chip = `h-11 min-w-12 px-3 font-mono text-[13px] disabled:opacity-40 ${toggleClass(false)}`;
 
   return (
@@ -61,33 +67,33 @@ export function PositionSize({ value, onChange, isFutures, unitLabel, riskText, 
               onChange(text);
               setBase(parseDecimal(text) ?? null);
             }}
-            placeholder={isFutures ? '1' : '0,10'}
+            placeholder={isFutures ? '1' : isCrypto ? '0,010' : '0,10'}
             className="pr-14 text-base font-semibold"
           />
           <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs text-dim">{unitLabel}</span>
         </div>
         <div role="group" aria-label={t.quickSize} className="flex gap-1.5">
-          {(isFutures ? FUTURES_SIZES : CFD_SIZES).map((preset) => {
+          {(isFutures ? FUTURES_SIZES : isCrypto ? CRYPTO_SIZES : CFD_SIZES).map((preset) => {
             const active = current === preset;
             return (
               <button key={preset} type="button" aria-pressed={active} onClick={() => set(preset)} className={`h-11 min-w-12 px-3 font-mono text-[13px] ${toggleClass(active)}`}>
-                {formatNumber(preset)}
+                {formatSize(preset)}
               </button>
             );
           })}
         </div>
-        <button type="button" aria-label={t.double} title={t.double} disabled={!current} onClick={() => current && set(round2(current * 2))} className={chip}>
+        <button type="button" aria-label={t.double} title={t.double} disabled={!current} onClick={() => current && set(round4(current * 2))} className={chip}>
           ×2
         </button>
         <button
           type="button"
-          aria-label={t.addStep(formatNumber(step))}
-          title={t.addStep(formatNumber(step))}
+          aria-label={t.addStep(formatSize(step))}
+          title={t.addStep(formatSize(step))}
           disabled={!current}
-          onClick={() => current && set(round2(current + step), true)}
+          onClick={() => current && set(round4(current + step), true)}
           className={chip}
         >
-          +{formatNumber(step)}
+          +{formatSize(step)}
         </button>
       </div>
 
@@ -118,7 +124,7 @@ export function PositionSize({ value, onChange, isFutures, unitLabel, riskText, 
         </div>
         <span aria-hidden className="text-dim">→</span>
         <span aria-live="polite" className={`font-mono ${sizedFromRisk != null ? 'font-semibold' : 'text-dim'}`}>
-          {sizedFromRisk != null ? t.riskGives(formatNumber(sizedFromRisk), unitLabel) : riskBlocker}
+          {sizedFromRisk != null ? t.riskGives(formatSize(sizedFromRisk), unitLabel) : riskBlocker}
         </span>
         <button
           type="button"

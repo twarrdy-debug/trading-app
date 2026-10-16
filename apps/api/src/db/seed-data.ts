@@ -42,7 +42,7 @@ const forex = (symbol: string, name: string): CreateInstrumentInput => {
 };
 
 // Gold futures count in pips like XAUUSD (their 0.10 tick is the gold pip); the others in ticks.
-const future = (symbol: string, name: string, assetClass: 'index' | 'metal', unitSize: number, unitValue: number): CreateInstrumentInput => ({
+const future = (symbol: string, name: string, assetClass: 'index' | 'metal' | 'crypto', unitSize: number, unitValue: number): CreateInstrumentInput => ({
   symbol,
   name,
   market: 'futures',
@@ -74,6 +74,19 @@ export const DEFAULT_INSTRUMENTS: CreateInstrumentInput[] = [
   forex('AUDUSD', 'Australian Dollar / US Dollar'),
   forex('USDCAD', 'US Dollar / Canadian Dollar'),
   forex('NZDUSD', 'New Zealand Dollar / US Dollar'),
+  // Crypto CFDs: 1 lot = 1 coin, so a 1 USD move is 1 USD per lot (brokers differ; admins can adjust).
+  cfd('BTCUSD', 'Bitcoin / USD CFD', { assetClass: 'crypto' }),
+  cfd('ETHUSD', 'Ethereum / USD CFD', { assetClass: 'crypto' }),
+  // CME: bitcoin 5 BTC with a 5 USD tick (25 USD), micro 0.1 BTC (0.50 USD); ether 50 ETH with a
+  // 0.50 tick (25 USD), micro 0.1 ETH (0.05 USD).
+  future('BTC1', 'Bitcoin (CME)', 'crypto', 5, 25),
+  future('MBT1', 'Bitcoin Micro (CME)', 'crypto', 5, 0.5),
+  future('ETH1', 'Ether (CME)', 'crypto', 0.5, 25),
+  future('MET1', 'Ether Micro (CME)', 'crypto', 0.5, 0.05),
+  // Exchange perpetuals (Binance, Bybit, OKX…): sized in coins, 1 USD per coin per 1 USD move.
+  // Settled in USDT, counted as USD.
+  { ...cfd('BTCUSDT', 'Bitcoin perpetual (USDT)', { assetClass: 'crypto' }), market: 'crypto' },
+  { ...cfd('ETHUSDT', 'Ethereum perpetual (USDT)', { assetClass: 'crypto' }), market: 'crypto' },
 ];
 
 const RENAMED_INSTRUMENTS = [

@@ -1,4 +1,5 @@
 import { toLocalDate, type CreateAccountInput, type UpdateAccountInput } from '@trading/shared';
+import { marketName } from '../i18n.ts';
 import { and, asc, count, eq, inArray, isNotNull, ne } from 'drizzle-orm';
 import type { DB } from '../db/client.ts';
 import { instruments, tradeScreenshots, tradingAccounts, trades } from '../db/schema.ts';
@@ -95,7 +96,7 @@ export async function deleteAccount(
         .innerJoin(instruments, eq(instruments.id, trades.instrumentId))
         .where(and(own, ne(instruments.market, target.market)))
         .limit(1);
-      if (other) throw badRequest('accountMarketMismatch', { account: target.name, market: target.market === 'cfd' ? 'CFD' : 'futures', symbol: other.symbol });
+      if (other) throw badRequest('accountMarketMismatch', { account: target.name, market: marketName(user.language, target.market), symbol: other.symbol });
     }
   }
   return db.transaction(async (tx) => {

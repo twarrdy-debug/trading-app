@@ -2,7 +2,7 @@ import { isWholeSteps, type PartResult } from '@trading/shared';
 import { DateTimePicker } from '../../components/ui/DateTimePicker.tsx';
 import { Input, toggleClass } from '../../components/ui/Field.tsx';
 import { useT } from '../../i18n/index.tsx';
-import { formatNumber, parseDecimal, toInputNumber } from '../../lib/format.ts';
+import { formatSize, parseDecimal, toInputNumber } from '../../lib/format.ts';
 
 /** One part of the position as edited. Without a split there is one part for the whole position. */
 export interface PartDraft {
@@ -170,7 +170,7 @@ export function PartsEditor({ parts, onChange, total, step, unitLabel, isFutures
         </button>
         {left != null && (
           <span className={`ml-1 text-xs ${Math.abs(left) < 1e-6 ? 'text-buy' : 'text-warn'}`} aria-live="polite">
-            {Math.abs(left) < 1e-6 ? `✓ ${t.allSplit}` : left > 0 ? t.leftToSplit(formatNumber(left), unitLabel) : t.overSplit(formatNumber(-left), unitLabel)}
+            {Math.abs(left) < 1e-6 ? `✓ ${t.allSplit}` : left > 0 ? t.leftToSplit(formatSize(left), unitLabel) : t.overSplit(formatSize(-left), unitLabel)}
           </span>
         )}
       </div>

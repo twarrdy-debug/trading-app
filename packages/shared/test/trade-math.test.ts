@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeTradeMetrics, detectDirection, exitReason, tradeOutcome, formatDayLabel, marginQuote, notionalQuote, riskQuote, parseSignal, sizeForRisk, toLocalDate, type InstrumentSpec } from '../src/index.ts';
+import { canSplit, coinOf, computeTradeMetrics, detectDirection, exitReason, tradeOutcome, formatDayLabel, marginQuote, notionalQuote, riskQuote, parseSignal, sizeForRisk, sizeStep, toLocalDate, type InstrumentSpec } from '../src/index.ts';
 
 const XAUUSD: InstrumentSpec = { measureUnit: 'pip', unitSize: 0.1, unitValue: 10 };
 const NQ: InstrumentSpec = { measureUnit: 'tick', unitSize: 0.25, unitValue: 5 };
@@ -177,5 +177,30 @@ describe('sizeForRisk', () => {
     expect(sizeForRisk(NQ, 20000, 19990, 500, 1)).toBe(2);
     expect(sizeForRisk(NQ, 20000, 19990, 100, 1)).toBeNull();
     expect(sizeForRisk(XAUUSD, 4000, null, 500, 0.01)).toBeNull();
+  });
+});
+
+describe('crypto', () => {
+  // A perpetual on an exchange: 1 USD per coin per 1 USD move; CME micro bitcoin: 0.50 USD per 5 USD tick.
+  const PERP: InstrumentSpec = { measureUnit: 'point', unitSize: 1, unitValue: 1 };
+  const MBT: InstrumentSpec = { measureUnit: 'tick', unitSize: 5, unitValue: 0.5 };
+
+  it('sizes exchange positions in coins from 0.001', () => {
+    expect(sizeStep('crypto')).toBe(0.001);
+    expect(sizeStep('cfd')).toBe(0.01);
+    expect(sizeStep('futures')).toBe(1);
+    expect(canSplit(0.002, sizeStep('crypto'))).toBe(true);
+    expect(canSplit(0.001, sizeStep('crypto'))).toBe(false);
+    expect(coinOf('BTCUSDT')).toBe('BTC');
+    expect(coinOf('ETHUSD')).toBe('ETH');
+  });
+
+  it('counts results and risk per coin and per contract', () => {
+    const perp = computeTradeMetrics(PERP, { direction: 'long', entryPrice: 60_000, exitPrice: 61_250, stopLoss: 59_500, positionSize: 0.05 });
+    expect(perp).toMatchObject({ resultUnits: 1250, pnlQuote: 62.5, rMultiple: 2.5 });
+    const micro = computeTradeMetrics(MBT, { direction: 'short', entryPrice: 61_000, exitPrice: 60_500, stopLoss: 61_200, positionSize: 2 });
+    expect(micro).toMatchObject({ resultUnits: 100, pnlQuote: 100 });
+    // Risk 25 USD at a 500 USD stop: 0.05 BTC.
+    expect(sizeForRisk(PERP, 60_000, 59_500, 25, sizeStep('crypto'))).toBe(0.05);
   });
 });

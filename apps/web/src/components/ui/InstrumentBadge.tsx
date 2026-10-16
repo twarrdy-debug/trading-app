@@ -1,10 +1,13 @@
 /**
  * Instrument logos in the circular style TradingView uses: two overlapping flags for a currency pair,
- * the US flag for US indices, a gold disc for gold. Files are in public/logos (see its README).
+ * the US flag for US indices, a gold disc for gold, the coin for bitcoin and ether (CFD, CME and
+ * exchanges). Files are in public/logos (see its README).
  */
 const CURRENCY_FLAGS: Record<string, string> = { EUR: 'eu', GBP: 'gb', USD: 'us', JPY: 'jp', CHF: 'ch', AUD: 'au', NZD: 'nz', CAD: 'ca', PLN: 'pl' };
 const GOLD = /^(XAU|M?GC\d)/;
 const US_INDEX = /^(US100|US500|US30|M?NQ\d|M?ES\d|M?YM\d)/;
+const BITCOIN = /^(BTC|XBT|MBT\d)/;
+const ETHER = /^(ETH|MET\d)/;
 
 const flag = (code: string) => `/logos/flags/${code}.svg`;
 
@@ -14,6 +17,8 @@ const isForex = (symbol: string) => /^[A-Z]{6}$/.test(symbol) && CURRENCY_FLAGS[
 function logoFiles(symbol: string): string[] {
   if (isForex(symbol)) return [flag(CURRENCY_FLAGS[symbol.slice(0, 3)]!), flag(CURRENCY_FLAGS[symbol.slice(3)]!)];
   if (GOLD.test(symbol)) return ['/logos/gold.svg'];
+  if (BITCOIN.test(symbol)) return ['/logos/btc.svg'];
+  if (ETHER.test(symbol)) return ['/logos/eth.svg'];
   if (US_INDEX.test(symbol)) return [flag('us')];
   return [];
 }

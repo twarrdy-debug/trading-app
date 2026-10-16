@@ -58,6 +58,11 @@ export const CAPITAL_EPICS: Record<string, string> = {
   AUDUSD: 'AUDUSD',
   USDCAD: 'USDCAD',
   NZDUSD: 'NZDUSD',
+  BTCUSD: 'BTCUSD',
+  ETHUSD: 'ETHUSD',
+  // Exchange perpetuals follow the coin's price closely enough for levels: the CFD's candles.
+  BTCUSDT: 'BTCUSD',
+  ETHUSDT: 'ETHUSD',
 };
 
 /** Where an instrument's candles come from: its own epic, or (futures) the paired CFD's. */

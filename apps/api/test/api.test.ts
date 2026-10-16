@@ -116,7 +116,8 @@ describe('reference data', () => {
   it('seeds instruments, emotions and the admin user', async () => {
     expect(Object.keys(ids).sort()).toEqual(
       [
-        'AUDUSD', 'ES1', 'EURUSD', 'GBPUSD', 'GC1', 'MES1', 'MGC1', 'MNQ1', 'MYM1', 'NQ1', 'NZDUSD',
+        'AUDUSD', 'BTC1', 'BTCUSD', 'BTCUSDT', 'ES1', 'ETH1', 'ETHUSD', 'ETHUSDT', 'EURUSD', 'GBPUSD', 'GC1',
+        'MBT1', 'MES1', 'MET1', 'MGC1', 'MNQ1', 'MYM1', 'NQ1', 'NZDUSD',
         'US100', 'US30', 'US500', 'USDCAD', 'USDCHF', 'USDJPY', 'XAUUSD', 'YM1',
       ],
     );
@@ -443,7 +444,7 @@ describe('CFD/futures difference measurements', () => {
   const setQuotes = (gold: [number, number], index: [number, number], age = { cfd: 1, futures: 2 }) => {
     quoteBook.set('XAU', { price: gold[0], time: minutesAgo(age.cfd) });
     quoteBook.set('GC=F', { price: gold[1], time: minutesAgo(age.futures) });
-    for (const [cfd, fut] of [['^NDX', 'NQ=F'], ['^GSPC', 'ES=F'], ['^DJI', 'YM=F']] as const) {
+    for (const [cfd, fut] of [['^NDX', 'NQ=F'], ['^GSPC', 'ES=F'], ['^DJI', 'YM=F'], ['BTC-USD', 'BTC=F'], ['ETH-USD', 'ETH=F']] as const) {
       quoteBook.set(cfd, { price: index[0], time: minutesAgo(age.cfd) });
       quoteBook.set(fut, { price: index[1], time: minutesAgo(age.futures) });
     }
@@ -1146,6 +1147,33 @@ describe('Tradovate import', () => {
   });
 });
 
+describe('crypto', () => {
+  it('trades coins on an exchange account, contracts on CME and lots on a CFD', async () => {
+    const user = (await post('/educators', { displayName: 'Crypto trader' })).json();
+    const headers = { 'x-user-id': user.id };
+    const account = (
+      await app.inject({ method: 'POST', url: '/accounts', headers, payload: { name: 'Bybit prop', type: 'prop', market: 'crypto', size: 10_000, maxDrawdownPct: 6, leverage: 100 } })
+    ).json();
+    expect(account).toMatchObject({ market: 'crypto' });
+
+    // 0.005 BTC long, +1250 USD per coin: +6.25 USD.
+    const perp = await post('/trades', { instrumentId: ids.BTCUSDT, accountId: account.id, direction: 'long', openedAt: '2026-10-12T10:00:00Z', closedAt: '2026-10-12T11:00:00Z', entryPrice: 60_000, exitPrice: 61_250, stopLoss: 59_500, positionSize: 0.005 }, headers);
+    expect(perp.statusCode).toBe(201);
+    expect(perp.json().trade).toMatchObject({ pnlAccount: 6.25, rMultiple: 2.5, instrument: { symbol: 'BTCUSDT', market: 'crypto' } });
+
+    // The prop account takes only its own market, and says so in the user's language.
+    const cfd = await post('/trades', { instrumentId: ids.BTCUSD, accountId: account.id, direction: 'long', openedAt: '2026-10-12T12:00:00Z', entryPrice: 60_000, positionSize: 1 }, headers);
+    expect(cfd.statusCode).toBe(400);
+    expect(cfd.json().error).toContain('giełdzie krypto');
+
+    // CME micro bitcoin: whole contracts, 0.50 USD per 5 USD tick.
+    const live = (await app.inject({ method: 'POST', url: '/accounts', headers, payload: { name: 'Live', type: 'live', size: 10_000 } })).json();
+    const micro = await post('/trades', { instrumentId: ids.MBT1, accountId: live.id, direction: 'short', openedAt: '2026-10-12T13:00:00Z', closedAt: '2026-10-12T14:00:00Z', entryPrice: 61_000, exitPrice: 60_500, positionSize: 2 }, headers);
+    expect(micro.json().trade).toMatchObject({ resultUnits: 100, pnlAccount: 100 });
+    expect((await post('/trades', { instrumentId: ids.MBT1, accountId: live.id, direction: 'short', openedAt: '2026-10-12T15:00:00Z', entryPrice: 61_000, positionSize: 0.5 }, headers)).statusCode).toBe(400);
+  });
+});
+
 describe('dashboard stats', () => {
   it('reports days with counts and discipline, and win/loss/breakeven streaks', async () => {
     const user = (await post('/educators', { displayName: 'Dashboard trader' })).json();
@@ -1438,7 +1466,7 @@ describe('admin panel', () => {
     const system = (await app.inject({ url: '/admin/system' })).json();
     expect(system.database.migrations).toBeGreaterThan(15);
     expect(system.mail).toMatchObject({ configured: false });
-    expect(system.basis.pairs).toHaveLength(4);
+    expect(system.basis.pairs).toHaveLength(6);
   });
 
   it('edits instruments and hides inactive ones', async () => {

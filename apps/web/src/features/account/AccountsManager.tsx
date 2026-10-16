@@ -233,7 +233,8 @@ function AccountForm({ account, currency, onDone }: { account?: AccountSummary; 
 
   const prop = type === 'prop';
   // Leverage only matters for CFD: live accounts and prop accounts on CFD.
-  const showLeverage = !prop || market === 'cfd';
+  // Futures margins are set by the exchange; CFD brokers and crypto exchanges use leverage.
+  const showLeverage = !prop || market !== 'futures';
   const sizeValue = parseDecimal(size);
 
   const submit = () => {
@@ -297,6 +298,7 @@ function AccountForm({ account, currency, onDone }: { account?: AccountSummary; 
               options={[
                 { value: 'cfd', label: t.cfd },
                 { value: 'futures', label: t.futures },
+                { value: 'crypto', label: t.crypto },
               ]}
             />
           </>

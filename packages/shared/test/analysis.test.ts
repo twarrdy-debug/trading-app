@@ -114,7 +114,11 @@ describe('analysis source', () => {
     expect(analysisSource('XAUUSD')).toEqual({ epic: 'GOLD', via: null });
     expect(analysisSource('MNQ1')).toEqual({ epic: 'US100', via: 'US100' });
     expect(analysisSource('GC1')).toEqual({ epic: 'GOLD', via: 'XAUUSD' });
-    expect(analysisSource('BTCUSD')).toBeNull();
+    expect(analysisSource('BTCUSD')).toEqual({ epic: 'BTCUSD', via: null });
+    // CME bitcoin from the CFD's candles; an exchange perpetual from the coin's CFD.
+    expect(analysisSource('MBT1')).toEqual({ epic: 'BTCUSD', via: 'BTCUSD' });
+    expect(analysisSource('ETHUSDT')).toEqual({ epic: 'ETHUSD', via: null });
+    expect(analysisSource('EURGBP')).toBeNull();
   });
 });
 

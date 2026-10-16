@@ -32,6 +32,9 @@ export const BASIS_SOURCES: Record<string, { cfd: QuoteSource[]; futures: QuoteS
   sp500: { cfd: [{ provider: 'capital', symbol: 'US500' }, { provider: 'yahoo', symbol: '^GSPC' }], futures: { provider: 'yahoo', symbol: 'ES=F' } },
   dow: { cfd: [{ provider: 'capital', symbol: 'US30' }, { provider: 'yahoo', symbol: '^DJI' }], futures: { provider: 'yahoo', symbol: 'YM=F' } },
   gold: { cfd: [{ provider: 'capital', symbol: 'GOLD' }, { provider: 'gold-api', symbol: 'XAU' }], futures: { provider: 'yahoo', symbol: 'GC=F' } },
+  // Crypto: the CFD from Capital.com, otherwise the spot price; CME futures from Yahoo.
+  bitcoin: { cfd: [{ provider: 'capital', symbol: 'BTCUSD' }, { provider: 'yahoo', symbol: 'BTC-USD' }], futures: { provider: 'yahoo', symbol: 'BTC=F' } },
+  ether: { cfd: [{ provider: 'capital', symbol: 'ETHUSD' }, { provider: 'yahoo', symbol: 'ETH-USD' }], futures: { provider: 'yahoo', symbol: 'ETH=F' } },
 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;

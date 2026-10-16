@@ -10,11 +10,12 @@ export function FavoriteInstrumentsPicker() {
   const t = all.instruments;
   const { data: instruments = [] } = useInstruments();
   const toggle = useToggleFavoriteInstrument();
-  // Forex pairs get their own row; the other CFDs and the futures follow.
+  // Forex pairs get their own row; the other CFDs and the futures follow; crypto together, whatever the market.
   const groups = [
     { key: 'forex', label: t.groups.forex, match: (i: Instrument) => i.market === 'cfd' && i.assetClass === 'forex' },
-    { key: 'cfd', label: t.groups.cfd, match: (i: Instrument) => i.market === 'cfd' && i.assetClass !== 'forex' },
-    { key: 'futures', label: t.groups.futures, match: (i: Instrument) => i.market === 'futures' },
+    { key: 'cfd', label: t.groups.cfd, match: (i: Instrument) => i.market === 'cfd' && i.assetClass !== 'forex' && i.assetClass !== 'crypto' },
+    { key: 'futures', label: t.groups.futures, match: (i: Instrument) => i.market === 'futures' && i.assetClass !== 'crypto' },
+    { key: 'crypto', label: t.groups.crypto, match: (i: Instrument) => i.assetClass === 'crypto' },
   ];
 
   return (

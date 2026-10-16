@@ -18,8 +18,11 @@ export type Direction = (typeof DIRECTIONS)[number];
 export const MEASURE_UNITS = ['pip', 'tick', 'point'] as const;
 export type MeasureUnit = (typeof MEASURE_UNITS)[number];
 
-/** CFD positions are sized in lots, futures in contracts. */
-export const MARKETS = ['cfd', 'futures'] as const;
+/**
+ * Where an instrument trades: a broker's CFD (lots), CME/COMEX futures (whole contracts), or a
+ * crypto exchange (`crypto`: spot or perpetual on Binance, Bybit, OKX…, sized in coins from 0.001).
+ */
+export const MARKETS = ['cfd', 'futures', 'crypto'] as const;
 export type Market = (typeof MARKETS)[number];
 
 export const ASSET_CLASSES = ['forex', 'metal', 'index', 'energy', 'crypto', 'other'] as const;

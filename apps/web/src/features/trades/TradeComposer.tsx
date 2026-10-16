@@ -15,6 +15,7 @@ import {
   type Direction,
   type TradePartInput,
   type TradeSource,
+  coinOf,
 } from '@trading/shared';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useState, type ClipboardEvent, type FormEvent, type ReactNode } from 'react';
@@ -38,7 +39,7 @@ import { DateTimePicker } from '../../components/ui/DateTimePicker.tsx';
 import { Field, Input, Segmented, Textarea, toggleClass } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
-import { formatAmount, formatDate, formatNumber, formatPrice, parseDecimal, toDateTimeLocal, toInputNumber } from '../../lib/format.ts';
+import { formatAmount, formatDate, formatNumber, formatPrice, formatSize, parseDecimal, toDateTimeLocal, toInputNumber } from '../../lib/format.ts';
 import { instrumentOptions } from '../../lib/instruments.ts';
 import { emptyPart, PartsEditor, partsTotal, ResultPicker, splitEqually, type PartDraft } from './PartsEditor.tsx';
 import { PositionSize, type RiskMode } from './PositionSize.tsx';
@@ -166,8 +167,10 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
   const instrument = instruments.find((i) => i.id === instrumentId);
   const isFutures = instrument?.market === 'futures';
   const isCfd = instrument?.market === 'cfd';
+  const isCrypto = instrument?.market === 'crypto';
   const step = sizeStep(instrument?.market ?? 'cfd');
-  const unitLabel = isFutures ? t.contractsShort : t.lotsShort;
+  // On a crypto exchange the size is in coins: "BTC" for BTCUSDT.
+  const unitLabel = isFutures ? t.contractsShort : isCrypto ? coinOf(instrument.symbol) : t.lotsShort;
   const tradeDate = openedAt ? toLocalDate(new Date(openedAt), user.settings.timezone) : undefined;
   const spread = useDailySpread(isCfd && advanced ? instrumentId : undefined, tradeDate);
   useEffect(() => {
@@ -234,7 +237,7 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
   const partPips = split && instrument && entryNum != null ? closedParts.map((r) => `${t.results[r.draft.result]} ${formatNumber(priceToUnits(instrument, direction, entryNum, r.price!), true)}`) : [];
   const riskMoney = instrument && entryNum != null && position != null && rate != null && stop != null ? (riskQuote(instrument, { entryPrice: entryNum, stopLoss: stop, positionSize: position }) ?? 0) * rate : null;
   const leverage = tradeAccount?.leverage ?? null;
-  const margin = isCfd && leverage && instrument && entryNum != null && position != null && rate != null ? marginQuote(instrument, entryNum, position, leverage) * rate : null;
+  const margin = (isCfd || isCrypto) && leverage && instrument && entryNum != null && position != null && rate != null ? marginQuote(instrument, entryNum, position, leverage) * rate : null;
   const session = openedAt ? tradeSession(new Date(openedAt)) : null;
   const strategy = strategies.find((s) => s.id === strategyId);
   const single = parts[0] ?? emptyPart();
@@ -288,9 +291,9 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
     if (position == null || position <= 0) return setErrors([t.errSize]);
     if (isFutures && !Number.isInteger(position)) return setErrors([f.errFutures]);
     if (split) {
-      if (Math.abs(partsTotal(parts) - position) > 1e-6) return setErrors([t.errSplit(formatNumber(position), unitLabel)]);
+      if (Math.abs(partsTotal(parts) - position) > 1e-6) return setErrors([t.errSplit(formatSize(position), unitLabel)]);
       const bad = resolved.findIndex((r) => r.size == null || r.size < step || !isWholeSteps(r.size, step));
-      if (bad >= 0) return setErrors([t.errPartStep(bad + 1, formatNumber(step))]);
+      if (bad >= 0) return setErrors([t.errPartStep(bad + 1, formatSize(step))]);
     }
     if (resolved.some((r) => r.draft.result === 'manual' && r.price == null)) return setErrors([t.errExitPrice]);
     if (source === 'educator' && !educatorId) return setErrors([f.errEducator]);
@@ -389,6 +392,7 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
             }
           }}
           isFutures={isFutures}
+          isCrypto={isCrypto}
           unitLabel={unitLabel}
           riskText={riskText}
           onRiskText={setRiskText}
@@ -448,7 +452,7 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
               </svg>
               {split ? t.splitOff : t.splitOn}
             </button>
-            {!split && !splittable && <span className="text-[11px] text-dim">{t.splitTooSmall(formatNumber(2 * step), unitLabel)}</span>}
+            {!split && !splittable && <span className="text-[11px] text-dim">{t.splitTooSmall(formatSize(2 * step), unitLabel)}</span>}
           </div>
         </div>
         {split && <PartsEditor parts={parts} onChange={setParts} total={position} step={step} unitLabel={unitLabel} isFutures={isFutures} tradeStop={stopText} />}
@@ -484,7 +488,7 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
             </>
           )}
         </Metric>
-        <Metric label={leverage != null && isCfd ? f.margin(leverage) : t.margin}>{margin != null ? formatAmount(margin, account, false) : '—'}</Metric>
+        <Metric label={leverage != null && (isCfd || isCrypto) ? f.margin(leverage) : t.margin}>{margin != null ? formatAmount(margin, account, false) : '—'}</Metric>
       </dl>
 
       {/* 6. Psychology and context, always in view. */}

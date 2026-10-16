@@ -40,7 +40,7 @@ import {
   users,
 } from '../db/schema.ts';
 import { badRequest, notFound } from '../errors.ts';
-import { t as tr } from '../i18n.ts';
+import { marketName, t as tr } from '../i18n.ts';
 import type { CurrentUser } from '../plugins/current-user.ts';
 import { accountBalanceCurve, accountLimits, accountOverview, accountTradeRows, balanceAt, getAccount, listAccounts } from './accounts.ts';
 import { getFxRate, supportsAutoRate, type FxProvider } from './fx.ts';
@@ -79,7 +79,7 @@ async function assertAccount(db: DB, user: CurrentUser, accountId: string | null
   if (account.market && account.market !== instrument.market) {
     throw badRequest('accountMarketMismatch', {
       account: account.name,
-      market: account.market === 'cfd' ? 'CFD' : 'futures',
+      market: marketName(user.language, account.market),
       symbol: instrument.symbol,
     });
   }
