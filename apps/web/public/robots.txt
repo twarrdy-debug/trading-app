@@ -1,0 +1,22 @@
+# Only the public page is meant for search results; the app is behind sign-in.
+User-agent: *
+Allow: /$
+Disallow: /api/
+Disallow: /files/
+Disallow: /dashboard
+Disallow: /dziennik
+Disallow: /transakcje
+Disallow: /statystyki
+Disallow: /kalkulator
+Disallow: /analiza
+Disallow: /kalendarz
+Disallow: /news
+Disallow: /ustawienia
+Disallow: /admin
+Disallow: /sygnaly
+Disallow: /aktywacja
+Disallow: /wypisz
+Disallow: /nowe-haslo
+Disallow: /reset-hasla
+
+Sitemap: https://www.alphalogfx.com/sitemap.xml

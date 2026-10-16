@@ -45,6 +45,7 @@ export const pl = {
     signals: 'Sygnały',
     basisChanged: 'Różnica CFD/futures się zmieniła',
     settings: 'Ustawienia',
+    help: 'Pomoc',
     collapse: 'Zwiń menu',
     expand: 'Rozwiń menu',
     openMenu: 'Otwórz menu',
@@ -354,6 +355,8 @@ export const pl = {
   },
   landing: {
     nav: { features: 'Funkcje', how: 'Jak zacząć', signIn: 'Zaloguj się' },
+    seoTitle: 'AlphaLogFX: dziennik tradingowy, monitor dyscypliny i kalkulator CFD → futures',
+    seoDescription: 'Dziennik tradingowy z analizą dla day traderów CFD i futures: pipsy, punkty, ticki i R liczone automatycznie, monitor dyscypliny, kalkulator CFD → futures, analiza rynku, kalendarz ekonomiczny i newsy na żywo. Import z MT5 i Tradovate.',
     eyebrow: 'Dla day traderów CFD i futures',
     title: 'Wznieś swój trading na wyższy poziom',
     lead: 'Dziennik z analizą, monitor dyscypliny i kalkulator CFD → futures w jednej aplikacji. Ty skupiasz się na rynku, a aplikacja liczy wyniki i pilnuje Twoich limitów.',

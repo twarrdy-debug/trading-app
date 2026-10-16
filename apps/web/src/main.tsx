@@ -1,23 +1,29 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { createRootRoute, createRoute, createRouter, redirect, RouterProvider } from '@tanstack/react-router';
+import { createRootRoute, createRoute, createRouter, lazyRouteComponent, redirect, RouterProvider } from '@tanstack/react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ApiError } from './api/client.ts';
 import { ActivatePage, ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage, UnsubscribePage } from './features/auth/AuthPages.tsx';
-import { CalculatorPage } from './features/calculator/CalculatorPage.tsx';
-import { CalendarPage } from './features/calendar/CalendarPage.tsx';
-import { JournalPage } from './features/journal/JournalPage.tsx';
-import { NewsPage } from './features/news/NewsPage.tsx';
-import { SettingsPage } from './features/settings/SettingsPage.tsx';
-import { StatsPage } from './features/stats/StatsPage.tsx';
 import { I18nProvider } from './i18n/index.tsx';
-import { AdminPage } from './features/admin/AdminPage.tsx';
-import { AnalysisPage } from './features/analysis/AnalysisPage.tsx';
-import { DashboardPage } from './features/dashboard/DashboardPage.tsx';
 import { LandingPage } from './features/landing/LandingPage.tsx';
-import { TradesPage } from './features/trades/TradesPage.tsx';
-import { AppShell, ComingSoon } from './layout/AppShell.tsx';
 import './styles.css';
+
+/**
+ * The app's screens load on demand, so the public page and sign-in fetch only their own code
+ * (faster first visit, which search engines also measure).
+ */
+const AppShell = lazyRouteComponent(() => import('./layout/AppShell.tsx'), 'AppShell');
+const ComingSoon = lazyRouteComponent(() => import('./layout/AppShell.tsx'), 'ComingSoon');
+const CalculatorPage = lazyRouteComponent(() => import('./features/calculator/CalculatorPage.tsx'), 'CalculatorPage');
+const CalendarPage = lazyRouteComponent(() => import('./features/calendar/CalendarPage.tsx'), 'CalendarPage');
+const JournalPage = lazyRouteComponent(() => import('./features/journal/JournalPage.tsx'), 'JournalPage');
+const NewsPage = lazyRouteComponent(() => import('./features/news/NewsPage.tsx'), 'NewsPage');
+const SettingsPage = lazyRouteComponent(() => import('./features/settings/SettingsPage.tsx'), 'SettingsPage');
+const StatsPage = lazyRouteComponent(() => import('./features/stats/StatsPage.tsx'), 'StatsPage');
+const AdminPage = lazyRouteComponent(() => import('./features/admin/AdminPage.tsx'), 'AdminPage');
+const AnalysisPage = lazyRouteComponent(() => import('./features/analysis/AnalysisPage.tsx'), 'AnalysisPage');
+const DashboardPage = lazyRouteComponent(() => import('./features/dashboard/DashboardPage.tsx'), 'DashboardPage');
+const TradesPage = lazyRouteComponent(() => import('./features/trades/TradesPage.tsx'), 'TradesPage');
 
 const rootRoute = createRootRoute();
 

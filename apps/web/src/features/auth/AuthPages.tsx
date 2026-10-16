@@ -1,4 +1,5 @@
-import { LANGUAGES, type EmailSubscription } from '@trading/shared';
+import { APP_NAME, LANGUAGES, SUPPORT_EMAIL, type EmailSubscription } from '@trading/shared';
+import { usePageMeta } from '../../lib/seo.ts';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { AuthError, authApi, useAuthConfig, useResetSession } from '../../api/auth.ts';
@@ -22,6 +23,7 @@ function useErrorText() {
 /** Centered card with the logo and a language switch, shared by the signed-out pages. */
 function AuthLayout({ title, children, footer }: { title: string; children: ReactNode; footer?: ReactNode }) {
   const all = useT();
+  usePageMeta({ title: `${title} · ${APP_NAME}`, index: false });
   const language = useLanguage();
   const setLanguage = useSetLanguage();
   return (
@@ -51,6 +53,12 @@ function AuthLayout({ title, children, footer }: { title: string; children: Reac
           {children}
         </section>
         {footer && <div className="text-center text-[13px] text-dim">{footer}</div>}
+        <div className="text-center text-xs text-dim">
+          {all.nav.help}:{' '}
+          <a href={`mailto:${SUPPORT_EMAIL}`} className="text-dim hover:text-ink">
+            {SUPPORT_EMAIL}
+          </a>
+        </div>
       </div>
     </main>
   );

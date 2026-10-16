@@ -1,4 +1,4 @@
-import { LANGUAGES } from '@trading/shared';
+import { LANGUAGES, SUPPORT_EMAIL } from '@trading/shared';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useAuthConfig } from '../../api/auth.ts';
@@ -8,6 +8,7 @@ import { LogoMark, Wordmark } from '../../components/ui/Brand.tsx';
 import { InstrumentBadge, InstrumentLogo } from '../../components/ui/InstrumentBadge.tsx';
 import { useLanguage, useSetLanguage, useT } from '../../i18n/index.tsx';
 import { formatAmount, formatNumber } from '../../lib/format.ts';
+import { usePageMeta } from '../../lib/seo.ts';
 import { NavIcon, type NavIconName } from '../../layout/NavIcon.tsx';
 import { SAMPLE_CURVE } from '../dashboard/DashboardPreview.tsx';
 
@@ -47,6 +48,7 @@ export function LandingPage() {
   const registration = config?.registration ?? 'invite';
   const { data: me } = useMe();
   const signedIn = me != null;
+  usePageMeta({ title: t.seoTitle, description: t.seoDescription, index: true });
 
   const primary = signedIn ? (
     <Link to="/dashboard" className="inline-flex h-12 items-center gap-2 rounded-(--radius-control) bg-accent px-6 text-[15px] font-bold text-on-accent no-underline transition hover:brightness-105">
@@ -204,6 +206,12 @@ export function LandingPage() {
           <Wordmark className="text-sm" />
         </span>
         <p className="m-0 max-w-2xl text-center text-[11px] leading-relaxed text-balance">{t.risk}</p>
+        <span>
+          {all.nav.help}:{' '}
+          <a href={`mailto:${SUPPORT_EMAIL}`} className="text-dim underline-offset-2 hover:text-ink hover:underline">
+            {SUPPORT_EMAIL}
+          </a>
+        </span>
         <span>{t.copyright(new Date().getFullYear())}</span>
       </footer>
     </div>

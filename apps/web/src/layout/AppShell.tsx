@@ -1,3 +1,4 @@
+import { APP_NAME } from '@trading/shared';
 import { Outlet, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { authApi, useResetSession } from '../api/auth.ts';
@@ -6,6 +7,7 @@ import { useBasis, useMe, useTradingMonitor, useUpdateSettings } from '../api/ho
 import { lossAlertMessage } from '../features/journal/MonitorPanel.tsx';
 import { useT } from '../i18n/index.tsx';
 import { useNewsLive, useNewsStream } from '../lib/news-live.ts';
+import { usePageMeta } from '../lib/seo.ts';
 import { applyTheme, DEFAULT_ACCENT, systemTheme } from '../lib/theme.ts';
 import { Onboarding } from '../features/onboarding/Onboarding.tsx';
 import { NavIcon } from './NavIcon.tsx';
@@ -99,6 +101,8 @@ export function AppShell() {
   const [collapsed, toggleCollapsed] = useCollapsed();
   const [drawer, setDrawer] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  // The app is behind sign-in: never in search results.
+  usePageMeta({ title: APP_NAME, index: false });
 
   // Without a session: to the sign-in page, coming back here afterwards.
   useEffect(() => {

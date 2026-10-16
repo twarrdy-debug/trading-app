@@ -1,4 +1,4 @@
-import { APP_NAME, type Language } from '@trading/shared';
+import { APP_NAME, SUPPORT_EMAIL, type Language } from '@trading/shared';
 import { t } from '../i18n.ts';
 import type { MailMessage } from './mailer.ts';
 import { WELCOME } from './welcome-content.ts';
@@ -56,7 +56,7 @@ function layout({ language, publicUrl, preheader, cards, footer }: { language: L
 </tr></table>
 </td></tr>
 ${cards}
-<tr><td style="padding:8px 12px 0;font-size:12px;line-height:1.5;color:${C.dim};text-align:center">${footer}</td></tr>
+<tr><td style="padding:8px 12px 0;font-size:12px;line-height:1.5;color:${C.dim};text-align:center">${footer}<br>${escape(t(language, 'mailHelp'))} <a href="mailto:${SUPPORT_EMAIL}" style="color:${C.accentInk}">${SUPPORT_EMAIL}</a></td></tr>
 </table>
 </td></tr>
 </table>

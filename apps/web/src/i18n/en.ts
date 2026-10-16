@@ -39,6 +39,7 @@ export const en: Messages = {
     signals: 'Signals',
     basisChanged: 'The CFD/futures difference has changed',
     settings: 'Settings',
+    help: 'Help',
     collapse: 'Collapse menu',
     expand: 'Expand menu',
     openMenu: 'Open menu',
@@ -346,6 +347,8 @@ export const en: Messages = {
   },
   landing: {
     nav: { features: 'Features', how: 'Getting started', signIn: 'Sign in' },
+    seoTitle: 'AlphaLogFX: trading journal, discipline monitor and CFD to futures calculator',
+    seoDescription: 'Trading journal with analytics for CFD and futures day traders: pips, points, ticks and R worked out for you, a discipline monitor, a CFD to futures calculator, market analysis, an economic calendar and live news. Import from MT5 and Tradovate.',
     eyebrow: 'For CFD and futures day traders',
     title: 'Improve your trading to the next level',
     lead: 'A journal with analytics, a discipline monitor and a CFD → futures calculator in one app. You focus on the market; the app does the maths and keeps you within your limits.',

@@ -1,5 +1,5 @@
 import type { PublicUser } from '@trading/api/types';
-import { APP_NAME } from '@trading/shared';
+import { APP_NAME, SUPPORT_EMAIL } from '@trading/shared';
 import { Link } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import { LogoMark, Wordmark } from '../components/ui/Brand.tsx';
@@ -119,6 +119,15 @@ export function Sidebar({ me, collapsed, onToggleCollapsed, onClose, dots, shown
           <NavIcon name="settings" className="group-data-[status=active]:text-accent-ink" />
           {!collapsed && t.nav.settings}
         </Link>
+        <a
+          href={`mailto:${SUPPORT_EMAIL}`}
+          title={collapsed ? `${t.nav.help}: ${SUPPORT_EMAIL}` : SUPPORT_EMAIL}
+          aria-label={collapsed ? t.nav.help : undefined}
+          className={`flex h-10 items-center gap-3 rounded-[11px] text-sm font-medium text-dim no-underline transition hover:bg-chip hover:text-ink ${collapsed ? 'justify-center' : 'px-3'}`}
+        >
+          <NavIcon name="help" />
+          {!collapsed && t.nav.help}
+        </a>
         <MenuButton collapsed={collapsed} label={themeLabel} onClick={onToggleTheme} icon={<ThemeIcon theme={shownTheme} />} />
         {me.authenticated && <MenuButton collapsed={collapsed} label={t.auth.signOut} onClick={onSignOut} icon={<NavIcon name="signOut" />} />}
         {!collapsed && (
