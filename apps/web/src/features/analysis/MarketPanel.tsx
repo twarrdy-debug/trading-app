@@ -7,12 +7,15 @@ import {
   findStructure,
   macd,
   premiumDiscount,
+  RESOLUTION_MS,
   rsi,
   sessionLevels,
   type AnalysisResolution,
 } from '@trading/shared';
+import { Link } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 import { useInstruments, useMarketAnalysis, useMe } from '../../api/hooks.ts';
+import { useLiveCandles, useLivePrice } from '../../lib/live-price.ts';
 import { TradingChart, type ChartBox, type ChartLine, type ChartLineSeries, type ChartPane, type ChartSegment } from '../../components/charts/TradingChart.tsx';
 import { Chip, Input, Segmented } from '../../components/ui/Field.tsx';
 import { InstrumentLogo } from '../../components/ui/InstrumentBadge.tsx';
@@ -66,9 +69,9 @@ const loadSettings = (): Settings => {
 
 /** Decimals a price is shown with: one more than the pip/tick/point (EURUSD 5, gold 2, indices 1). */
 const decimalsFor = (unitSize: number) => Math.min(5, Math.max(1, Math.ceil(-Math.log10(unitSize)) + 1));
-const STRENGTH: Record<AnalysisResolution, number> = { M5: 3, M15: 3, H1: 3, H4: 2, D1: 2 };
+const STRENGTH: Record<AnalysisResolution, number> = { M1: 3, M3: 3, M5: 3, M15: 3, M30: 3, H1: 3, H4: 2, D1: 2 };
 const EMA_COLORS = ['chart-ema-1', 'chart-ema-2', 'chart-ema-3', 'chart-ema-4'];
-const INTRADAY: AnalysisResolution[] = ['M5', 'M15', 'H1'];
+const INTRADAY: AnalysisResolution[] = ['M1', 'M3', 'M5', 'M15', 'M30', 'H1'];
 
 type Level = { tag: string; tone: 'eqh' | 'eql' | 'day' | 'swing'; price: number; note: string };
 
@@ -135,6 +138,9 @@ export function MarketPanel() {
   useEffect(() => write(SETTINGS_KEY, JSON.stringify(settings)), [settings]);
 
   const { data: a, isPending } = useMarketAnalysis(selected?.id ?? null, resolution);
+  // The last candle follows the live price between the minute refreshes.
+  const live = useLivePrice(selected?.id ?? null);
+  const liveCandles = useLiveCandles(a?.candles, live.price, RESOLUTION_MS[resolution], resolution === 'D1');
   const choose = (id: string) => {
     setInstrumentId(id);
     write(INSTRUMENT_KEY, id);
@@ -157,8 +163,8 @@ export function MarketPanel() {
 
   // Everything the chart draws, recomputed only when the data or the switches change.
   const chart = useMemo(() => {
-    if (!a || a.candles.length === 0) return null;
-    const candles = a.candles;
+    if (!a || liveCandles.length === 0) return null;
+    const candles = liveCandles;
     const closes = candles.map((c) => c.close);
     const atr = a.atr ?? 0;
     const overlays: ChartLineSeries[] = on.ema
@@ -238,7 +244,7 @@ export function MarketPanel() {
         emas: overlays.map((o) => ({ label: o.label, value: lastOf(o.values) })),
       },
     };
-  }, [a, settings, resolution, t, on]);
+  }, [a, liveCandles, settings, resolution, t, on]);
 
   const toggleGroups: { label: string; keys: ToggleKey[] }[] = [
     { label: t.groupIndicators, keys: ['ema', 'rsi', 'macd'] },
@@ -292,7 +298,10 @@ export function MarketPanel() {
                 />
               </div>
               <div className="grow" />
-              <Segmented label={t.resolution} value={resolution} onChange={chooseResolution} options={ANALYSIS_RESOLUTIONS.map((r) => ({ value: r, label: r }))} />
+              {/* Eight timeframes do not fit a phone: the switch scrolls sideways instead of the page. */}
+              <div className="max-w-full overflow-x-auto">
+                <Segmented label={t.resolution} value={resolution} onChange={chooseResolution} options={ANALYSIS_RESOLUTIONS.map((r) => ({ value: r, label: r }))} />
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line pt-3">
               {toggleGroups.map((group) => (
@@ -341,7 +350,13 @@ export function MarketPanel() {
                     {selected?.name} · {resolution}
                   </span>
                   <div className="grow" />
-                  {a?.lastPrice != null && <span className="font-mono text-xs opacity-70">{t.lastPrice(price(a.lastPrice))}</span>}
+                  {live.price && (
+                    <span className="flex items-center gap-1.5 text-xs font-semibold" title={t.liveHint}>
+                      <span aria-hidden className="size-1.5 animate-pulse rounded-full" style={{ background: 'var(--chart-up)' }} />
+                      {t.live}
+                    </span>
+                  )}
+                  {(live.price?.price ?? a?.lastPrice) != null && <span className="font-mono text-xs opacity-70">{t.lastPrice(price(live.price?.price ?? a!.lastPrice!))}</span>}
                 </div>
                 {a?.source.via && (
                   <span className="px-1 text-xs opacity-70">
@@ -355,6 +370,9 @@ export function MarketPanel() {
                   </span>
                 )}
                 {a?.fetchError && <span className="px-1 text-xs text-warn">{t.stale}</span>}
+                <Link to="/ustawienia/$section" params={{ section: 'wyglad' }} className="self-end px-1 text-xs font-semibold text-dim no-underline hover:text-ink">
+                  {all.settings.candles} →
+                </Link>
                 {isPending && !a ? (
                   <div className="h-[clamp(520px,74vh,920px)] animate-pulse rounded-xl opacity-30" style={{ background: 'var(--chart-grid)' }} />
                 ) : chart ? (
@@ -367,6 +385,7 @@ export function MarketPanel() {
                     panes={chart.panes}
                     decimals={decimals}
                     timeZone={timezone}
+                    periodMs={resolution === 'D1' ? undefined : RESOLUTION_MS[resolution]}
                     resetKey={`${selected?.id}:${resolution}:${chart.panes.map((p) => p.key).join(',')}`}
                     ariaLabel={t.chartAria(selected?.symbol ?? '', resolution)}
                     watermark={`${selected?.symbol ?? ''} · ${resolution}`}

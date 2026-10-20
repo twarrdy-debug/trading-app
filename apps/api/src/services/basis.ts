@@ -1,4 +1,4 @@
-import { CFD_FUTURES_PAIRS } from '@trading/shared';
+import { aggregateCandles, CFD_FUTURES_PAIRS, PRO_RESOLUTION_MS, type Candle, type ProResolution } from '@trading/shared';
 import { and, desc, eq } from 'drizzle-orm';
 import type { DB } from '../db/client.ts';
 import { basisSnapshots } from '../db/schema.ts';
@@ -19,6 +19,8 @@ export interface QuoteProvider {
    * futures quote's own minute, since the free futures feed is about 10 minutes late.
    */
   fetchQuoteAt?(source: QuoteSource, at: Date): Promise<Quote>;
+  /** Futures candles for the calculator PRO (Yahoo, about 10 minutes late), oldest first. */
+  fetchCandles?(symbol: string, resolution: ProResolution): Promise<Candle[]>;
 }
 
 /**
@@ -38,9 +40,46 @@ export const BASIS_SOURCES: Record<string, { cfd: QuoteSource[]; futures: QuoteS
 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
+
+/**
+ * Yahoo's interval and history per resolution (it keeps 1m for about a week, 5m and 15m for 60 days);
+ * H4 is built from hours. Enough to cover the CFD candles the calculator shows.
+ */
+const YAHOO_CANDLES: Record<ProResolution, { interval: string; range: string }> = {
+  M1: { interval: '1m', range: '5d' },
+  M5: { interval: '5m', range: '10d' },
+  M15: { interval: '15m', range: '30d' },
+  H1: { interval: '60m', range: '3mo' },
+  H4: { interval: '60m', range: '1y' },
+};
+
+async function yahooCandles(symbol: string, resolution: ProResolution): Promise<Candle[]> {
+  const { interval, range } = YAHOO_CANDLES[resolution];
+  const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}`, {
+    signal: AbortSignal.timeout(10_000),
+    headers: { 'user-agent': 'Mozilla/5.0' },
+  });
+  if (!res.ok) throw new Error(`Yahoo ${symbol} ${res.status}`);
+  const body = (await res.json()) as {
+    chart: { result: { timestamp?: number[]; indicators: { quote: { open: (number | null)[]; high: (number | null)[]; low: (number | null)[]; close: (number | null)[] }[] } }[] | null };
+  };
+  const result = body.chart.result?.[0];
+  const q = result?.indicators.quote[0];
+  if (!result?.timestamp || !q) throw new Error(`Yahoo ${symbol}: brak danych`);
+  const raw: Candle[] = [];
+  result.timestamp.forEach((ts, i) => {
+    const [open, high, low, close] = [q.open[i], q.high[i], q.low[i], q.close[i]];
+    if (open == null || high == null || low == null || close == null) return;
+    raw.push({ time: new Date(ts * 1000).toISOString(), open: round6(open), high: round6(high), low: round6(low), close: round6(close) });
+  });
+  // The last point is the live quote at an odd second: it joins its candle (and hours join into H4).
+  return aggregateCandles(raw, PRO_RESOLUTION_MS[resolution]);
+}
 
 /** Live quotes; Capital.com ones need its market data provider (without it they fail and the next source is used). */
 export const createQuoteProvider = (market: MarketDataProvider | null): QuoteProvider => ({
+  fetchCandles: yahooCandles,
   async fetchQuoteAt({ provider, symbol }, at) {
     if (provider !== 'capital' || !market) throw new Error(`${provider} has no price history`);
     return market.fetchQuoteAt(symbol, at);

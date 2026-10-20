@@ -10,6 +10,7 @@ import { seed } from '../src/db/seed-data.ts';
 import { loadEnv } from '../src/env.ts';
 import type { QuoteProvider, QuoteSource } from '../src/services/basis.ts';
 import type { CalendarSource, FfEvent } from '../src/services/calendar.ts';
+import { buildDemo, DEMO_EMAIL } from '../src/services/demo.ts';
 import { runDigests, sendWhatsNew } from '../src/services/digests.ts';
 import type { MailMessage } from '../src/services/mailer.ts';
 import type { FxProvider } from '../src/services/fx.ts';
@@ -35,6 +36,12 @@ const quotes: QuoteProvider = {
     const quote = quoteBook.get(symbol);
     if (!quote) throw new Error(`no quote for ${symbol}`);
     return quote;
+  },
+  // Futures candles for the calculator PRO: the market's candles 35 higher, wicks half a point longer.
+  async fetchCandles(symbol, resolution) {
+    if (symbol !== 'GC=F') throw new Error(`no candles for ${symbol}`);
+    const cfd = await market.fetchCandles('GOLD', resolution, {});
+    return cfd.slice(0, -2).map((c) => ({ ...c, open: c.open + 35, high: c.high + 35.5, low: c.low + 34.5, close: c.close + 35 }));
   },
 };
 
@@ -486,6 +493,28 @@ describe('CFD/futures difference measurements', () => {
     quoteBook.delete('GC=F');
     const res = (await app.inject({ method: 'POST', url: '/basis/refresh' })).json();
     expect(res.results.find((r: { pairKey: string }) => r.pairKey === 'gold')).toMatchObject({ status: 'error' });
+  });
+});
+
+describe('calculator PRO', () => {
+  it('returns both markets\' candles of a pair, the futures from their own feed', async () => {
+    const res = await app.inject({ url: '/basis/pro?pair=gold&resolution=H1' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body).toMatchObject({ pairKey: 'gold', resolution: 'H1', cfd: { symbol: 'XAUUSD', source: 'capital' }, futures: { symbol: 'GC=F', source: 'yahoo', delayMinutes: 10 }, errors: { cfd: null, futures: null } });
+    expect(body.cfd.candles).toHaveLength(60);
+    // The futures feed is late: its newest candles are missing.
+    expect(body.futures.candles).toHaveLength(58);
+    expect(body.futures.lastCandleAt).toBe(body.futures.candles.at(-1).time);
+    const [cfd, fut] = [body.cfd.candles[10], body.futures.candles[10]];
+    expect(fut).toMatchObject({ time: cfd.time, high: cfd.high + 35.5 });
+  });
+
+  it('reports a pair without futures candles and refuses an unknown pair', async () => {
+    const res = (await app.inject({ url: '/basis/pro?pair=nasdaq&resolution=M1' })).json();
+    expect(res.futures.candles).toEqual([]);
+    expect(res.errors.futures).toMatch(/no candles/);
+    expect((await app.inject({ url: '/basis/pro?pair=oil' })).statusCode).toBe(400);
   });
 });
 
@@ -1174,6 +1203,66 @@ describe('crypto', () => {
   });
 });
 
+describe('candle colours', () => {
+  it('stores a palette or own colours on the account, and refuses bad colours', async () => {
+    const user = (await post('/educators', { displayName: 'Calm trader' })).json();
+    const headers = { 'x-user-id': user.id };
+    expect((await app.inject({ url: '/me', headers })).json().settings.chartStyle).toBeNull();
+    const own = await app.inject({ method: 'PATCH', url: '/me', headers, payload: { chartStyle: { palette: 'custom', up: '#7fb3ae', down: '#b98b92', hollow: true } } });
+    expect(own.json().settings.chartStyle).toEqual({ palette: 'custom', up: '#7fb3ae', down: '#b98b92', hollow: true });
+    expect((await app.inject({ method: 'PATCH', url: '/me', headers, payload: { chartStyle: { palette: 'neon', hollow: false } } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'PATCH', url: '/me', headers, payload: { chartStyle: { palette: 'custom', up: 'red', hollow: false } } })).statusCode).toBe(400);
+  });
+});
+
+describe('linked accounts', () => {
+  it('saves, edits and deletes one trade on every linked account, and counts it once across all', async () => {
+    const user = (await post('/educators', { displayName: 'Copier trader' })).json();
+    const headers = { 'x-user-id': user.id };
+    const make = async (name: string, market: 'futures' | 'cfd' = 'futures') =>
+      (await app.inject({ method: 'POST', url: '/accounts', headers, payload: { name, type: 'prop', market, size: 50_000, maxDrawdownAmount: 2000, drawdownType: 'eod' } })).json();
+    const [a, b, c, cfd] = [await make('Lucid #1'), await make('Lucid #2'), await make('Lucid #3'), await make('CFD prop', 'cfd')];
+
+    // Only accounts of one market can be linked.
+    expect((await app.inject({ method: 'PUT', url: `/accounts/${a.id}/links`, headers, payload: { accountIds: [cfd.id] } })).statusCode).toBe(400);
+    const linked = (await app.inject({ method: 'PUT', url: `/accounts/${a.id}/links`, headers, payload: { accountIds: [b.id, c.id] } })).json();
+    const group = linked.find((x: { id: string }) => x.id === a.id).linkGroup;
+    expect(group).toEqual(expect.any(String));
+    expect(linked.filter((x: { linkGroup: string | null }) => x.linkGroup === group)).toHaveLength(3);
+
+    // MNQ1 long 2 contracts, +20 points = 80 ticks × $0.50 × 2 = $80 on each account.
+    const created = await post('/trades', { instrumentId: ids.MNQ1, accountId: a.id, direction: 'long', openedAt: '2026-10-12T14:00:00Z', closedAt: '2026-10-12T14:30:00Z', entryPrice: 21_500, exitPrice: 21_520, stopLoss: 21_490, positionSize: 2 }, headers);
+    expect(created.statusCode).toBe(201);
+    const all = (await app.inject({ url: '/trades', headers })).json();
+    expect(all.total).toBe(1);
+    expect(all.items[0]).toMatchObject({ dayLabel: '1/12.10.2026 – LONG', pnlAccount: 80, linked: { pnlTotal: 240 } });
+    expect(all.items[0].linked.accounts.map((x: { name: string }) => x.name).sort()).toEqual(['Lucid #1', 'Lucid #2', 'Lucid #3']);
+    const own = (await app.inject({ url: `/trades?account=${b.id}`, headers })).json();
+    expect(own.items[0]).toMatchObject({ accountId: b.id, pnlAccount: 80, dayLabel: '1/12.10.2026 – LONG' });
+
+    // Across all accounts the setup counts once, with the money of all three.
+    const stats = (await app.inject({ url: '/trades/stats', headers })).json();
+    expect(stats.summary).toMatchObject({ trades: 1, wins: 1, pnl: 240 });
+    expect((await app.inject({ url: `/trades/stats?account=${c.id}`, headers })).json().summary).toMatchObject({ trades: 1, pnl: 80 });
+
+    // An edit on a copy changes every account at once.
+    const copyId = own.items[0].id;
+    await app.inject({ method: 'PATCH', url: `/trades/${copyId}`, headers, payload: { exitPrice: 21_530, closedAt: '2026-10-12T14:40:00Z' } });
+    expect((await app.inject({ url: '/trades', headers })).json().items[0]).toMatchObject({ exitPrice: 21_530, linked: { pnlTotal: 360 } });
+
+    // Deleting the source account keeps the copies on the others.
+    expect((await app.inject({ method: 'DELETE', url: `/accounts/${a.id}?trades=delete`, headers })).statusCode).toBe(204);
+    const after = (await app.inject({ url: '/trades', headers })).json();
+    expect(after.total).toBe(1);
+    expect(after.items[0].linked.accounts).toHaveLength(2);
+
+    // Deleting one copy deletes the trade on every account.
+    expect((await app.inject({ method: 'DELETE', url: `/trades/${after.items[0].id}`, headers })).statusCode).toBe(204);
+    expect((await app.inject({ url: `/trades?account=${b.id}`, headers })).json().total).toBe(0);
+    expect((await app.inject({ url: `/trades?account=${c.id}`, headers })).json().total).toBe(0);
+  });
+});
+
 describe('dashboard stats', () => {
   it('reports days with counts and discipline, and win/loss/breakeven streaks', async () => {
     const user = (await post('/educators', { displayName: 'Dashboard trader' })).json();
@@ -1424,17 +1513,17 @@ describe('admin panel', () => {
     const me = (await app.inject({ url: '/me' })).json();
     const user = (await post('/educators', { displayName: 'Panel user', email: 'panel@example.com' })).json();
     const headers = { 'x-user-id': user.id };
-    await app.inject({ method: 'PATCH', url: `/admin/users/${user.id}`, payload: { role: 'user' } });
+    await app.inject({ method: 'PATCH', url: `/admin/users/${user.id}`, payload: { role: 'standard' } });
     expect((await app.inject({ url: '/admin/users', headers })).statusCode).toBe(403);
     expect((await app.inject({ url: '/admin/stats', headers })).statusCode).toBe(403);
     // A percent-encoded path reaches the same route and must not skip the check.
     expect((await app.inject({ url: '/%61dmin/users', headers })).statusCode).toBe(403);
-    expect((await app.inject({ method: 'PATCH', url: `/%61dmin/users/${me.id}`, payload: { role: 'user' }, headers })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'PATCH', url: `/%61dmin/users/${me.id}`, payload: { role: 'standard' }, headers })).statusCode).toBe(403);
 
     // The user's data shows in the list.
     await post('/trades', { instrumentId: ids.XAUUSD, direction: 'long', openedAt: '2025-06-02T08:00:00Z', entryPrice: 4000, positionSize: 0.1 }, headers);
     const listed = (await app.inject({ url: '/admin/users' })).json().find((u: { id: string }) => u.id === user.id);
-    expect(listed).toMatchObject({ email: 'panel@example.com', role: 'user', trades: 1, accounts: 1, disabledAt: null, canSignIn: false });
+    expect(listed).toMatchObject({ email: 'panel@example.com', role: 'standard', trades: 1, accounts: 1, disabledAt: null, canSignIn: false });
 
     // Promote, block (no API access), unblock.
     expect((await app.inject({ method: 'PATCH', url: `/admin/users/${user.id}`, payload: { role: 'vip' } })).json().role).toBe('vip');
@@ -1885,9 +1974,11 @@ describe('authentication', () => {
     expect((await browser()('GET', '/auth/verify-email?token=forged')).statusCode).toBe(401);
     expect((await browser()('POST', '/auth/sign-in/email', { email: 'nowy@example.com', password: 'Nowy-password-1!' })).statusCode).toBe(200);
 
-    // Signing up again with a taken address looks the same but creates nothing and keeps the invite.
+    // Signing up again with a taken address says so, creates nothing and keeps the invite.
     const { code: fresh } = (await authApp.inject({ method: 'POST', url: '/invites', headers: { cookie: await ownerCookie() }, payload: {} })).json();
-    expect((await browser()('POST', '/auth/sign-up/email', { ...payload, inviteCode: fresh })).statusCode).toBe(200);
+    const again = await browser()('POST', '/auth/sign-up/email', { ...payload, email: ' Nowy@Example.com ', inviteCode: fresh });
+    expect(again.statusCode).toBe(422);
+    expect(again.json().code).toBe('USER_ALREADY_EXISTS');
     const invites = (await authApp.inject({ url: '/invites', headers: { cookie: await ownerCookie() } })).json();
     expect(invites.find((i: { code: string }) => i.code === fresh)).toMatchObject({ usedBy: null });
   });
@@ -1895,14 +1986,14 @@ describe('authentication', () => {
   it('e-mails invitations bound to an address, and seeds no second admin', async () => {
     const admin = browser();
     await admin('POST', '/auth/sign-in/email', { email: 'owner@example.com', password: 'Owner-password-1!' });
-    const invite = (await admin('POST', '/invites', { email: 'Ewa@Example.com', role: 'user' })).json();
+    const invite = (await admin('POST', '/invites', { email: 'Ewa@Example.com', role: 'standard' })).json();
     expect(invite).toMatchObject({ email: 'ewa@example.com', emailed: true });
     const mail = sent.at(-1)!;
     expect(mail).toMatchObject({ to: 'ewa@example.com', subject: 'Zaproszenie do AlphaLogFX' });
     expect(mail.text).toContain(`/rejestracja?kod=${invite.code}`);
     // Without an address nothing is sent.
     const before = sent.length;
-    expect((await admin('POST', '/invites', { role: 'user' })).json().emailed).toBe(false);
+    expect((await admin('POST', '/invites', { role: 'standard' })).json().emailed).toBe(false);
     expect(sent).toHaveLength(before);
 
     // The admin's address changed (owner@example.com): starting again must not recreate admin@trading.local.
@@ -1915,7 +2006,7 @@ describe('authentication', () => {
   it('lets a whole group sign up with one shared code', async () => {
     const admin = browser();
     await admin('POST', '/auth/sign-in/email', { email: 'owner@example.com', password: 'Owner-password-1!' });
-    const group = await admin('POST', '/invites', { code: 'dixigroup26', multiUse: true, expiresInDays: null, role: 'user' });
+    const group = await admin('POST', '/invites', { code: 'dixigroup26', multiUse: true, expiresInDays: null, role: 'standard' });
     expect(group.statusCode).toBe(201);
     expect(group.json()).toMatchObject({ code: 'DIXIGROUP26', multiUse: true, expiresAt: null, useCount: 0 });
     // Codes are unique, and must look like codes.
@@ -1926,7 +2017,7 @@ describe('authentication', () => {
       const user = browser();
       const res = await signUpAndActivate(user, { name, email: `${name.toLowerCase()}@group.example`, password: 'Group-password-1!', inviteCode: 'Dixigroup26' });
       expect(res.statusCode).toBe(200);
-      expect((await user('GET', '/me')).json()).toMatchObject({ displayName: name, role: 'user', onboarded: false });
+      expect((await user('GET', '/me')).json()).toMatchObject({ displayName: name, role: 'standard', onboarded: false });
     }
     const stored = (await admin('GET', '/invites')).json().find((i: { code: string }) => i.code === 'DIXIGROUP26');
     expect(stored).toMatchObject({ useCount: 2, usedBy: null });
@@ -2086,10 +2177,201 @@ describe('market analysis', () => {
   });
 
   it('validates the request and lists favourites in the overview', async () => {
-    expect((await app.inject({ url: `/analysis/market/${ids.XAUUSD}?resolution=M1` })).statusCode).toBe(400);
+    expect((await app.inject({ url: `/analysis/market/${ids.XAUUSD}?resolution=W1` })).statusCode).toBe(400);
+    // M3 has no candles of its own: it is built from the stored M1 ones.
+    marketCalls.length = 0;
+    const m3 = (await app.inject({ url: `/analysis/market/${ids.XAUUSD}?resolution=M3` })).json();
+    expect(m3.resolution).toBe('M3');
+    expect(m3.candles.length).toBeGreaterThan(0);
+    expect(marketCalls.some((c) => c.startsWith('GOLD:M1:'))).toBe(true);
+    expect(marketCalls.some((c) => c.includes(':M3:'))).toBe(false);
     expect((await app.inject({ url: '/analysis/market/00000000-0000-4000-8000-000000000000' })).statusCode).toBe(404);
     const overview = (await app.inject({ url: '/analysis/overview' })).json();
     expect(overview.items.map((i: { symbol: string }) => i.symbol)).toContain('XAUUSD');
+  });
+});
+
+describe('backtesting', () => {
+  const inject = (method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', url: string, payload?: object) => app.inject({ method, url, ...(payload ? { payload } : {}) });
+  let account: string;
+  let session: string;
+
+  it('keeps backtesting accounts out of the journal, the stats and links', async () => {
+    const created = await inject('POST', '/accounts', { name: 'Backtest', type: 'backtest', size: 10_000, market: 'cfd', maxDrawdownPct: 5 });
+    expect(created.statusCode).toBe(201);
+    // Only a name, a size and a leverage: market and prop limits are dropped.
+    expect(created.json()).toMatchObject({ type: 'backtest', market: null, maxDrawdownPct: null });
+    account = created.json().id;
+
+    const trade = await inject('POST', '/trades', { accountId: account, instrumentId: ids.XAUUSD, direction: 'long', openedAt: '2026-10-01T10:00:00Z', entryPrice: 4000, positionSize: 1 });
+    expect(trade.statusCode).toBe(400);
+    expect(trade.json().error).toMatch(/Backtesting/);
+    expect((await inject('PUT', `/accounts/${account}/links`, { accountIds: [await defaultAccount()] })).statusCode).toBe(400);
+    expect((await inject('PATCH', `/accounts/${account}`, { type: 'live' })).statusCode).toBe(400);
+
+    const stats = (await inject('GET', '/trades/stats')).json();
+    expect(stats.accounts.some((a: { id: string }) => a.id === account)).toBe(false);
+    const monitor = (await inject('GET', '/trades/monitor')).json();
+    expect(monitor.groups.some((g: { accountId: string | null }) => g.accountId === account)).toBe(false);
+  });
+
+  it('serves past candles in stretches and refuses futures and long stretches', async () => {
+    const res = await inject('GET', `/backtest/candles?instrumentId=${ids.XAUUSD}&resolution=H1&from=2026-10-10T00:00:00Z&to=2026-10-12T00:00:00Z`);
+    expect(res.statusCode).toBe(200);
+    const candles = res.json().candles as { time: string }[];
+    expect(candles.length).toBeGreaterThan(0);
+    expect(candles.every((c) => c.time >= '2026-10-10T00:00:00.000Z' && c.time < '2026-10-12T00:00:00.000Z')).toBe(true);
+    expect((await inject('GET', `/backtest/candles?instrumentId=${ids.XAUUSD}&resolution=M1&from=2026-10-01T00:00:00Z&to=2026-10-12T00:00:00Z`)).statusCode).toBe(400);
+    expect((await inject('GET', `/backtest/candles?instrumentId=${ids.GC1}&resolution=H1&from=2026-10-10T00:00:00Z&to=2026-10-12T00:00:00Z`)).statusCode).toBe(400);
+  });
+
+  it('replays a session: positions, R, money and the summary', async () => {
+    expect((await inject('POST', '/backtest/sessions', { accountId: await defaultAccount(), instrumentId: ids.XAUUSD, resolution: 'M5', startAt: '2026-10-01T08:00:00Z' })).statusCode).toBe(400);
+    expect((await inject('POST', '/backtest/sessions', { accountId: account, instrumentId: ids.XAUUSD, resolution: 'M5', startAt: '2999-01-01T08:00:00Z' })).statusCode).toBe(400);
+    const created = await inject('POST', '/backtest/sessions', { accountId: account, instrumentId: ids.XAUUSD, resolution: 'M5', startAt: '2026-10-01T08:00:00Z' });
+    expect(created.statusCode).toBe(201);
+    session = created.json().id;
+    expect(created.json()).toMatchObject({ cursorAt: '2026-10-01T08:00:00.000Z', instrument: { symbol: 'XAUUSD' }, trades: [], summary: { trades: 0 } });
+
+    expect((await inject('POST', `/backtest/sessions/${session}/trades`, { direction: 'long', size: 1, entryPrice: 4100, stopLoss: 4110, openedAt: '2026-10-01T08:05:00Z' })).statusCode).toBe(400);
+    const win = (await inject('POST', `/backtest/sessions/${session}/trades`, { direction: 'long', size: 1, entryPrice: 4100, stopLoss: 4090, takeProfit: 4120, openedAt: '2026-10-01T08:05:00Z' })).json();
+    // Gold: 200 pips of $10 a lot, twice the 100-pip risk.
+    const closed = (await inject('PATCH', `/backtest/trades/${win.id}`, { close: { price: 4120, at: '2026-10-01T09:00:00Z', reason: 'tp' } })).json();
+    expect(closed).toMatchObject({ resultUnits: 200, pnl: 2000, rMultiple: 2, exitReason: 'tp', outcome: 'win' });
+    expect((await inject('PATCH', `/backtest/trades/${win.id}`, { stopLoss: 4100 })).statusCode).toBe(400);
+
+    const loss = (await inject('POST', `/backtest/sessions/${session}/trades`, { direction: 'short', size: 0.5, entryPrice: 4120, stopLoss: 4130, openedAt: '2026-10-01T09:30:00Z' })).json();
+    // The stop moved to the entry still measures R against the first stop.
+    await inject('PATCH', `/backtest/trades/${loss.id}`, { stopLoss: 4120 });
+    await inject('PATCH', `/backtest/trades/${loss.id}`, { close: { price: 4125, at: '2026-10-01T10:00:00Z', reason: 'manual' } });
+
+    await inject('PATCH', `/backtest/sessions/${session}`, { cursorAt: '2026-10-01T10:00:00Z' });
+    const view = (await inject('GET', `/backtest/sessions/${session}`)).json();
+    expect(view.cursorAt).toBe('2026-10-01T10:00:00.000Z');
+    expect(view.summary).toMatchObject({ trades: 2, wins: 1, losses: 1, winRate: 50, totalR: 1.5, pnl: 1750, profitFactor: 8, maxDrawdown: 250, byRules: null });
+    expect(view.summary.curve.map((p: { pnl: number }) => p.pnl)).toEqual([2000, 1750]);
+
+    // The account's balance follows its sessions.
+    const accounts = (await inject('GET', '/accounts')).json();
+    expect(accounts.find((a: { id: string }) => a.id === account)).toMatchObject({ balance: 11_750 });
+    const list = (await inject('GET', '/backtest/sessions')).json();
+    expect(list[0]).toMatchObject({ id: session, symbol: 'XAUUSD', openTrades: 0, summary: { trades: 2, totalR: 1.5 } });
+  });
+
+  it('splits the summary by the strategy rules followed', async () => {
+    const strategy = (await inject('POST', '/strategies', { name: 'BT', rules: ['Sweep', 'FVG'] })).json();
+    const ruleIds = strategy.rules.map((r: { id: string }) => r.id);
+    const s = (await inject('POST', '/backtest/sessions', { accountId: account, instrumentId: ids.XAUUSD, resolution: 'H1', startAt: '2026-09-01T08:00:00Z', strategyId: strategy.id })).json();
+    expect(s.strategy.rules).toHaveLength(2);
+    const open = async (checked: string[], exit: number) => {
+      const t = (await inject('POST', `/backtest/sessions/${s.id}/trades`, { direction: 'long', size: 1, entryPrice: 4100, stopLoss: 4090, openedAt: '2026-09-01T09:00:00Z', checkedRuleIds: [...checked, '00000000-0000-4000-8000-000000000000'] })).json();
+      await inject('PATCH', `/backtest/trades/${t.id}`, { close: { price: exit, at: '2026-09-01T10:00:00Z', reason: 'manual' } });
+      return t;
+    };
+    const followed = await open(ruleIds, 4110);
+    // Ids of other rules are dropped.
+    expect(followed.checkedRuleIds).toEqual(ruleIds);
+    await open(ruleIds.slice(0, 1), 4090);
+    const view = (await inject('GET', `/backtest/sessions/${s.id}`)).json();
+    expect(view.summary.byRules).toMatchObject({ followed: { trades: 1, wins: 1, totalR: 1 }, broken: { trades: 1, losses: 1, totalR: -1 } });
+
+    expect((await inject('DELETE', `/backtest/sessions/${s.id}`)).statusCode).toBe(204);
+    expect((await inject('GET', `/backtest/sessions/${s.id}`)).statusCode).toBe(404);
+  });
+});
+
+describe('plans', () => {
+  it('gives Standard the journal with five trades and one account, and Pro everything', async () => {
+    const created = (await post('/educators', { displayName: 'Standard trader', email: 'standard@example.com' })).json();
+    await app.inject({ method: 'PATCH', url: `/admin/users/${created.id}`, payload: { role: 'standard' } });
+    const headers = { 'x-user-id': created.id };
+    const as = (method: 'GET' | 'POST', url: string, payload?: object) => app.inject({ method, url, headers, ...(payload ? { payload } : {}) });
+
+    for (const url of ['/analysis/overview', '/news', '/backtest/sessions', '/basis/pro?pair=gold']) {
+      const res = await as('GET', url);
+      expect(res.statusCode, url).toBe(403);
+      expect(res.json().code).toBe('planPro');
+    }
+    expect((await as('GET', '/calendar?from=2026-10-12&to=2026-10-16')).statusCode).toBe(200);
+    expect((await as('GET', '/strategies')).statusCode).toBe(200);
+
+    const account = (await as('POST', '/accounts', { name: 'Main', type: 'live', size: 10_000 })).json();
+    expect((await as('POST', '/accounts', { name: 'Second', type: 'live', size: 10_000 })).json().code).toBe('accountLimit');
+    const trade = (n: number) => as('POST', '/trades', { accountId: account.id, instrumentId: ids.XAUUSD, direction: 'long', openedAt: `2026-10-0${n}T08:00:00Z`, entryPrice: 4000, positionSize: 0.1 });
+    for (let n = 1; n <= 5; n++) expect((await trade(n)).statusCode).toBe(201);
+    const sixth = await trade(6);
+    expect(sixth.statusCode).toBe(403);
+    expect(sixth.json().code).toBe('tradeLimit');
+    expect((await as('GET', '/me')).json()).toMatchObject({ role: 'standard', plan: { tradeLimit: 5, features: [] }, tradesUsed: 5 });
+
+    await app.inject({ method: 'PATCH', url: `/admin/users/${created.id}`, payload: { role: 'pro' } });
+    expect((await trade(6)).statusCode).toBe(201);
+    expect((await as('GET', '/analysis/overview')).statusCode).toBe(200);
+    expect((await as('GET', '/me')).json()).toMatchObject({ plan: { tradeLimit: null }, tradesUsed: null });
+    expect((await as('POST', '/accounts', { name: 'Second', type: 'live', size: 10_000 })).statusCode).toBe(201);
+  });
+});
+
+describe('public demo', () => {
+  const now = Date.parse('2026-10-16T18:00:00Z');
+  /** Hourly candles on weekdays in any asked stretch, a slow wave around 20 000 (stands in for Capital.com). */
+  const hours: MarketDataProvider = {
+    ...market,
+    async fetchCandles(_epic, _resolution, { from, to }) {
+      const out = [];
+      for (let t = Math.ceil(from!.getTime() / 3_600_000) * 3_600_000; t < to!.getTime(); t += 3_600_000) {
+        const day = new Date(t).getUTCDay();
+        if (day === 0 || day === 6) continue;
+        const mid = 20_000 + 300 * Math.sin(t / 3_600_000 / 9);
+        out.push({ time: new Date(t).toISOString(), open: mid, high: mid + 40, low: mid - 40, close: mid + 10 });
+      }
+      return out;
+    },
+  };
+  let cookie = '';
+  const as = (method: 'GET' | 'POST', url: string, headers: Record<string, string> = {}) => app.inject({ method, url, headers: { cookie, ...headers } });
+
+  it('is unavailable until built, then builds sample trades on the given candles', async () => {
+    expect((await app.inject({ method: 'POST', url: '/demo' })).statusCode).toBe(503);
+    const saved = await buildDemo(database.db, { fx, quotes, market: hours }, now);
+    expect(saved).toBeGreaterThan(20);
+    const res = await app.inject({ method: 'POST', url: '/demo' });
+    expect(res.statusCode).toBe(204);
+    cookie = String(res.headers['set-cookie']).split(';')[0]!;
+    expect(cookie).toMatch(/^alphalog_demo=\d+\./);
+  });
+
+  it('shows the sample data read-only, without the analysis and news', async () => {
+    const me = (await as('GET', '/me')).json();
+    expect(me).toMatchObject({ email: DEMO_EMAIL, demo: true, authenticated: false, onboarded: true });
+    const list = (await as('GET', '/trades?limit=200')).json();
+    expect(list.items.length).toBeGreaterThan(10);
+    // Entries sit on the candles' opens (real prices in production), within the last 90 days.
+    const opens: number[] = [];
+    for (let t = now - 92 * 86_400_000; t < now; t += 3_600_000) opens.push(20_000 + 300 * Math.sin(t / 3_600_000 / 9));
+    // Rounded to the instrument's step at most (0.1 for US100).
+    expect(list.items.every((t: { entryPrice: number }) => opens.some((o) => Math.abs(o - t.entryPrice) <= 0.05))).toBe(true);
+    const accounts = (await as('GET', '/accounts')).json();
+    expect(accounts.map((a: { name: string }) => a.name)).toEqual(['Live 25K', 'Prop 50K', 'Prop 50K #2']);
+
+    const write = await as('POST', '/trades');
+    expect(write.statusCode).toBe(403);
+    expect(write.json().error).toMatch(/demo/i);
+    expect((await as('POST', '/trades', { 'x-language': 'en' })).json().error).toBe('Nothing is saved in the demo. Create an account to keep your own journal');
+    expect((await as('GET', '/news')).statusCode).toBe(403);
+    expect((await as('GET', '/analysis/overview')).statusCode).toBe(403);
+    expect((await as('GET', '/backtest/sessions')).statusCode).toBe(403);
+    expect((await as('GET', '/calendar?from=2026-10-12&to=2026-10-16')).statusCode).toBe(200);
+  });
+
+  it('ignores a forged cookie, stays out of the admin panel and clears the cookie on leaving', async () => {
+    const forged = await app.inject({ url: '/me', headers: { cookie: `alphalog_demo=${Date.now() + 60_000}.forged` } });
+    expect(forged.json().demo).toBe(false);
+    const people = (await app.inject({ url: '/admin/users' })).json();
+    expect(people.some((u: { email: string }) => u.email === DEMO_EMAIL)).toBe(false);
+    const exit = await as('POST', '/demo/exit');
+    expect(exit.statusCode).toBe(204);
+    expect(String(exit.headers['set-cookie'])).toContain('Max-Age=0');
   });
 });
 

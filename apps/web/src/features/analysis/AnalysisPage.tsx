@@ -4,10 +4,12 @@ import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, ty
 import { ApiError } from '../../api/client.ts';
 import { useChangeStrategyRules, useDeleteStrategy, useSaveStrategy, useStrategies } from '../../api/hooks.ts';
 import { Button } from '../../components/ui/Button.tsx';
-import { Field, Input, Segmented, Textarea } from '../../components/ui/Field.tsx';
+import { Field, Input, Textarea } from '../../components/ui/Field.tsx';
 import { Panel } from '../../components/ui/Panel.tsx';
 import { useT } from '../../i18n/index.tsx';
+import { AnalysisTabs } from './AnalysisTabs.tsx';
 import { MarketPanel } from './MarketPanel.tsx';
+import { PlanGate } from '../plans/PlanLocked.tsx';
 
 const errorLines = (err: unknown) => (err instanceof ApiError ? err.lines : [err instanceof Error ? err.message : String(err)]);
 
@@ -22,42 +24,30 @@ function Errors({ lines }: { lines: string[] }) {
   );
 }
 
-const TAB_KEY = 'analysis-tab';
-
-/** Analysis: the automatic market analysis ("Market", the default) and the user's strategies. */
+/** Analysis (`/analiza`): the automatic market analysis. */
 export function AnalysisPage() {
-  const t = useT().analysis;
-  const [tab, setTab] = useState<'market' | 'strategies'>(() => {
-    try {
-      return localStorage.getItem(TAB_KEY) === 'strategies' ? 'strategies' : 'market';
-    } catch {
-      return 'market';
-    }
-  });
-  const choose = (next: 'market' | 'strategies') => {
-    setTab(next);
-    try {
-      localStorage.setItem(TAB_KEY, next);
-    } catch {
-      // The tab resets to "Market" on the next visit.
-    }
-  };
+  const all = useT();
+  const t = all.analysis;
   return (
     <main className="page">
       <div className="flex flex-wrap items-center gap-4">
         <h1 className="m-0 text-2xl font-bold tracking-tight">{t.title}</h1>
-        <div className="grow" />
-        <Segmented
-          label={t.title}
-          value={tab}
-          onChange={choose}
-          options={[
-            { value: 'market', label: t.tabs.market! },
-            { value: 'strategies', label: t.tabs.strategies! },
-          ]}
-        />
+        <AnalysisTabs />
       </div>
-      {tab === 'market' ? <MarketPanel /> : <StrategiesPanel />}
+      <PlanGate feature="analysis" demo={{ title: all.demo.analysisTitle, text: all.demo.analysisText }} plan={{ title: all.plans.analysisTitle, text: all.plans.analysisText }}>
+        <MarketPanel />
+      </PlanGate>
+    </main>
+  );
+}
+
+/** Strategies (`/strategie`, its own menu item since 2026-10-19): the user's strategies and entry rules. */
+export function StrategiesPage() {
+  const t = useT().nav;
+  return (
+    <main className="page">
+      <h1 className="m-0 text-2xl font-bold tracking-tight">{t.strategies}</h1>
+      <StrategiesPanel />
     </main>
   );
 }

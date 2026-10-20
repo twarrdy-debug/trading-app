@@ -1,4 +1,4 @@
-import { useContext, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ChangeEvent, type FocusEvent, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useLanguage, useT } from '../../i18n/index.tsx';
 import { currentLocale } from '../../lib/format.ts';
@@ -132,10 +132,31 @@ export function DateTimePicker({ value, onChange, mode = 'datetime', clearable =
   };
 
   const [hour = '', minute = ''] = time.split(':');
-  const setTime = (h: string, m: string) => {
-    const hh = Math.min(23, Math.max(0, Number(h) || 0));
-    const mm = Math.min(59, Math.max(0, Number(m) || 0));
-    commit(date || today, `${pad(hh)}:${pad(mm)}`);
+  // What is being typed in the hour or minute box: kept as typed ("1" on the way to "14") and
+  // committed whenever it is a valid number; padded to two digits once the box is left.
+  const [draft, setDraft] = useState<{ part: 'h' | 'm'; text: string } | null>(null);
+  const setTime = (h: number, m: number) => commit(date || today, `${pad(Math.min(23, Math.max(0, h)))}:${pad(Math.min(59, Math.max(0, m)))}`);
+  const timeBox = (part: 'h' | 'm') => {
+    const shown = part === 'h' ? hour : minute;
+    const max = part === 'h' ? 23 : 59;
+    const apply = (n: number) => (part === 'h' ? setTime(n, Number(minute) || 0) : setTime(Number(hour) || 0, n));
+    return {
+      value: draft?.part === part ? draft.text : shown,
+      onFocus: (e: FocusEvent<HTMLInputElement>) => e.target.select(),
+      onBlur: () => setDraft(null),
+      onChange: (e: ChangeEvent<HTMLInputElement>) => {
+        const text = e.target.value.replace(/\D/g, '').slice(0, 2);
+        setDraft({ part, text });
+        if (text !== '' && Number(text) <= max) apply(Number(text));
+      },
+      onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => {
+        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+        e.preventDefault();
+        setDraft(null);
+        // Wraps around: 23 → 00, 00 → 23 (59 → 00 for minutes).
+        apply(((Number(shown) || 0) + (e.key === 'ArrowUp' ? 1 : -1) + max + 1) % (max + 1));
+      },
+    };
   };
 
   const display = value
@@ -236,8 +257,7 @@ export function DateTimePicker({ value, onChange, mode = 'datetime', clearable =
                   aria-label={t.hour}
                   inputMode="numeric"
                   maxLength={2}
-                  value={hour}
-                  onChange={(e) => setTime(e.target.value.replace(/\D/g, ''), minute)}
+                  {...timeBox('h')}
                   className="h-9 w-12 rounded-lg border border-line bg-raised text-center font-mono text-sm outline-none focus:border-accent-ink"
                 />
                 <span className="font-mono">:</span>
@@ -245,8 +265,7 @@ export function DateTimePicker({ value, onChange, mode = 'datetime', clearable =
                   aria-label={t.minute}
                   inputMode="numeric"
                   maxLength={2}
-                  value={minute}
-                  onChange={(e) => setTime(hour, e.target.value.replace(/\D/g, ''))}
+                  {...timeBox('m')}
                   className="h-9 w-12 rounded-lg border border-line bg-raised text-center font-mono text-sm outline-none focus:border-accent-ink"
                 />
                 <span className="grow" />

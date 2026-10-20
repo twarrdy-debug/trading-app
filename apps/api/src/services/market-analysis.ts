@@ -1,5 +1,5 @@
 import {
-  ANALYSIS_RESOLUTIONS,
+  aggregateCandles,
   analysisSource,
   atr,
   CAPITAL_EPICS,
@@ -7,8 +7,11 @@ import {
   findEqualLevels,
   findPairBySymbol,
   findSwings,
+  RESOLUTION_MS,
+  STORED_RESOLUTIONS,
   type AnalysisResolution,
   type Candle,
+  type StoredResolution,
 } from '@trading/shared';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.ts';
@@ -21,11 +24,11 @@ import type { MarketDataProvider } from './market-data.ts';
 const WINDOW = 600;
 const CHART = 500;
 /** Swing strength (candles on each side) per resolution. */
-const STRENGTH: Record<AnalysisResolution, number> = { M5: 3, M15: 3, H1: 3, H4: 2, D1: 2 };
+const STRENGTH: Record<AnalysisResolution, number> = { M1: 3, M3: 3, M5: 3, M15: 3, M30: 3, H1: 3, H4: 2, D1: 2 };
 /** Equal highs/lows lie within this share of the ATR. */
 const EQUAL_ATR_SHARE = 0.1;
 /** Fetch again on demand when the last fetch is older than this (short timeframes sooner). */
-const ON_DEMAND_MS: Record<AnalysisResolution, number> = { M5: 60_000, M15: 2 * 60_000, H1: 5 * 60_000, H4: 5 * 60_000, D1: 5 * 60_000 };
+const ON_DEMAND_MS: Record<StoredResolution, number> = { M1: 30_000, M5: 60_000, M15: 2 * 60_000, M30: 2 * 60_000, H1: 5 * 60_000, H4: 5 * 60_000, D1: 5 * 60_000 };
 const SENTIMENT_MS = 5 * 60_000;
 
 /** When each instrument × resolution was last fetched (this process). */
@@ -36,7 +39,7 @@ const sentimentCache = new Map<string, { long: number; short: number; at: number
 const round = (n: number) => Math.round(n * 1e6) / 1e6;
 
 /** Brings the stored candles up to date: the whole window the first time, then from the last stored one. */
-export async function syncCandles(db: DB, market: MarketDataProvider, instrumentId: string, epic: string, resolution: AnalysisResolution) {
+export async function syncCandles(db: DB, market: MarketDataProvider, instrumentId: string, epic: string, resolution: StoredResolution) {
   const [latest] = await db
     .select({ ts: ohlcCandles.ts })
     .from(ohlcCandles)
@@ -71,8 +74,19 @@ export async function syncCandles(db: DB, market: MarketDataProvider, instrument
 export async function syncAll(db: DB, market: MarketDataProvider) {
   const rows = await db.select({ id: instruments.id, symbol: instruments.symbol }).from(instruments).where(inArray(instruments.symbol, Object.keys(CAPITAL_EPICS)));
   let candles = 0;
-  for (const row of rows) for (const resolution of ANALYSIS_RESOLUTIONS) candles += await syncCandles(db, market, row.id, CAPITAL_EPICS[row.symbol]!, resolution);
+  for (const row of rows) for (const resolution of STORED_RESOLUTIONS) candles += await syncCandles(db, market, row.id, CAPITAL_EPICS[row.symbol]!, resolution);
   return { instruments: rows.length, candles };
+}
+
+/** Fetches newer candles when the last fetch is older than the resolution's limit; returns the error, if any. */
+export async function refreshIfStale(db: DB, market: MarketDataProvider, instrumentId: string, epic: string, resolution: StoredResolution) {
+  if ((fetched.get(`${instrumentId}:${resolution}`) ?? 0) > Date.now() - ON_DEMAND_MS[resolution]) return null;
+  try {
+    await syncCandles(db, market, instrumentId, epic, resolution);
+    return null;
+  } catch (err) {
+    return (err as Error).message;
+  }
 }
 
 export function startAnalysisScheduler(db: DB, market: MarketDataProvider, minutes: number, log: (msg: string) => void) {
@@ -86,7 +100,7 @@ export function startAnalysisScheduler(db: DB, market: MarketDataProvider, minut
   return () => clearInterval(timer);
 }
 
-async function loadCandles(db: DB, instrumentId: string, resolution: AnalysisResolution, limit: number): Promise<Candle[]> {
+export async function loadCandles(db: DB, instrumentId: string, resolution: StoredResolution, limit: number): Promise<Candle[]> {
   const rows = await db
     .select()
     .from(ohlcCandles)
@@ -110,7 +124,7 @@ async function sentimentFor(market: MarketDataProvider | null, epics: string[]) 
 }
 
 /** The latest live futures − CFD difference for a futures instrument's pair (null when never measured). */
-async function basisOffset(db: DB, symbol: string) {
+export async function basisOffset(db: DB, symbol: string) {
   const pair = findPairBySymbol(symbol);
   if (!pair) return null;
   const [row] = await db
@@ -120,6 +134,15 @@ async function basisOffset(db: DB, symbol: string) {
     .orderBy(desc(basisSnapshots.measuredAt))
     .limit(1);
   return row ? { difference: row.difference, measuredAt: row.measuredAt } : null;
+}
+
+/** M3 is read from M1 candles; every other resolution is stored as such. */
+const storedFor = (resolution: AnalysisResolution): StoredResolution => (resolution === 'M3' ? 'M1' : resolution);
+
+/** The analysis window: M3 merged from three times as many M1 candles (the first, maybe partial, dropped). */
+async function windowCandles(db: DB, instrumentId: string, resolution: AnalysisResolution) {
+  if (resolution !== 'M3') return loadCandles(db, instrumentId, resolution, WINDOW);
+  return aggregateCandles(await loadCandles(db, instrumentId, 'M1', WINDOW * 3), RESOLUTION_MS.M3).slice(1);
 }
 
 const shift = (c: Candle, by: number): Candle => ({ ...c, open: round(c.open + by), high: round(c.high + by), low: round(c.low + by), close: round(c.close + by) });
@@ -137,9 +160,10 @@ export async function marketAnalysis(db: DB, market: MarketDataProvider | null, 
   const [sourceInstrument] = source.via ? await db.select().from(instruments).where(eq(instruments.symbol, source.via)) : [instrument];
   if (!sourceInstrument) throw badRequest('analysisUnavailable', { symbol: instrument.symbol });
 
+  const stored = storedFor(resolution);
   let fetchError: string | null = null;
   if (market) {
-    for (const res of new Set<AnalysisResolution>([resolution, 'D1'])) {
+    for (const res of new Set<StoredResolution>([stored, 'D1'])) {
       if ((fetched.get(`${sourceInstrument.id}:${res}`) ?? 0) > Date.now() - ON_DEMAND_MS[res]) continue;
       try {
         await syncCandles(db, market, sourceInstrument.id, source.epic, res);
@@ -152,7 +176,7 @@ export async function marketAnalysis(db: DB, market: MarketDataProvider | null, 
 
   const offset = source.via ? await basisOffset(db, instrument.symbol) : null;
   const by = offset?.difference ?? 0;
-  const candles = (await loadCandles(db, sourceInstrument.id, resolution, WINDOW)).map((c) => (by ? shift(c, by) : c));
+  const candles = (await windowCandles(db, sourceInstrument.id, resolution)).map((c) => (by ? shift(c, by) : c));
   // Enough days for the previous month's range and this month's open.
   const daily = (await loadCandles(db, sourceInstrument.id, 'D1', 70)).map((c) => (by ? shift(c, by) : c));
   const atrValue = atr(candles);

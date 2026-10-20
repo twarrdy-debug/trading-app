@@ -1,3 +1,4 @@
+import { DemoButton } from '../demo/Demo.tsx';
 import { LANGUAGES, SUPPORT_EMAIL } from '@trading/shared';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -47,7 +48,8 @@ export function LandingPage() {
   const { data: config } = useAuthConfig();
   const registration = config?.registration ?? 'invite';
   const { data: me } = useMe();
-  const signedIn = me != null;
+  // A real session or the demo; the development bypass (no session) shows the page as a guest sees it.
+  const signedIn = me != null && (me.authenticated || me.demo);
   usePageMeta({ title: t.seoTitle, description: t.seoDescription, index: true });
 
   const primary = signedIn ? (
@@ -97,6 +99,7 @@ export function LandingPage() {
               </button>
             ))}
           </div>
+          {!signedIn && <DemoButton variant="link" className="hidden px-2 text-[13px] text-dim! hover:text-ink! md:inline-flex" />}
           {/* On phones the hero has its own sign-in button right below. */}
           <Link
             to={signedIn ? '/dashboard' : '/logowanie'}
@@ -123,9 +126,16 @@ export function LandingPage() {
             </p>
             <div className="landing-rise flex flex-wrap items-center gap-3" style={{ animationDelay: '240ms' }}>
               {primary}
-              {signIn}
+              {/* The demo next to signing up; signing in stays in the header (and here on phones). */}
+              {signedIn ? null : <DemoButton />}
+              {signIn && <span className="sm:hidden">{signIn}</span>}
             </div>
-            {!signedIn && registration === 'invite' && <span className="-mt-2 text-[13px] text-dim">{t.inviteNote}</span>}
+            {!signedIn && (
+              <span className="-mt-2 text-[13px] text-dim">
+                {all.demo.note}
+                {registration === 'invite' ? ` ${t.inviteNote}` : ''}
+              </span>
+            )}
             <dl className="m-0 grid grid-cols-1 gap-4 pt-2 sm:grid-cols-3">
               {t.facts.map((fact) => (
                 <div key={fact.value} className="flex flex-col gap-0.5">
@@ -194,7 +204,7 @@ export function LandingPage() {
           <h2 className="m-0 grow text-2xl font-extrabold tracking-tight text-balance md:text-3xl">{t.finalTitle}</h2>
           <div className="flex shrink-0 flex-wrap gap-3">
             {primary}
-            {signIn}
+            {signedIn ? null : <DemoButton />}
           </div>
         </section>
       </main>

@@ -1,4 +1,4 @@
-import type { AnalysisResolution, Candle } from '@trading/shared';
+import type { Candle, StoredResolution } from '@trading/shared';
 
 /**
  * Market data for the analysis and the calculator: candles, the current price and client sentiment.
@@ -6,16 +6,19 @@ import type { AnalysisResolution, Candle } from '@trading/shared';
  * It is an unofficial source for personal use: clarify its terms before other users rely on it.
  */
 export interface MarketDataProvider {
-  fetchCandles(epic: string, resolution: AnalysisResolution, options: { max?: number; from?: Date }): Promise<Candle[]>;
+  /** With `to` a past stretch (backtesting); a stretch without trading (a weekend) gives no candles. */
+  fetchCandles(epic: string, resolution: StoredResolution, options: { max?: number; from?: Date; to?: Date }): Promise<Candle[]>;
   /** Mid price (between bid and ask) and when it was quoted. */
   fetchQuote(epic: string): Promise<{ price: number; time: Date }>;
   /** Mid price of the one-minute candle at `at` (the last one at or before it). */
   fetchQuoteAt(epic: string, at: Date): Promise<{ price: number; time: Date }>;
   /** Share of the source's clients long and short on each market, in %. */
   fetchSentiment(epics: string[]): Promise<{ epic: string; long: number; short: number }[]>;
+  /** Session tokens for the live price stream (logs in when needed). */
+  streamAuth?(): Promise<{ cst: string; token: string }>;
 }
 
-const CAPITAL_RESOLUTION: Record<AnalysisResolution, string> = { M5: 'MINUTE_5', M15: 'MINUTE_15', H1: 'HOUR', H4: 'HOUR_4', D1: 'DAY' };
+const CAPITAL_RESOLUTION: Record<StoredResolution, string> = { M1: 'MINUTE', M5: 'MINUTE_5', M15: 'MINUTE_15', M30: 'MINUTE_30', H1: 'HOUR', H4: 'HOUR_4', D1: 'DAY' };
 
 /** Capital.com allows 10 requests a second per user; stay well under it. */
 const MIN_GAP_MS = 150;
@@ -79,11 +82,19 @@ export function capitalProvider(config: { env: 'demo' | 'live'; identifier: stri
     }).then((body) => (body === null && retry ? get<T>(path, false) : (body as T)));
 
   return {
-    async fetchCandles(epic, resolution, { max = 1000, from }) {
+    async fetchCandles(epic, resolution, { max = 1000, from, to }) {
       const params = new URLSearchParams({ resolution: CAPITAL_RESOLUTION[resolution], max: String(max) });
-      // Capital.com reads `from` as UTC without a zone suffix.
+      // Capital.com reads `from` and `to` as UTC without a zone suffix.
       if (from) params.set('from', from.toISOString().slice(0, 19));
-      const body = await get<{ prices: CapitalPrice[] }>(`/prices/${encodeURIComponent(epic)}?${params}`);
+      if (to) params.set('to', to.toISOString().slice(0, 19));
+      let body: { prices: CapitalPrice[] };
+      try {
+        body = await get<{ prices: CapitalPrice[] }>(`/prices/${encodeURIComponent(epic)}?${params}`);
+      } catch (err) {
+        // A closed market in the asked stretch (weekend, holiday) answers 404.
+        if (to && /\b404\b/.test((err as Error).message)) return [];
+        throw err;
+      }
       // Bid prices, as broker charts show them by default.
       return body.prices.map((p) => ({
         time: new Date(`${p.snapshotTimeUTC}Z`).toISOString(),
@@ -117,6 +128,12 @@ export function capitalProvider(config: { env: 'demo' | 'live'; identifier: stri
         price: Math.round(((candle.closePrice.bid + candle.closePrice.ask) / 2) * 100) / 100,
         time: new Date(`${candle.snapshotTimeUTC}Z`),
       };
+    },
+    async streamAuth() {
+      await throttled(async () => {
+        if (!session || session.until < Date.now()) await login();
+      });
+      return { cst: session!.cst, token: session!.token };
     },
     async fetchSentiment(epics) {
       const body = await get<{ clientSentiments: { marketId: string; longPositionPercentage: number; shortPositionPercentage: number }[] }>(

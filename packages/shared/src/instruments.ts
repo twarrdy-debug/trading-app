@@ -88,16 +88,18 @@ export interface CfdFuturesPair {
   micro: string;
   /** Alert when the measured futures − CFD difference moves by more than this many points. */
   alertPoints: number;
+  /** Calculator PRO: a candle's high, low, open or close within this many points is the level's candle. */
+  matchPoints: number;
 }
 
 export const CFD_FUTURES_PAIRS: readonly CfdFuturesPair[] = [
-  { key: 'nasdaq', label: { pl: 'Nasdaq 100', en: 'Nasdaq 100' }, cfd: 'US100', mini: 'NQ1', micro: 'MNQ1', alertPoints: 10 },
-  { key: 'sp500', label: { pl: 'S&P 500', en: 'S&P 500' }, cfd: 'US500', mini: 'ES1', micro: 'MES1', alertPoints: 3 },
-  { key: 'dow', label: { pl: 'Dow Jones', en: 'Dow Jones' }, cfd: 'US30', mini: 'YM1', micro: 'MYM1', alertPoints: 30 },
-  { key: 'gold', label: { pl: 'Złoto', en: 'Gold' }, cfd: 'XAUUSD', mini: 'GC1', micro: 'MGC1', alertPoints: 2 },
+  { key: 'nasdaq', label: { pl: 'Nasdaq 100', en: 'Nasdaq 100' }, cfd: 'US100', mini: 'NQ1', micro: 'MNQ1', alertPoints: 10, matchPoints: 2 },
+  { key: 'sp500', label: { pl: 'S&P 500', en: 'S&P 500' }, cfd: 'US500', mini: 'ES1', micro: 'MES1', alertPoints: 3, matchPoints: 0.5 },
+  { key: 'dow', label: { pl: 'Dow Jones', en: 'Dow Jones' }, cfd: 'US30', mini: 'YM1', micro: 'MYM1', alertPoints: 30, matchPoints: 5 },
+  { key: 'gold', label: { pl: 'Złoto', en: 'Gold' }, cfd: 'XAUUSD', mini: 'GC1', micro: 'MGC1', alertPoints: 2, matchPoints: 0.5 },
   // CME bitcoin is 5 BTC (micro 0.1 BTC), ether 50 ETH (micro 0.1 ETH); the CFD is 1 coin a lot.
-  { key: 'bitcoin', label: { pl: 'Bitcoin', en: 'Bitcoin' }, cfd: 'BTCUSD', mini: 'BTC1', micro: 'MBT1', alertPoints: 100 },
-  { key: 'ether', label: { pl: 'Ethereum', en: 'Ethereum' }, cfd: 'ETHUSD', mini: 'ETH1', micro: 'MET1', alertPoints: 8 },
+  { key: 'bitcoin', label: { pl: 'Bitcoin', en: 'Bitcoin' }, cfd: 'BTCUSD', mini: 'BTC1', micro: 'MBT1', alertPoints: 100, matchPoints: 30 },
+  { key: 'ether', label: { pl: 'Ethereum', en: 'Ethereum' }, cfd: 'ETHUSD', mini: 'ETH1', micro: 'MET1', alertPoints: 8, matchPoints: 2 },
 ];
 
 /** The pair a symbol belongs to, on either side ("NAS100", "NQ1!", "MGC1" …). */

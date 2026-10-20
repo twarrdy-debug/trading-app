@@ -24,6 +24,8 @@ import { currentUserPlugin } from './plugins/current-user.ts';
 import { accountRoutes } from './routes/accounts.ts';
 import { adminRoutes } from './routes/admin.ts';
 import { analysisRoutes } from './routes/analysis.ts';
+import { backtestRoutes } from './routes/backtest.ts';
+import { demoRoutes } from './routes/demo.ts';
 import { authRoutes } from './routes/auth.ts';
 import { basisRoutes } from './routes/basis.ts';
 import { calendarRoutes } from './routes/calendar.ts';
@@ -36,6 +38,7 @@ import { spreadRoutes } from './routes/spreads.ts';
 import { strategyRoutes } from './routes/strategies.ts';
 import { tradeRoutes } from './routes/trades.ts';
 import { createQuoteProvider, type QuoteProvider } from './services/basis.ts';
+import { capitalLiveSource, type LiveSource } from './services/live-prices.ts';
 import { capitalProvider, type MarketDataProvider } from './services/market-data.ts';
 import { forexFactorySource, type CalendarSource } from './services/calendar.ts';
 import { frankfurterProvider, type FxProvider } from './services/fx.ts';
@@ -50,6 +53,7 @@ export async function buildApp({
   fx = frankfurterProvider,
   quotes,
   market,
+  live,
   calendar = forexFactorySource,
   news = financialJuiceSource,
   mailer,
@@ -62,6 +66,8 @@ export async function buildApp({
   quotes?: QuoteProvider;
   /** Market data for the analysis and the calculator's CFD side; defaults to Capital.com when its key is set, else none. */
   market?: MarketDataProvider | null;
+  /** Live prices for the analysis chart; defaults to Capital.com's stream when the market data has one. */
+  live?: LiveSource | null;
   calendar?: CalendarSource;
   news?: NewsSource;
   /** Defaults to SMTP_URL, or to writing e-mails to the log when it is not set. */
@@ -87,6 +93,10 @@ export async function buildApp({
         : null;
   app.decorate('market', marketData);
   app.decorate('quotes', quotes ?? createQuoteProvider(marketData));
+  const liveSource =
+    live !== undefined ? live : marketData?.streamAuth ? capitalLiveSource(() => marketData.streamAuth!(), undefined, (msg) => app.log.warn(msg)) : null;
+  app.decorate('live', liveSource);
+  app.addHook('onClose', async () => liveSource?.close());
   app.decorate('calendar', calendar);
   app.decorate('news', news);
   app.decorate('newsHub', new NewsHub());
@@ -108,7 +118,7 @@ export async function buildApp({
       });
     }
     if (error instanceof HttpError) {
-      return reply.status(error.statusCode).send({ error: t(language, error.key, error.params), details: error.details });
+      return reply.status(error.statusCode).send({ error: t(language, error.key, error.params), code: error.key, details: error.details });
     }
     const status = (error as { statusCode?: number }).statusCode ?? 500;
     if (status >= 500) req.log.error(error);
@@ -157,6 +167,8 @@ export async function buildApp({
   await app.register(newsRoutes);
   await app.register(signalRoutes);
   await app.register(analysisRoutes);
+  await app.register(backtestRoutes);
+  await app.register(demoRoutes);
   await app.register(strategyRoutes);
   await app.register(adminRoutes);
   await app.register(emailRoutes);

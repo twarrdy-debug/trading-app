@@ -11,6 +11,7 @@ import { InstrumentBadge } from '../../components/ui/InstrumentBadge.tsx';
 import { instrumentOptions } from '../../lib/instruments.ts';
 import { DateTimePicker } from '../../components/ui/DateTimePicker.tsx';
 import { Fragment, type ReactNode } from 'react';
+import { LinkIcon } from '../account/AccountsManager.tsx';
 
 export function TradeFilters({
   value,
@@ -84,6 +85,24 @@ export function TradeFilters({
 }
 
 /** White "N" on the FinancialJuice red: a red headline came out while the trade was open. */
+/** The row's money: on the all-accounts list a trade on linked accounts shows all of them together. */
+const rowPnl = (t: Trade) => (t.linked?.grouped ? t.linked.pnlTotal : t.pnlAccount);
+
+/** "×3 konta" with every account's result in its tooltip (linked accounts, a trade copier). */
+function LinkedBadge({ trade }: { trade: Trade }) {
+  const all = useT();
+  const linked = trade.linked!;
+  const title = linked.accounts
+    .map((a) => `${a.name ?? all.accounts.none}: ${a.pnlAccount == null ? '—' : formatAmount(a.pnlAccount, trade.accountCurrency)}`)
+    .join('\n');
+  return (
+    <span title={title} className="inline-flex items-center gap-1 rounded-full bg-warn-bg px-2 py-px font-sans text-[10.5px] font-bold whitespace-nowrap text-warn">
+      <LinkIcon className="size-3" />
+      {all.accounts.linkedBadge(linked.accounts.length)}
+    </span>
+  );
+}
+
 function RedNewsMark({ trade }: { trade: Trade }) {
   const t = useT().table;
   const titles = trade.redNews
@@ -242,10 +261,11 @@ export function TradeTable({
                     {dateFormat.format(opened)} <span className="font-mono font-semibold text-ink">{timeFormat.format(opened)}</span> · #{t.dayIndex}
                     {showAccount && ` · ${account?.name ?? all.accounts.none}`}
                   </span>
+                  {t.linked && <LinkedBadge trade={t} />}
                 </span>
                 <span className="flex shrink-0 flex-col items-end gap-0.5">
-                  <span className={`text-[15px] font-semibold ${tone(t.pnlAccount)}`}>
-                    {t.pnlAccount != null ? formatAmount(t.pnlAccount, t.accountCurrency) : t.pnlQuote != null ? labels.noRate : '—'}
+                  <span className={`text-[15px] font-semibold ${tone(rowPnl(t))}`}>
+                    {rowPnl(t) != null ? formatAmount(rowPnl(t), t.accountCurrency) : t.pnlQuote != null ? labels.noRate : '—'}
                   </span>
                   <span className={`text-xs ${tone(t.rMultiple)}`}>{t.rMultiple == null ? '' : `${formatNumber(t.rMultiple, true)} R`}</span>
                 </span>
@@ -357,7 +377,14 @@ export function TradeTable({
                     )}
                   </div>
                 </td>
-                {showAccount && <td className="max-w-36 truncate px-3 py-3 font-sans">{account?.name ?? <span className="text-dim">{all.accounts.none}</span>}</td>}
+                {showAccount && (
+                  <td className="max-w-40 px-3 py-3 font-sans">
+                    <div className="flex flex-col items-start gap-1">
+                      <span className="max-w-40 truncate">{t.linked?.grouped ? all.accounts.linkedAccounts(t.linked.accounts.length) : (account?.name ?? <span className="text-dim">{all.accounts.none}</span>)}</span>
+                      {t.linked && <LinkedBadge trade={t} />}
+                    </div>
+                  </td>
+                )}
                 <td className="px-3 py-3">
                   <div className="flex flex-col items-start gap-1">
                     <InstrumentBadge symbol={t.instrument.symbol} />
@@ -372,8 +399,8 @@ export function TradeTable({
                 </td>
                 <td className="px-3 py-3 whitespace-nowrap">
                   <div className="flex flex-col gap-0.5">
-                    <span className={`font-semibold ${tone(t.pnlAccount)}`}>
-                      {t.pnlAccount != null ? formatAmount(t.pnlAccount, t.accountCurrency) : t.pnlQuote != null ? labels.noRate : '—'}
+                    <span className={`font-semibold ${tone(rowPnl(t))}`}>
+                      {rowPnl(t) != null ? formatAmount(rowPnl(t), t.accountCurrency) : t.pnlQuote != null ? labels.noRate : '—'}
                     </span>
                     <span className="text-[11px] text-dim">{t.resultUnits == null ? all.common.open : formatUnits(t.resultUnits, all.units.short[t.instrument.measureUnit])}</span>
                   </div>

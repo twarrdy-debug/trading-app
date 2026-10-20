@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analysisSource, atr, dayLevels, ema, findEqualLevels, findFvgs, findStructure, findSwings, macd, premiumDiscount, rsi, sessionLevels, type Candle } from '../src/index.ts';
+import { analysisSource, atr, dayLevels, ema, findEqualLevels, findFvgs, findStructure, findSwings, macd, premiumDiscount, rsi, sessionLevels, withLivePrice, type Candle } from '../src/index.ts';
 
 /** Hourly candles from [high, low] pairs; open/close sit in the middle. */
 const candles = (bars: [number, number][], start = '2026-10-05T00:00:00Z', stepMs = 3_600_000): Candle[] =>
@@ -205,5 +205,25 @@ describe('month and week opens', () => {
     expect(levels.pml).toBe(190);
     expect(levels.monthOpen).toBe(daily.find((c) => c.time.startsWith('2026-10-01'))!.open);
     expect(levels.weekOpen).toBe(daily.find((c) => c.time.startsWith('2026-10-12'))!.open);
+  });
+});
+
+describe('live price on the chart', () => {
+  const c = (time: string, o: number, h: number, l: number, cl: number) => ({ time, open: o, high: h, low: l, close: cl });
+  const candles = [c('2026-10-20T12:00:00.000Z', 10, 12, 9, 11), c('2026-10-20T12:05:00.000Z', 11, 13, 10, 12)];
+  const M5 = 300_000;
+
+  it('extends the last candle within its period', () => {
+    expect(withLivePrice(candles, { time: '2026-10-20T12:07:30.000Z', price: 14 }, M5).at(-1)).toEqual(c('2026-10-20T12:05:00.000Z', 11, 14, 10, 14));
+    expect(withLivePrice(candles, { time: '2026-10-20T12:07:30.000Z', price: 9.5 }, M5).at(-1)).toEqual(c('2026-10-20T12:05:00.000Z', 11, 13, 9.5, 9.5));
+  });
+
+  it('opens the next candle, and ignores a price older than the last candle', () => {
+    const next = withLivePrice(candles, { time: '2026-10-20T12:10:02.000Z', price: 12.5 }, M5);
+    expect(next).toHaveLength(3);
+    expect(next.at(-1)).toEqual(c('2026-10-20T12:10:00.000Z', 12.5, 12.5, 12.5, 12.5));
+    expect(withLivePrice(candles, { time: '2026-10-20T11:59:00.000Z', price: 50 }, M5)).toBe(candles);
+    // Daily candles start at the source's own hour: only extended.
+    expect(withLivePrice(candles, { time: '2026-10-21T12:10:00.000Z', price: 12.5 }, 86_400_000, true)).toHaveLength(2);
   });
 });

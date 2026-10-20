@@ -5,11 +5,23 @@ import { findPairBySymbol } from './instruments.ts';
  * the previous day's and week's range and ATR. Pure functions shared by the API and clients.
  */
 
-export const ANALYSIS_RESOLUTIONS = ['M5', 'M15', 'H1', 'H4', 'D1'] as const;
+export const ANALYSIS_RESOLUTIONS = ['M1', 'M3', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'] as const;
 export type AnalysisResolution = (typeof ANALYSIS_RESOLUTIONS)[number];
+/** Resolutions fetched and stored; M3 is built from M1 (Capital.com has no three-minute candles). */
+export const STORED_RESOLUTIONS = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'] as const;
+export type StoredResolution = (typeof STORED_RESOLUTIONS)[number];
 
 /** Length of one candle of each resolution, in ms. */
-export const RESOLUTION_MS: Record<AnalysisResolution, number> = { M5: 300_000, M15: 900_000, H1: 3_600_000, H4: 4 * 3_600_000, D1: 24 * 3_600_000 };
+export const RESOLUTION_MS: Record<AnalysisResolution, number> = {
+  M1: 60_000,
+  M3: 180_000,
+  M5: 300_000,
+  M15: 900_000,
+  M30: 1_800_000,
+  H1: 3_600_000,
+  H4: 4 * 3_600_000,
+  D1: 24 * 3_600_000,
+};
 
 export interface Candle {
   /** Opening time, ISO string in UTC. */
@@ -226,4 +238,29 @@ export function dayLevels(daily: readonly Candle[]): DayLevels {
     pmh: month.length ? Math.max(...month.map((c) => c.high)) : null,
     pml: month.length ? Math.min(...month.map((c) => c.low)) : null,
   };
+}
+
+/** A live price: the bid at a moment. */
+export interface LivePrice {
+  time: string;
+  price: number;
+}
+
+/**
+ * The candles with the live price applied: the last candle extended (high, low, close), or a new
+ * one opened when the price falls into the next period. Daily candles are only extended, since the
+ * source starts its days at its own hour.
+ */
+export function withLivePrice(candles: Candle[], live: LivePrice | null, periodMs: number, daily = false): Candle[] {
+  const last = candles.at(-1);
+  if (!last || !live) return candles;
+  const at = Date.parse(live.time);
+  const lastStart = Date.parse(last.time);
+  if (at < lastStart) return candles;
+  const start = Math.floor(at / periodMs) * periodMs;
+  if (daily || start <= lastStart) {
+    const updated = { ...last, high: Math.max(last.high, live.price), low: Math.min(last.low, live.price), close: live.price };
+    return [...candles.slice(0, -1), updated];
+  }
+  return [...candles, { time: new Date(start).toISOString(), open: live.price, high: live.price, low: live.price, close: live.price }];
 }

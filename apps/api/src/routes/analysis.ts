@@ -1,5 +1,6 @@
 import {
   addChecklistItemSchema,
+  analysisSource,
   checklistParams,
   createLevelSchema,
   DEFAULT_CHECKLIST_ITEMS,
@@ -11,6 +12,7 @@ import {
   updateChecklistSchema,
   updateLevelSchema,
 } from '@trading/shared';
+import type { ServerResponse } from 'node:http';
 import { and, asc, eq, gte, inArray, isNull, lte, or } from 'drizzle-orm';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import {
@@ -22,9 +24,9 @@ import {
   sessionChecklists,
 } from '../db/schema.ts';
 import type { DB } from '../db/client.ts';
-import { badRequest, notFound } from '../errors.ts';
+import { badRequest, HttpError, notFound } from '../errors.ts';
 import type { CurrentUser } from '../plugins/current-user.ts';
-import { analysisOverview, marketAnalysis } from '../services/market-analysis.ts';
+import { analysisOverview, basisOffset, marketAnalysis } from '../services/market-analysis.ts';
 
 const HIGHER_TIMEFRAMES = ['H4', 'D1', 'W1', 'MN'] as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -54,7 +56,73 @@ async function eventsForDay(db: DB, user: CurrentUser, instrumentId: string, dat
   return rows.filter((e) => toLocalDate(e.eventTime, user.timezone) === date);
 }
 
+/** Keeps proxies and tunnels from closing an idle stream. */
+const LIVE_PING_MS = 25_000;
+/** A futures chart's shift is read again this often while it is open. */
+const OFFSET_MS = 60_000;
+/** Open live charts per user (one per tab). */
+const MAX_LIVE_PER_USER = 6;
+
 export const analysisRoutes: FastifyPluginAsyncZod = async (app) => {
+  const liveStreams = new Map<string, number>();
+  const liveResponses = new Set<ServerResponse>();
+  // Open streams would keep the server from closing.
+  app.addHook('onClose', async () => {
+    for (const res of liveResponses) res.end();
+  });
+
+  /**
+   * The instrument's live price as server-sent events (`event: price`, `{ time, price }`), the bid
+   * like the candles; futures get their CFD's price shifted by the latest measured difference.
+   */
+  app.get('/analysis/live/:id', { schema: { tags: ['analiza'], params: idParams } }, async (req, reply) => {
+    const live = app.live;
+    if (!live) throw badRequest('liveUnavailable');
+    const [instrument] = await app.db.select().from(instruments).where(eq(instruments.id, req.params.id));
+    if (!instrument) throw notFound('unknownInstrument');
+    const source = analysisSource(instrument.symbol);
+    if (!source) throw badRequest('analysisUnavailable', { symbol: instrument.symbol });
+    const userId = req.user.id;
+    const open = liveStreams.get(userId) ?? 0;
+    if (open >= MAX_LIVE_PER_USER) throw new HttpError(429, 'tooManyStreams');
+    liveStreams.set(userId, open + 1);
+
+    let shift = source.via ? ((await basisOffset(app.db, instrument.symbol))?.difference ?? 0) : 0;
+    reply.hijack();
+    const res = reply.raw;
+    res.writeHead(200, {
+      ...(reply.getHeaders() as Record<string, string>),
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache, no-transform',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+    });
+    res.write('retry: 5000\n\n');
+    liveResponses.add(res);
+    const unsubscribe = live.subscribe(source.epic, (q) => {
+      const price = Math.round((q.price + shift) * 1e6) / 1e6;
+      res.write(`event: price\ndata: ${JSON.stringify({ time: q.time.toISOString(), price })}\n\n`);
+    });
+    const ping = setInterval(() => res.write(': ping\n\n'), LIVE_PING_MS);
+    const offset = source.via
+      ? setInterval(() => {
+          void basisOffset(app.db, instrument.symbol).then((o) => {
+            if (o) shift = o.difference;
+          });
+        }, OFFSET_MS)
+      : null;
+    const end = () => {
+      unsubscribe();
+      clearInterval(ping);
+      if (offset) clearInterval(offset);
+      liveResponses.delete(res);
+      const left = (liveStreams.get(userId) ?? 1) - 1;
+      if (left > 0) liveStreams.set(userId, left);
+      else liveStreams.delete(userId);
+    };
+    req.raw.on('close', end);
+  });
+
   /**
    * Automatic analysis of one instrument from market data: candles, swings, equal highs and lows,
    * the previous day's and week's levels, ATR and client sentiment. Not investment advice.

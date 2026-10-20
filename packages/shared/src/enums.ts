@@ -1,13 +1,19 @@
 // Enum values shared by the database schema, API validation and clients.
 
-export const ROLE_KEYS = ['admin', 'educator', 'user', 'vip'] as const;
+/**
+ * Roles (plans since 2026-10-20, see plans.ts): `user` became `pro` (every user then kept all
+ * features), `standard` is the limited plan for new sign-ups, and `educator` stays in the database
+ * enum only, withdrawn for now (its users became Pro).
+ */
+export const ROLE_KEYS = ['admin', 'educator', 'pro', 'vip', 'standard'] as const;
 export type RoleKey = (typeof ROLE_KEYS)[number];
 
 export const ROLE_NAMES: Record<RoleKey, string> = {
   admin: 'Administrator',
-  educator: 'Edukator',
-  user: 'Użytkownik',
+  educator: 'Edukator (wycofana)',
+  pro: 'Pro',
   vip: 'VIP',
+  standard: 'Standard',
 };
 
 /** Long = buy, short = sell. Signals written as BUY/SELL map onto these. */
@@ -72,7 +78,8 @@ export const THEMES = ['dark', 'light', 'system'] as const;
 export type Theme = (typeof THEMES)[number];
 
 /** Optional trading account profile: a live account or a prop firm account (challenge / funded). */
-export const ACCOUNT_TYPES = ['live', 'prop'] as const;
+/** `backtest`: an account for backtesting sessions only, never in the journal, stats or monitor. */
+export const ACCOUNT_TYPES = ['live', 'prop', 'backtest'] as const;
 export type AccountType = (typeof ACCOUNT_TYPES)[number];
 
 /**

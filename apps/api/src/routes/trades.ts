@@ -9,7 +9,7 @@ import {
   tradeStatsQuerySchema,
   updateTradeSchema,
 } from '@trading/shared';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { trades, tradeScreenshots } from '../db/schema.ts';
@@ -94,7 +94,9 @@ export const tradeRoutes: FastifyPluginAsyncZod = async (app) => {
     '/trades/:id/screenshots',
     { schema: { tags, params: idParams, consumes: ['multipart/form-data'] }, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
     async (req, reply) => {
-      await getTrade(app.db, req.user, req.params.id);
+      // A copy on a linked account shares its source's screenshots.
+      const trade = await getTrade(app.db, req.user, req.params.id);
+      const owner = trade.copyOf ?? trade.id;
       const file = await req.file();
       if (!file) throw badRequest('noFile');
       let bytes: Buffer;
@@ -112,7 +114,7 @@ export const tradeRoutes: FastifyPluginAsyncZod = async (app) => {
 
       const [row] = await app.db
         .insert(tradeScreenshots)
-        .values({ tradeId: req.params.id, storageKey, mimeType: type.mimeType, sizeBytes: bytes.length })
+        .values({ tradeId: owner, storageKey, mimeType: type.mimeType, sizeBytes: bytes.length })
         .returning();
       return reply.status(201).send({ id: row!.id, url: `/files/${storageKey}`, mimeType: row!.mimeType, sizeBytes: row!.sizeBytes });
     },
@@ -136,8 +138,9 @@ export const tradeRoutes: FastifyPluginAsyncZod = async (app) => {
     '/trades/:id/screenshots/:screenshotId',
     { schema: { tags, params: idParams.extend({ screenshotId: z.uuid() }) } },
     async (req, reply) => {
+      // A copy on a linked account removes from its source's screenshots, which it shows.
       const owned = app.db
-        .select({ id: trades.id })
+        .select({ id: sql<string>`coalesce(${trades.copyOf}, ${trades.id})` })
         .from(trades)
         .where(and(eq(trades.id, req.params.id), eq(trades.userId, req.user.id)));
       const [deleted] = await app.db

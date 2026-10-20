@@ -1,9 +1,10 @@
-import { toLocalDate, type CreateAccountInput, type UpdateAccountInput } from '@trading/shared';
+import { hasFeature, toLocalDate, type CreateAccountInput, type UpdateAccountInput } from '@trading/shared';
 import { marketName } from '../i18n.ts';
-import { and, asc, count, eq, inArray, isNotNull, ne } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import { and, asc, count, eq, inArray, isNotNull, ne, notInArray } from 'drizzle-orm';
 import type { DB } from '../db/client.ts';
-import { instruments, tradeScreenshots, tradingAccounts, trades } from '../db/schema.ts';
-import { badRequest, notFound } from '../errors.ts';
+import { backtestSessions, backtestTrades, instruments, tradeScreenshots, tradingAccounts, trades } from '../db/schema.ts';
+import { badRequest, HttpError, notFound } from '../errors.ts';
 import type { CurrentUser } from '../plugins/current-user.ts';
 
 export type TradingAccount = typeof tradingAccounts.$inferSelect;
@@ -20,6 +21,14 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export const listAccounts = (db: DB, user: CurrentUser) =>
   db.select().from(tradingAccounts).where(eq(tradingAccounts.userId, user.id)).orderBy(asc(tradingAccounts.createdAt));
+
+/** The accounts of the journal, stats and monitor: every one but the backtesting ones. */
+export const journalAccounts = (db: DB, user: CurrentUser) =>
+  db
+    .select()
+    .from(tradingAccounts)
+    .where(and(eq(tradingAccounts.userId, user.id), ne(tradingAccounts.type, 'backtest')))
+    .orderBy(asc(tradingAccounts.createdAt));
 
 /** The daily limits in force for an account: its own where set, otherwise the user's defaults. */
 export const accountLimits = (
@@ -57,19 +66,41 @@ function oneUnit<T extends Partial<CreateAccountInput>>(input: T): T {
   return out;
 }
 
+/** A backtesting account has only a name, a size and a leverage: no market, prop limits or own limits. */
+const backtestOnly = <T extends Partial<CreateAccountInput>>(input: T): T =>
+  input.type === 'backtest'
+    ? { ...input, market: null, maxDrawdownPct: null, maxDrawdownAmount: null, profitTargetPct: null, profitTargetAmount: null, maxTradesPerDay: null, lossStreakAlert: null }
+    : input;
+
 export async function createAccount(db: DB, user: CurrentUser, input: CreateAccountInput) {
+  // Plans: backtesting accounts are part of Backtesting, more than one account is Pro and VIP.
+  if (input.type === 'backtest' && !hasFeature(user.role, 'backtest')) throw new HttpError(403, 'planPro');
+  if (!hasFeature(user.role, 'multipleAccounts')) {
+    const [row] = await db.select({ n: count() }).from(tradingAccounts).where(eq(tradingAccounts.userId, user.id));
+    if ((row?.n ?? 0) >= 1) throw new HttpError(403, 'accountLimit');
+  }
   assertPropRules(input);
+  const values = backtestOnly(oneUnit(input));
   const [row] = await db
     .insert(tradingAccounts)
-    .values({ ...oneUnit(input), market: input.market ?? null, userId: user.id })
+    .values({ ...values, market: values.market ?? null, userId: user.id })
     .returning();
   return row!;
 }
 
 export async function updateAccount(db: DB, user: CurrentUser, id: string, patch: UpdateAccountInput) {
   const existing = await getAccount(db, user, id);
+  if (patch.type && (patch.type === 'backtest') !== (existing.type === 'backtest')) throw badRequest('backtestTypeFixed');
   assertPropRules({ ...existing, ...patch });
-  const [row] = await db.update(tradingAccounts).set(oneUnit(patch)).where(eq(tradingAccounts.id, existing.id)).returning();
+  // Linked accounts share one market; changing it would break the link.
+  if (existing.linkGroup && patch.market !== undefined && (patch.market ?? null) !== (existing.market ?? null)) {
+    throw badRequest('linkMarketMismatch', { account: existing.name });
+  }
+  const [row] = await db
+    .update(tradingAccounts)
+    .set(backtestOnly({ ...oneUnit(patch), type: existing.type }))
+    .where(eq(tradingAccounts.id, existing.id))
+    .returning();
   return row!;
 }
 
@@ -103,6 +134,8 @@ export async function deleteAccount(
     let files: string[] = [];
     if (mode === 'move') await tx.update(trades).set({ accountId: moveTo }).where(own);
     if (mode === 'delete') {
+      // Copies on the other linked accounts stay: one of them takes over.
+      await promoteCopies(tx, (await tx.select({ id: trades.id }).from(trades).where(own)).map((r) => r.id));
       files = (
         await tx
           .select({ key: tradeScreenshots.storageKey })
@@ -113,8 +146,79 @@ export async function deleteAccount(
       await tx.delete(trades).where(own);
     }
     await tx.delete(tradingAccounts).where(eq(tradingAccounts.id, existing.id));
+    await dissolveLoneGroups(tx, user.id);
     return files;
   });
+}
+
+/**
+ * Links the account with `others` (a trade copier: every trade saved on one is saved on all), or
+ * unlinks it when `others` is empty. Linked accounts must trade the same market. Accounts that were
+ * in the group but are left out are unlinked; a group of one is no group.
+ */
+export async function setAccountLinks(db: DB, user: CurrentUser, id: string, others: string[]) {
+  const account = await getAccount(db, user, id);
+  const ids = [...new Set([account.id, ...others])];
+  const members = await db.select().from(tradingAccounts).where(and(eq(tradingAccounts.userId, user.id), inArray(tradingAccounts.id, ids)));
+  if (members.length !== ids.length) throw notFound('accountNotFound');
+  if (ids.length > 1 && members.some((m) => m.type === 'backtest')) throw badRequest('linkBacktest');
+  const mismatch = members.find((m) => (m.market ?? null) !== (account.market ?? null));
+  if (mismatch) throw badRequest('linkMarketMismatch', { account: mismatch.name });
+  await db.transaction(async (tx) => {
+    const group = members.find((m) => m.linkGroup)?.linkGroup ?? randomUUID();
+    const old = [...new Set(members.map((m) => m.linkGroup).filter((g): g is string => g != null))];
+    // Everyone else in the groups touched leaves them.
+    if (old.length) {
+      await tx
+        .update(tradingAccounts)
+        .set({ linkGroup: null })
+        .where(and(eq(tradingAccounts.userId, user.id), inArray(tradingAccounts.linkGroup, old), notInArray(tradingAccounts.id, ids)));
+    }
+    await tx
+      .update(tradingAccounts)
+      .set({ linkGroup: ids.length > 1 ? group : null })
+      .where(and(eq(tradingAccounts.userId, user.id), inArray(tradingAccounts.id, ids)));
+  });
+}
+
+/** The other accounts linked with this one (empty when it is not linked). */
+export async function linkedAccounts(db: DB, user: CurrentUser, account: Pick<TradingAccount, 'id' | 'linkGroup'>) {
+  if (!account.linkGroup) return [];
+  return db
+    .select()
+    .from(tradingAccounts)
+    .where(and(eq(tradingAccounts.userId, user.id), eq(tradingAccounts.linkGroup, account.linkGroup), ne(tradingAccounts.id, account.id)))
+    .orderBy(asc(tradingAccounts.createdAt));
+}
+
+/** A group with one account left is no group. */
+async function dissolveLoneGroups(db: Pick<DB, 'select' | 'update'>, userId: string) {
+  const rows = await db
+    .select({ group: tradingAccounts.linkGroup, n: count() })
+    .from(tradingAccounts)
+    .where(and(eq(tradingAccounts.userId, userId), isNotNull(tradingAccounts.linkGroup)))
+    .groupBy(tradingAccounts.linkGroup);
+  const lone = rows.filter((r) => r.n < 2).map((r) => r.group!);
+  if (lone.length) await db.update(tradingAccounts).set({ linkGroup: null }).where(inArray(tradingAccounts.linkGroup, lone));
+}
+
+/**
+ * Before trades are deleted or moved out of a link: each of them that other trades copy hands that
+ * role to its first copy, so the copies on other accounts survive.
+ */
+export async function promoteCopies(db: Pick<DB, 'select' | 'update'>, tradeIds: string[]) {
+  if (tradeIds.length === 0) return;
+  const copies = await db
+    .select({ id: trades.id, copyOf: trades.copyOf })
+    .from(trades)
+    .where(and(inArray(trades.copyOf, tradeIds), notInArray(trades.id, tradeIds)))
+    .orderBy(asc(trades.createdAt));
+  const heirs = new Map<string, string>();
+  for (const c of copies) if (!heirs.has(c.copyOf!)) heirs.set(c.copyOf!, c.id);
+  for (const [source, heir] of heirs) {
+    await db.update(trades).set({ copyOf: null }).where(eq(trades.id, heir));
+    await db.update(trades).set({ copyOf: heir }).where(and(eq(trades.copyOf, source), ne(trades.id, heir)));
+  }
 }
 
 /** How many trades (open ones included) each of the user's accounts has. */
@@ -144,6 +248,13 @@ export async function accountTradeRows(db: DB, user: CurrentUser, accountIds: st
       ),
     );
   for (const r of rows) byAccount.get(r.accountId!)?.push({ pnl: r.pnl!, at: (r.closedAt ?? r.openedAt).getTime(), tradeDate: r.tradeDate });
+  // A backtesting account's balance moves with its sessions' closed positions (at their replay times).
+  const backtest = await db
+    .select({ accountId: backtestSessions.accountId, pnl: backtestTrades.pnl, closedAt: backtestTrades.closedAt })
+    .from(backtestTrades)
+    .innerJoin(backtestSessions, eq(backtestSessions.id, backtestTrades.sessionId))
+    .where(and(eq(backtestTrades.userId, user.id), inArray(backtestSessions.accountId, accountIds), isNotNull(backtestTrades.pnl), isNotNull(backtestTrades.closedAt)));
+  for (const r of backtest) byAccount.get(r.accountId)?.push({ pnl: r.pnl!, at: r.closedAt!.getTime(), tradeDate: toLocalDate(r.closedAt!, user.timezone) });
   for (const list of byAccount.values()) list.sort((a, b) => a.at - b.at);
   return byAccount;
 }
@@ -241,6 +352,8 @@ export function accountOverview(account: TradingAccount, rows: AccountTradeRow[]
     /** Own limits (null = the defaults from the settings). */
     maxTradesPerDay: account.maxTradesPerDay,
     lossStreakAlert: account.lossStreakAlert,
+    /** Accounts sharing this id are linked (trades are saved on all of them); null = not linked. */
+    linkGroup: account.linkGroup,
     size,
     trades: rows.length,
     balance: round2(balance),

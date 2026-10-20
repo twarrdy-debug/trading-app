@@ -41,7 +41,7 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
     user: {
       modelName: 'users',
       fields: { name: 'displayName' },
-      additionalFields: { role: { type: 'string', input: false, defaultValue: 'user' } },
+      additionalFields: { role: { type: 'string', input: false, defaultValue: 'standard' } },
     },
     session: { modelName: 'authSessions', expiresIn: 60 * 60 * 24 * 30, updateAge: 60 * 60 * 24 },
     account: { modelName: 'authAccounts' },
@@ -123,9 +123,17 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
           const [row] = await db.select({ disabledAt: users.disabledAt }).from(users).where(eq(users.email, ctx.body.email.trim().toLowerCase()));
           if (row?.disabledAt) throw new APIError('FORBIDDEN', { message: 'Account blocked', code: 'ACCOUNT_DISABLED' });
         }
-        if (ctx.path !== '/sign-up/email' || env.REGISTRATION !== 'invite') return;
-        const invite = await findUsableInvite(db, ctx.body?.inviteCode, ctx.body?.email);
-        if (!invite) throw new APIError('BAD_REQUEST', { message: 'Invalid or used invite code', code: 'INVALID_INVITE' });
+        if (ctx.path !== '/sign-up/email') return;
+        if (env.REGISTRATION === 'invite') {
+          const invite = await findUsableInvite(db, ctx.body?.inviteCode, ctx.body?.email);
+          if (!invite) throw new APIError('BAD_REQUEST', { message: 'Invalid or used invite code', code: 'INVALID_INVITE' });
+        }
+        // An address already registered is said so (the owner's choice, 2026-10-20), after the invite
+        // check so that only someone with a code can ask; nothing is created and the invite stays.
+        if (typeof ctx.body?.email === 'string') {
+          const [taken] = await db.select({ id: users.id }).from(users).where(eq(users.email, ctx.body.email.trim().toLowerCase()));
+          if (taken) throw new APIError('UNPROCESSABLE_ENTITY', { message: 'User already exists', code: 'USER_ALREADY_EXISTS' });
+        }
       }),
     },
   });

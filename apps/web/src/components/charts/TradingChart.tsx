@@ -18,6 +18,7 @@ import {
 } from 'lightweight-charts';
 import { useEffect, useRef, useState } from 'react';
 import { currentLocale } from '../../lib/format.ts';
+import type { ChartSync } from './chart-sync.ts';
 
 export interface ChartCandle {
   time: string;
@@ -41,6 +42,8 @@ export interface ChartBox {
   dashed?: boolean;
   /** Where the label goes: inside at the right end (default) or just above the top left corner, clear of the candles. */
   labelAt?: 'right' | 'above';
+  /** One candle wide around `from` (`to` is ignored): a highlighted candle. */
+  bar?: boolean;
 }
 
 /** A labelled dashed segment at a price between two candles (BOS / CHoCH). */
@@ -124,9 +127,11 @@ class ZonesPrimitive implements ISeriesPrimitive<Time> {
           const labels: { x: number; y: number; w: number; text: string; color: string }[] = [];
           ctx.font = `700 10px ${FONT}`;
           for (const b of this.boxes) {
-            const x1 = x(b.from) ?? (toTime(b.from) < (ts.getVisibleRange()?.from as number) ? 0 : null);
+            const center = b.bar ? x(b.from) : null;
+            const half = (ts.options().barSpacing ?? BAR_PX) / 2 + 1;
+            const x1 = b.bar ? (center == null ? null : center - half) : (x(b.from) ?? (toTime(b.from) < (ts.getVisibleRange()?.from as number) ? 0 : null));
             if (x1 == null) continue;
-            const x2 = b.to ? (x(b.to) ?? mediaSize.width) : mediaSize.width;
+            const x2 = b.bar ? center! + half : b.to ? (x(b.to) ?? mediaSize.width) : mediaSize.width;
             const y1 = y(b.top);
             const y2 = y(b.bottom);
             if (y1 == null || y2 == null) continue;
@@ -205,6 +210,10 @@ export function TradingChart({
   watermark,
   resetKey,
   ariaLabel,
+  sync,
+  focus,
+  periodMs,
+  followNewest = false,
 }: {
   candles: ChartCandle[];
   overlays: ChartLineSeries[];
@@ -221,18 +230,28 @@ export function TradingChart({
   /** A new value rebuilds the chart and resets the view (instrument, timeframe, indicator set). */
   resetKey: string;
   ariaLabel: string;
+  /** Scrolling, zoom and the crosshair shared with other charts of the same moments. */
+  sync?: ChartSync;
+  /** Centres the view on this candle whenever `key` changes. */
+  focus?: { time: string; key: string } | null;
+  /** Length of one candle: a countdown to the last candle's close sits under its price on the axis. */
+  periodMs?: number;
+  /** Always bring a newly added candle into view (a replay), even after the user scrolled away. */
+  followNewest?: boolean;
 }) {
   const box = useRef<HTMLDivElement>(null);
   /** Index of the candle under the cursor (null: the last one). */
   const [hover, setHover] = useState<number | null>(null);
-  const chartRef = useRef<{ chart: IChartApi; candles: ISeriesApi<'Candlestick'>; zones: ZonesPrimitive; fresh: boolean } | null>(null);
+  const chartRef = useRef<{ chart: IChartApi; candles: ISeriesApi<'Candlestick'>; zones: ZonesPrimitive; fresh: boolean; count: number } | null>(null);
   /** The candles the legend reads (the change against the previous close). */
   const data = useRef<ChartCandle[]>(candles);
   data.current = candles;
-  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme ?? 'dark');
+  // The theme and the user's candle colours: a change of either redraws the chart.
+  const look = () => `${document.documentElement.dataset.theme ?? 'dark'}|${token('chart-up')}|${token('chart-down')}|${token('chart-hollow')}`;
+  const [theme, setTheme] = useState(look);
 
   useEffect(() => {
-    const observer = new MutationObserver(() => setTheme(document.documentElement.dataset.theme ?? 'dark'));
+    const observer = new MutationObserver(() => setTheme(look()));
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style'] });
     return () => observer.disconnect();
   }, []);
@@ -281,10 +300,14 @@ export function TradingChart({
     });
     const up = token('chart-up');
     const down = token('chart-down');
+    // The user's choice (Settings → Appearance): rising candles as outlines.
+    const hollow = token('chart-hollow') === '1';
     const series = chart.addSeries(CandlestickSeries, {
-      upColor: up,
+      upColor: hollow ? token('chart-bg') : up,
       downColor: down,
-      borderVisible: false,
+      borderVisible: hollow,
+      borderUpColor: up,
+      borderDownColor: down,
       wickUpColor: up,
       wickDownColor: down,
       priceLineStyle: LineStyle.Dotted,
@@ -299,18 +322,27 @@ export function TradingChart({
     }
     const zones = new ZonesPrimitive();
     series.attachPrimitive(zones);
-    chartRef.current = { chart, candles: series, zones, fresh: true };
+    chartRef.current = { chart, candles: series, zones, fresh: true, count: 0 };
 
+    const leave = sync?.join(
+      {
+        chart,
+        series,
+        closes: () => new Map(data.current.map((c) => [toTime(c.time), c.close])),
+      },
+      el,
+    );
     chart.subscribeCrosshairMove((param) => {
       const list = data.current;
       const index = param.logical != null && param.seriesData.get(series) ? Math.round(param.logical) : list.length - 1;
       setHover(index >= 0 && index < list.length ? index : list.length - 1);
     });
     return () => {
+      leave?.();
       chart.remove();
       chartRef.current = null;
     };
-  }, [resetKey, theme, timeZone, decimals, watermark]);
+  }, [resetKey, theme, timeZone, decimals, watermark, sync]);
 
   // Data, indicators and overlays: replaced in place, keeping the view.
   useEffect(() => {
@@ -318,6 +350,11 @@ export function TradingChart({
     if (!ref || candles.length === 0) return;
     const { chart } = ref;
     const times = candles.map((c) => toTime(c.time));
+    // Following the newest candle (it was in view): keep following when one is added (live, replay).
+    const before = chart.timeScale().getVisibleLogicalRange();
+    const grew = !ref.fresh && ref.count > 0 && candles.length > ref.count;
+    const follow = grew && (followNewest || (before != null && before.to >= ref.count - 1));
+    ref.count = candles.length;
     ref.candles.setData(candles.map((c, i) => ({ time: times[i]!, open: c.open, high: c.high, low: c.low, close: c.close })));
 
     const added: ISeriesApi<'Line' | 'Histogram'>[] = [];
@@ -363,6 +400,7 @@ export function TradingChart({
       ref.candles.createPriceLine({ price: l.price, color: fade(l.color, 0.75), lineWidth: 1, lineStyle: LineStyle.SparseDotted, axisLabelVisible: true, title: l.label }),
     );
     ref.zones.set(boxes, segments);
+    if (follow) chart.timeScale().scrollToRealTime();
     if (ref.fresh) {
       // As many candles as fit at BAR_PX each, so wide screens show more history, not fatter candles.
       const fit = Math.round((box.current?.clientWidth ?? 900) / BAR_PX) - 10;
@@ -374,7 +412,53 @@ export function TradingChart({
       for (const s of added) chart.removeSeries(s);
       for (const l of priceLines) ref.candles.removePriceLine(l);
     };
-  }, [candles, overlays, boxes, segments, lines, panes, resetKey, theme]);
+  }, [candles, overlays, boxes, segments, lines, panes, resetKey, theme, followNewest]);
+
+  // Centre on the focused candle once per focus (and again after a rebuild).
+  const focused = useRef<string | null>(null);
+  useEffect(() => {
+    const ref = chartRef.current;
+    if (!ref || !focus || candles.length === 0) return;
+    const mark = `${focus.key}|${resetKey}|${theme}`;
+    if (focused.current === mark) return;
+    const index = candles.findIndex((c) => c.time >= focus.time);
+    if (index < 0) return;
+    focused.current = mark;
+    const half = Math.round((box.current?.clientWidth ?? 900) / BAR_PX / 2);
+    ref.chart.timeScale().setVisibleLogicalRange({ from: index - half, to: index + half });
+  }, [focus, candles, resetKey, theme]);
+
+  // Time left until the last candle closes, under its price label on the axis (as on TradingView).
+  const [countdown, setCountdown] = useState<{ y: number; width: number; text: string; up: boolean } | null>(null);
+  useEffect(() => {
+    if (!periodMs) {
+      setCountdown(null);
+      return;
+    }
+    const update = () => {
+      const ref = chartRef.current;
+      const last = data.current.at(-1);
+      if (!ref || !last) return setCountdown(null);
+      const left = Date.parse(last.time) + periodMs - Date.now();
+      const y = ref.candles.priceToCoordinate(last.close);
+      // A closed market (the last candle long over) has nothing to count down.
+      if (left <= 0 || y == null) return setCountdown(null);
+      const total = Math.ceil(left / 1000);
+      const h = Math.floor(total / 3600);
+      const m = Math.floor((total % 3600) / 60);
+      const sec = total % 60;
+      const two = (n: number) => String(n).padStart(2, '0');
+      setCountdown({ y, width: ref.chart.priceScale('right').width(), text: h ? `${h}:${two(m)}:${two(sec)}` : `${two(m)}:${two(sec)}`, up: last.close >= last.open });
+    };
+    update();
+    const timer = setInterval(update, 1000);
+    const ref = chartRef.current;
+    ref?.chart.timeScale().subscribeVisibleLogicalRangeChange(update);
+    return () => {
+      clearInterval(timer);
+      ref?.chart.timeScale().unsubscribeVisibleLogicalRangeChange(update);
+    };
+  }, [periodMs, candles, resetKey, theme]);
 
   // The hovered candle (or the last one): OHLC and its change against the previous close.
   const at = hover ?? candles.length - 1;
@@ -386,6 +470,16 @@ export function TradingChart({
   return (
     <div className="relative" style={{ height: height ?? 'clamp(520px, 74vh, 920px)' }}>
       <div ref={box} role="img" aria-label={ariaLabel} className="absolute inset-0" />
+      {countdown && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute right-0 z-10 flex justify-center font-mono text-[10.5px] leading-4 font-semibold text-white"
+          // Just under the last price's label, in the candle's colour like the label itself.
+          style={{ top: countdown.y + 7, width: countdown.width, borderRadius: '0 0 3px 3px', background: countdown.up ? 'var(--chart-up)' : 'var(--chart-down)' }}
+        >
+          {countdown.text}
+        </div>
+      )}
       {/* Like the legend line on TradingView. */}
       {bar && (
         <div

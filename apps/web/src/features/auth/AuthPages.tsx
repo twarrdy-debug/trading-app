@@ -3,6 +3,7 @@ import { usePageMeta } from '../../lib/seo.ts';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { AuthError, authApi, useAuthConfig, useResetSession } from '../../api/auth.ts';
+import { DemoButton } from '../demo/Demo.tsx';
 import { api } from '../../api/client.ts';
 import { Button } from '../../components/ui/Button.tsx';
 import { Field, Input } from '../../components/ui/Field.tsx';
@@ -79,6 +80,7 @@ const linkClass = 'font-semibold text-ink underline-offset-2 hover:underline';
 
 export function LoginPage() {
   const t = useT().auth;
+  const demo = useT().demo;
   const errorText = useErrorText();
   const navigate = useNavigate();
   const resetSession = useResetSession();
@@ -158,6 +160,10 @@ export function LoginPage() {
         <Button type="submit" variant="primary" size="lg" disabled={busy}>
           {busy ? t.signingIn : t.signIn}
         </Button>
+        <div className="mt-1 flex flex-wrap items-center justify-between gap-2 rounded-(--radius-control) bg-raised px-3.5 py-3 text-[13px]">
+          <span className="text-dim">{demo.signInPrompt}</span>
+          <DemoButton variant="link" />
+        </div>
       </form>
     </AuthLayout>
   );
@@ -258,6 +264,8 @@ export function RegisterPage() {
   const [errors, setErrors] = useState<string[]>([]);
   /** The account exists and waits for the e-mailed activation link. */
   const [sentTo, setSentTo] = useState<string | null>(null);
+  /** The address already has an account: sign in or reset the password instead. */
+  const [taken, setTaken] = useState(false);
   const rulesId = useId();
 
   const submit = async (e: FormEvent) => {
@@ -265,6 +273,7 @@ export function RegisterPage() {
     if (!isStrongPassword(password)) return setErrors([t.weakPassword]);
     setBusy(true);
     setErrors([]);
+    setTaken(false);
     try {
       await authApi.signUp({
         name: name.trim(),
@@ -276,6 +285,7 @@ export function RegisterPage() {
       });
       setSentTo(email.trim());
     } catch (err) {
+      setTaken(err instanceof AuthError && err.code.startsWith('USER_ALREADY_EXISTS'));
       setErrors([errorText(err)]);
     } finally {
       setBusy(false);
@@ -326,6 +336,16 @@ export function RegisterPage() {
         </Field>
         <PasswordRules password={password} id={rulesId} />
         <Errors lines={errors} />
+        {taken && (
+          <p className="-mt-2 m-0 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+            <Link to="/logowanie" className={linkClass}>
+              {t.signIn}
+            </Link>
+            <Link to="/reset-hasla" className={linkClass}>
+              {t.forgot}
+            </Link>
+          </p>
+        )}
         <Button type="submit" variant="primary" size="lg" disabled={busy}>
           {busy ? t.signingUp : t.signUp}
         </Button>

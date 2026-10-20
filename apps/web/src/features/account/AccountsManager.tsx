@@ -2,9 +2,9 @@ import type { AccountListItem as AccountSummary } from '@trading/api/types';
 import { LEVERAGE_OPTIONS, type AccountType, type DrawdownType, type Market } from '@trading/shared';
 import { useState } from 'react';
 import { ApiError } from '../../api/client.ts';
-import { useAccounts, useDeleteAccount, useMe, useSaveAccount } from '../../api/hooks.ts';
+import { useAllAccounts, useDeleteAccount, useLinkAccounts, useMe, useSaveAccount } from '../../api/hooks.ts';
 import { Button } from '../../components/ui/Button.tsx';
-import { Field, Input, Segmented } from '../../components/ui/Field.tsx';
+import { Field, Input, Segmented, toggleClass } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
 import { currencyLabel, formatAmount, formatNumber, parseDecimal, toInputNumber } from '../../lib/format.ts';
@@ -26,9 +26,14 @@ function propSummary(all: ReturnType<typeof useT>, a: AccountSummary, currency: 
 export function AccountsManager({ currency }: { currency: string }) {
   const all = useT();
   const t = all.accounts;
-  const { data: accounts = [] } = useAccounts();
+  const { data: accounts = [] } = useAllAccounts();
+  const { data: me } = useMe();
+  // The Standard plan has one trading account.
+  const oneAccountOnly = me != null && !me.plan.features.includes('multipleAccounts') && accounts.length >= 1;
   const [editing, setEditing] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [linking, setLinking] = useState<string | null>(null);
+  const linkedTo = (a: AccountSummary) => (a.linkGroup ? accounts.filter((o) => o.id !== a.id && o.linkGroup === a.linkGroup) : []);
 
   return (
     <div className="flex flex-col gap-3">
@@ -51,7 +56,18 @@ export function AccountsManager({ currency }: { currency: string }) {
                     {a.leverage ? ` · 1:${a.leverage}` : ''}
                     {a.maxTradesPerDay != null || a.lossStreakAlert != null ? ` · ${t.ownLimits(a.maxTradesPerDay, a.lossStreakAlert)}` : ''}
                   </span>
+                  {linkedTo(a).length > 0 && (
+                    <span className="mt-1 inline-flex items-center gap-1.5 self-start rounded-full bg-warn-bg px-2.5 py-0.5 text-[11px] font-semibold text-warn">
+                      <LinkIcon />
+                      {t.linkedWith(linkedTo(a).map((o) => o.name).join(', '))}
+                    </span>
+                  )}
                 </div>
+                {a.type !== 'backtest' && (
+                  <Button size="sm" variant="ghost" aria-expanded={linking === a.id} onClick={() => setLinking(linking === a.id ? null : a.id)}>
+                    {t.link}
+                  </Button>
+                )}
                 <Button size="sm" variant="ghost" onClick={() => setEditing(a.id)}>
                   {t.edit}
                 </Button>
@@ -59,7 +75,8 @@ export function AccountsManager({ currency }: { currency: string }) {
                   {t.delete}
                 </Button>
               </div>
-              {deleting === a.id && <DeleteAccount account={a} others={accounts.filter((o) => o.id !== a.id)} onDone={() => setDeleting(null)} />}
+              {deleting === a.id && <DeleteAccount account={a} others={accounts.filter((o) => o.id !== a.id && o.type !== 'backtest')} onDone={() => setDeleting(null)} />}
+              {linking === a.id && <LinkAccounts account={a} accounts={accounts} onDone={() => setLinking(null)} />}
             </li>
           ),
         )}
@@ -67,11 +84,77 @@ export function AccountsManager({ currency }: { currency: string }) {
 
       {editing === 'new' ? (
         <AccountForm currency={currency} onDone={() => setEditing(null)} />
+      ) : oneAccountOnly ? (
+        <span className="rounded-(--radius-control) bg-accent/10 px-3 py-2.5 text-[13px] ring-1 ring-accent/30 ring-inset">{all.plans.accountLimit}</span>
       ) : (
         <Button size="sm" onClick={() => setEditing('new')} className="self-start whitespace-nowrap">
           {t.add}
         </Button>
       )}
+    </div>
+  );
+}
+
+/** A chain link, for linked accounts. */
+export function LinkIcon({ className = 'size-3.5' }: { className?: string }) {
+  return (
+    <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </svg>
+  );
+}
+
+/**
+ * Linking (a trade copier): pick the other accounts of the same market; a trade saved on one is then
+ * saved on all of them. Saving with none picked unlinks the account.
+ */
+function LinkAccounts({ account, accounts, onDone }: { account: AccountSummary; accounts: AccountSummary[]; onDone: () => void }) {
+  const all = useT();
+  const t = all.accounts;
+  const link = useLinkAccounts();
+  const candidates = accounts.filter((o) => o.id !== account.id && o.type !== 'backtest' && (o.market ?? null) === (account.market ?? null));
+  const [picked, setPicked] = useState<string[]>(() => (account.linkGroup ? candidates.filter((o) => o.linkGroup === account.linkGroup).map((o) => o.id) : []));
+  const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  const save = (ids: string[]) => link.mutate({ id: account.id, accountIds: ids }, { onSuccess: onDone });
+  return (
+    <div className="flex flex-col gap-3 rounded-(--radius-control) border border-line bg-panel p-3.5">
+      <div className="flex flex-col gap-1">
+        <span className="flex items-center gap-2 text-sm font-semibold">
+          <LinkIcon className="size-4 text-accent-ink" />
+          {t.linkTitle}
+        </span>
+        <span className="text-xs text-dim">{t.linkHelp}</span>
+      </div>
+      {candidates.length === 0 ? (
+        <span className="text-[13px] text-dim">{t.linkNone}</span>
+      ) : (
+        <div role="group" aria-label={t.linkTitle} className="flex flex-wrap gap-2">
+          <span className={`flex h-10 items-center px-3.5 text-[13px] opacity-80 ${toggleClass(true)}`}>{account.name}</span>
+          {candidates.map((o) => (
+            <button key={o.id} type="button" aria-pressed={picked.includes(o.id)} onClick={() => toggle(o.id)} className={`flex h-10 items-center px-3.5 text-[13px] ${toggleClass(picked.includes(o.id))}`}>
+              {o.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {picked.length > 0 && <span className="text-xs font-semibold text-accent-ink">{t.linkCount(picked.length + 1)}</span>}
+      {link.error && <span className="text-xs text-sell">{link.error instanceof ApiError ? link.error.lines.join(' ') : link.error.message}</span>}
+      <div className="flex flex-wrap gap-2">
+        {candidates.length > 0 && (
+          <Button size="sm" variant="primary" disabled={link.isPending} onClick={() => save(picked)}>
+            {t.linkSave}
+          </Button>
+        )}
+        {account.linkGroup && (
+          <Button size="sm" variant="ghost" disabled={link.isPending} onClick={() => save([])}>
+            {t.unlink}
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" onClick={onDone}>
+          {all.common.cancel}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -232,6 +315,8 @@ function AccountForm({ account, currency, onDone }: { account?: AccountSummary; 
   const [errors, setErrors] = useState<string[]>([]);
 
   const prop = type === 'prop';
+  const backtest = type === 'backtest';
+  const canBacktest = me?.plan.features.includes('backtest') ?? true;
   // Leverage only matters for CFD: live accounts and prop accounts on CFD.
   // Futures margins are set by the exchange; CFD brokers and crypto exchanges use leverage.
   const showLeverage = !prop || market !== 'futures';
@@ -259,8 +344,8 @@ function AccountForm({ account, currency, onDone }: { account?: AccountSummary; 
           profitTargetPct: targetUnit === 'pct' ? goal : null,
           profitTargetAmount: targetUnit === 'amount' ? goal : null,
           leverage: showLeverage && leverage ? Number(leverage) : null,
-          maxTradesPerDay: tradeLimit.trim() ? Number(tradeLimit) : null,
-          lossStreakAlert: lossLimit.trim() ? Number(lossLimit) : null,
+          maxTradesPerDay: !backtest && tradeLimit.trim() ? Number(tradeLimit) : null,
+          lossStreakAlert: !backtest && lossLimit.trim() ? Number(lossLimit) : null,
         },
       },
       { onSuccess: onDone, onError: (err) => setErrors(err instanceof ApiError ? err.lines : [err.message]) },
@@ -283,10 +368,16 @@ function AccountForm({ account, currency, onDone }: { account?: AccountSummary; 
           label={t.type}
           value={type}
           onChange={setType}
-          options={[
-            { value: 'live', label: t.live },
-            { value: 'prop', label: t.prop },
-          ]}
+          // A backtesting account stays one: its type cannot change, nor can another account become one.
+          options={
+            account?.type === 'backtest'
+              ? [{ value: 'backtest', label: t.backtest }]
+              : [
+                  { value: 'live', label: t.live },
+                  { value: 'prop', label: t.prop },
+                  ...(account || !canBacktest ? [] : [{ value: 'backtest' as const, label: t.backtest }]),
+                ]
+          }
         />
         {prop && (
           <>
@@ -305,6 +396,7 @@ function AccountForm({ account, currency, onDone }: { account?: AccountSummary; 
         )}
       </div>
       {prop && <span className="-mt-1 text-xs text-dim">{t.marketHelp}</span>}
+      {backtest && <span className="-mt-1 text-xs text-dim">{t.backtestHelp}</span>}
       {prop && (
         <div className="flex flex-col gap-1.5">
           <div className="flex flex-wrap items-center gap-3">
@@ -359,7 +451,7 @@ function AccountForm({ account, currency, onDone }: { account?: AccountSummary; 
           </Field>
         )}
       </div>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className={`grid grid-cols-1 gap-3 sm:grid-cols-2 ${backtest ? 'hidden' : ''}`}>
         <Field label={t.tradeLimit} help={t.limitsHelp}>
           <Input type="number" inputMode="numeric" min={1} max={100} step={1} value={tradeLimit} onChange={(e) => setTradeLimit(e.target.value)} placeholder={t.byDefault(me?.settings.maxTradesPerDay ?? null)} />
         </Field>

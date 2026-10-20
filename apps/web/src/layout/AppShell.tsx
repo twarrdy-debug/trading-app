@@ -8,7 +8,8 @@ import { lossAlertMessage } from '../features/journal/MonitorPanel.tsx';
 import { useT } from '../i18n/index.tsx';
 import { useNewsLive, useNewsStream } from '../lib/news-live.ts';
 import { usePageMeta } from '../lib/seo.ts';
-import { applyTheme, DEFAULT_ACCENT, systemTheme } from '../lib/theme.ts';
+import { DemoBanner, leaveDemo } from '../features/demo/Demo.tsx';
+import { applyCandles, applyTheme, DEFAULT_ACCENT, systemTheme } from '../lib/theme.ts';
 import { Onboarding } from '../features/onboarding/Onboarding.tsx';
 import { NavIcon } from './NavIcon.tsx';
 import { SessionClock, ThemeIcon } from './SessionClock.tsx';
@@ -127,6 +128,7 @@ export function AppShell() {
   }, [drawer]);
 
   const signOut = async () => {
+    if (me?.demo) return leaveDemo('/');
     await authApi.signOut().catch(() => undefined);
     await resetSession();
     await navigate({ to: '/logowanie' });
@@ -135,15 +137,19 @@ export function AppShell() {
   const basis = useBasis();
   // A changed CFD/futures difference on any market the calculator covers.
   const basisAlert = basis.data?.some((p) => p.alert) ?? false;
-  useNewsStream(Boolean(me), me?.settings.newsKeywords ?? [], t.news.alertTitle);
+  // No news in the demo or the Standard plan (owner's choice), so no stream either.
+  useNewsStream(Boolean(me) && !me?.demo && Boolean(me?.plan.features.includes('news')), me?.settings.newsKeywords ?? [], t.news.alertTitle);
   const newsUnseen = useNewsLive().unseen > 0;
 
   const theme = me?.settings.theme ?? 'dark';
   const accent = me?.settings.accentColor ?? DEFAULT_ACCENT;
   // Until /me arrives, the theme set by theme-init.js (last used) stays; applying the default would flash.
+  const chartStyle = me?.settings.chartStyle ?? null;
   useEffect(() => {
-    if (me) applyTheme(theme, accent);
-  }, [me, theme, accent]);
+    if (!me) return;
+    applyTheme(theme, accent);
+    applyCandles(chartStyle, theme);
+  }, [me, theme, accent, chartStyle]);
 
   // "system" shows (and switches away from) whatever the operating system uses now.
   const shownTheme = theme === 'system' ? systemTheme() : theme;
@@ -189,6 +195,7 @@ export function AppShell() {
             )}
           </header>
         </div>
+        {me?.demo && <DemoBanner />}
         <LossStreakBanner />
         <Outlet />
       </div>

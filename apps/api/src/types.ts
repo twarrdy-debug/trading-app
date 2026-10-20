@@ -3,6 +3,8 @@ import type { instruments } from './db/schema.ts';
 import type { toPublicUser } from './routes/me.ts';
 import type { AccountOverview, accountOverviews, TradingAccount as TradingAccountRow } from './services/accounts.ts';
 import type { basisOverview } from './services/basis.ts';
+import type { proCandles } from './services/calculator-pro.ts';
+import type { backtestCandles, getBacktestSession, listBacktestSessions } from './services/backtest.ts';
 import type { analysisOverview, marketAnalysis } from './services/market-analysis.ts';
 import type { eventHistory, listEvents, RefreshResult } from './services/calendar.ts';
 import type { invites } from './db/schema.ts';
@@ -21,7 +23,8 @@ export type Jsonify<T> = T extends Date
       ? { [K in keyof T]: Jsonify<T[K]> }
       : T;
 
-export type PublicUser = Jsonify<ReturnType<typeof toPublicUser>>;
+/** `tradesUsed` comes with GET /me (not with the answers of settings changes). */
+export type PublicUser = Jsonify<ReturnType<typeof toPublicUser>> & { tradesUsed?: number | null };
 /** `favorite`: one of the acting user's favourite instruments. */
 export type Instrument = Jsonify<typeof instruments.$inferSelect & { currencies: string[]; favorite: boolean }>;
 export type Trade = Jsonify<TradeView>;
@@ -30,6 +33,11 @@ export type TradeMutation = Jsonify<Omit<Awaited<ReturnType<typeof createTrade>>
 export type TradeStats = Jsonify<Awaited<ReturnType<typeof tradeStats>>>;
 export type BasisOverview = Jsonify<Awaited<ReturnType<typeof basisOverview>>>;
 export type BasisPair = BasisOverview[number];
+export type ProCandles = Jsonify<Awaited<ReturnType<typeof proCandles>>>;
+export type BacktestCandles = Jsonify<Awaited<ReturnType<typeof backtestCandles>>>;
+export type BacktestSession = Jsonify<Awaited<ReturnType<typeof getBacktestSession>>>;
+export type BacktestSessionListItem = Jsonify<Awaited<ReturnType<typeof listBacktestSessions>>[number]>;
+export type BacktestTrade = BacktestSession['trades'][number];
 export type CalendarResponse = Jsonify<Awaited<ReturnType<typeof listEvents>>>;
 export type CalendarEvent = CalendarResponse['events'][number];
 export type CalendarRefresh = RefreshResult;
@@ -79,6 +87,8 @@ export interface DailySpread {
 
 export interface ApiErrorBody {
   error: string;
+  /** The message key (e.g. `demoReadOnly`), for clients that react to a specific refusal. */
+  code?: string;
   issues?: { path: string; message: string }[];
   details?: unknown;
 }

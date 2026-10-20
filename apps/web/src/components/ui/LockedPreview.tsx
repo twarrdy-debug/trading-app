@@ -7,7 +7,21 @@ import { useT } from '../../i18n/index.tsx';
  * out of reach for the mouse, keyboard and screen readers) under a card with a lock that says how
  * to unlock it.
  */
-export function LockedPreview({ title, text, children }: { title: string; text: string; children: ReactNode }) {
+export function LockedPreview({
+  title,
+  text,
+  children,
+  eyebrow,
+  actions,
+}: {
+  title: string;
+  text: string;
+  children: ReactNode;
+  /** The small label above the title (default "Preview"). */
+  eyebrow?: string;
+  /** In place of "Add a trade" / "Import" (e.g. the demo's sign-up and sign-in). */
+  actions?: ReactNode;
+}) {
   const t = useT().locked;
   return (
     <div className="relative isolate min-h-[34rem] overflow-hidden rounded-(--radius)">
@@ -26,16 +40,20 @@ export function LockedPreview({ title, text, children }: { title: string; text: 
               <path d="M12 14.5v2.5" />
             </svg>
           </span>
-          <span className="eyebrow">{t.preview}</span>
+          <span className="eyebrow">{eyebrow ?? t.preview}</span>
           <h2 className="m-0 text-xl font-bold tracking-tight text-balance">{title}</h2>
           <p className="m-0 text-sm text-dim text-pretty">{text}</p>
           <div className="mt-1 flex flex-wrap justify-center gap-2">
-            <Link to="/transakcje" className="inline-flex h-11 items-center rounded-(--radius-control) bg-accent px-5 text-sm font-bold text-on-accent no-underline hover:brightness-105">
-              + {t.add}
-            </Link>
-            <Link to="/transakcje" search={{ import: 'mt5' }} className="inline-flex h-11 items-center rounded-(--radius-control) border border-line bg-panel px-5 text-sm font-semibold text-ink no-underline hover:bg-raised">
-              {t.import}
-            </Link>
+            {actions ?? (
+              <>
+                <Link to="/transakcje" className="inline-flex h-11 items-center rounded-(--radius-control) bg-accent px-5 text-sm font-bold text-on-accent no-underline hover:brightness-105">
+                  + {t.add}
+                </Link>
+                <Link to="/transakcje" search={{ import: 'mt5' }} className="inline-flex h-11 items-center rounded-(--radius-control) border border-line bg-panel px-5 text-sm font-semibold text-ink no-underline hover:bg-raised">
+                  {t.import}
+                </Link>
+              </>
+            )}
           </div>
         </section>
       </div>

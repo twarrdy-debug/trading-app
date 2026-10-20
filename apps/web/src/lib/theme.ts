@@ -1,4 +1,4 @@
-import { ACCENT_COLORS, type Theme } from '@trading/shared';
+import { ACCENT_COLORS, candleColors, type ChartStyle, type Theme } from '@trading/shared';
 
 /** Orange is the app's default accent. */
 export const DEFAULT_ACCENT = ACCENT_COLORS.orange;
@@ -27,6 +27,18 @@ export const systemTheme = () => (window.matchMedia('(prefers-color-scheme: ligh
 
 /** localStorage key read by the inline script in index.html, so the first paint already has the right theme. */
 const STORED_THEME_KEY = 'theme';
+
+/**
+ * The user's candle colours (calm palettes, shared/chart.ts) over the theme's --chart-up/--chart-down,
+ * so the chart, its legend and the MACD bars all follow them; --chart-hollow draws rising candles as outlines.
+ */
+export function applyCandles(style: ChartStyle | null | undefined, theme: Theme) {
+  const root = document.documentElement;
+  const colors = candleColors(style, theme === 'system' ? systemTheme() : theme);
+  root.style.setProperty('--chart-up', colors.up);
+  root.style.setProperty('--chart-down', colors.down);
+  root.style.setProperty('--chart-hollow', colors.hollow ? '1' : '0');
+}
 
 export function applyTheme(theme: Theme, accent: string | null) {
   const root = document.documentElement;

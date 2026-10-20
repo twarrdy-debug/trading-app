@@ -193,10 +193,12 @@ export async function buildDaySummary(db: DB, env: Env, user: CurrentUser, now =
   const rows = [...items].sort((a, b) => a.openedAt.getTime() - b.openedAt.getTime());
   const [stats, overviews] = await Promise.all([tradeStats(db, user, { dateFrom: day, dateTo: day }), accountOverviews(db, user)]);
   const currency = user.accountCurrency;
-  const pnl = rows.reduce((sum, r) => sum + (r.pnlAccount ?? 0), 0);
+  // A trade on linked accounts is one row with every account's money.
+  const rowPnl = (r: (typeof rows)[number]) => r.linked?.pnlTotal ?? r.pnlAccount;
+  const pnl = rows.reduce((sum, r) => sum + (rowPnl(r) ?? 0), 0);
   const rValues = rows.map((r) => r.rMultiple).filter((r): r is number => r != null);
   const rSum = rValues.reduce((a, b) => a + b, 0);
-  const accountIds = [...new Set(rows.map((r) => r.accountId))];
+  const accountIds = [...new Set(rows.flatMap((r) => (r.linked ? r.linked.accounts.map((a) => a.accountId) : [r.accountId])))];
   const accounts = accountIds.map((id) => overviews.find((o) => o.id === id)).filter((o) => o != null);
   const single = accountIds.length === 1 && accounts.length === 1 ? accounts[0]! : null;
   const limit = single ? (single.maxTradesPerDay ?? user.maxTradesPerDay) : null;
@@ -240,7 +242,7 @@ export async function buildDaySummary(db: DB, env: Env, user: CurrentUser, now =
         side: r.direction === 'long' ? 'Long' : 'Short',
         symbol: r.instrument.symbol,
         detail: `${size} ${r.instrument.market === 'crypto' ? coinOf(r.instrument.symbol) : UNIT[l][r.instrument.market === 'futures' ? 'futures' : 'cfd']} · ${price(r.entryPrice)} → ${price(r.exitPrice)}`,
-        pnl: r.pnlAccount == null ? '–' : money(l, r.pnlAccount, currency),
+        pnl: rowPnl(r) == null ? '–' : money(l, rowPnl(r)!, currency),
         win: r.outcome === 'win' ? true : r.outcome === 'loss' ? false : null,
         r: r.rMultiple == null ? '' : `${signed(l, r.rMultiple)}R`,
       };

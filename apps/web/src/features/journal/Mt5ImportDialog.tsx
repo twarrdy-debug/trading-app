@@ -4,11 +4,12 @@ import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.ts';
 import { useMt5Import } from '../../api/hooks.ts';
 import { Button } from '../../components/ui/Button.tsx';
-import { Field } from '../../components/ui/Field.tsx';
+import { Field, Segmented } from '../../components/ui/Field.tsx';
 import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
 import { currencyLabel, formatAmount, formatDateTime, formatNumber } from '../../lib/format.ts';
 import { instrumentOptions } from '../../lib/instruments.ts';
+import { LinkIcon } from '../account/AccountsManager.tsx';
 
 const TIMEZONE_KEY = 'mt5-timezone';
 const TRADOVATE_TIMEZONE_KEY = 'tradovate-timezone';
@@ -73,6 +74,8 @@ export function Mt5ImportDialog({
   // Tradovate writes times in the zone set in the platform: the user's own by default.
   const [csvTimezone, setCsvTimezone] = useState<string>(() => load<string>(TRADOVATE_TIMEZONE_KEY, userTimezone));
   const [includeSimilar, setIncludeSimilar] = useState(false);
+  /** Linked account: the trades came from a trade copier (save on all) or not; null until answered. */
+  const [fromCopier, setFromCopier] = useState<boolean | null>(null);
   const [symbolMap, setSymbolMap] = useState<Record<string, string>>(() => load(SYMBOL_MAP_KEY, {}));
   const [preview, setPreview] = useState<Mt5Import | null>(null);
   /** Remounts the file input, so choosing another file starts empty. */
@@ -96,7 +99,7 @@ export function Mt5ImportDialog({
     // Only assignments for symbols in this report are sent.
     const relevant = Object.fromEntries(Object.entries(map).filter(([, id]) => instruments.some((i) => i.id === id)));
     run.mutate(
-      { file, timezone: zone, symbolMap: relevant, commit, accountId: account, includeSimilar: similar },
+      { file, timezone: zone, symbolMap: relevant, commit, accountId: account, includeSimilar: similar, copyToLinked: commit && fromCopier === true },
       {
         onSuccess: (result) => {
           if (commit) {
@@ -195,6 +198,7 @@ export function Mt5ImportDialog({
                 value={accountId}
                 onChange={(id) => {
                   setAccountId(id);
+                  setFromCopier(null);
                   if (file) request(false, symbolMap, zoneFor(timezone), id);
                 }}
                 options={[...(accountId ? [] : [{ value: '', label: all.form.chooseAccount }]), ...accounts.map((a) => ({ value: a.id, label: a.name }))]}
@@ -333,6 +337,24 @@ export function Mt5ImportDialog({
               </table>
             </div>
 
+            {preview.linkedAccounts.length > 0 && (
+              <div className="flex flex-col gap-2.5 rounded-(--radius-control) bg-warn-bg p-3.5">
+                <span className="flex items-start gap-2 text-[13px] font-semibold text-warn">
+                  <LinkIcon className="mt-0.5 size-4 shrink-0" />
+                  {t.copierQuestion(preview.linkedAccounts.map((a) => a.name).join(', '))}
+                </span>
+                <Segmented<'yes' | 'no'>
+                  label={t.copierQuestion('')}
+                  value={fromCopier == null ? ('' as 'yes') : fromCopier ? 'yes' : 'no'}
+                  onChange={(v) => setFromCopier(v === 'yes')}
+                  options={[
+                    { value: 'yes', label: t.copierYes(preview.linkedAccounts.length + 1) },
+                    { value: 'no', label: t.copierNo },
+                  ]}
+                />
+              </div>
+            )}
+
             <p className="m-0 text-xs text-dim">{preview.format === 'tradovate' ? t.tradovateNote : t.feesNote}</p>
 
             <div className="flex flex-wrap justify-end gap-3">
@@ -347,7 +369,7 @@ export function Mt5ImportDialog({
                 {t.otherFile}
               </Button>
               <Button onClick={onClose}>{all.common.cancel}</Button>
-              <Button variant="primary" disabled={s.ready === 0 || run.isPending} onClick={() => request(true)}>
+              <Button variant="primary" disabled={s.ready === 0 || run.isPending || (preview.linkedAccounts.length > 0 && fromCopier == null)} onClick={() => request(true)}>
                 {run.isPending ? t.importing : t.importN(s.ready)}
               </Button>
             </div>

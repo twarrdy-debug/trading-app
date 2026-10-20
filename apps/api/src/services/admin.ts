@@ -2,7 +2,7 @@ import type { AdminUpdateUserInput, UpdateInstrumentInput } from '@trading/share
 import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
-import { and, asc, count, desc, eq, gte, isNotNull, max, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, isNotNull, max, notInArray, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.ts';
 import {
   authSessions,
@@ -74,6 +74,8 @@ export async function listUsers(db: DB) {
     .leftJoin(accountCounts, eq(accountCounts.userId, users.id))
     .leftJoin(strategyCounts, eq(strategyCounts.userId, users.id))
     .leftJoin(sessions, eq(sessions.userId, users.id))
+    // The demo's user is not a person.
+    .where(eq(users.demo, false))
     .orderBy(desc(users.createdAt));
 
   return rows.map((r) => ({
@@ -169,6 +171,8 @@ export async function appStats(db: DB) {
       .from(authSessions)
       .where(gte(authSessions.updatedAt, since(days)));
 
+  // The demo's sample data does not count.
+  const demoIds = () => db.select({ id: users.id }).from(users).where(eq(users.demo, true));
   const [[userTotals], byRole, [active7], [active30], [tradeTotals], [accountTotal], [strategyTotal], weekly, codes, bySignupCode] = await Promise.all([
     db
       .select({
@@ -178,8 +182,9 @@ export async function appStats(db: DB) {
         disabled: sql<number>`count(*) filter (where ${users.disabledAt} is not null)`.mapWith(Number),
         onboardingPending: sql<number>`count(*) filter (where ${users.onboardedAt} is null)`.mapWith(Number),
       })
-      .from(users),
-    db.select({ role: users.role, n: count() }).from(users).groupBy(users.role).orderBy(asc(users.role)),
+      .from(users)
+      .where(eq(users.demo, false)),
+    db.select({ role: users.role, n: count() }).from(users).where(eq(users.demo, false)).groupBy(users.role).orderBy(asc(users.role)),
     activeSince(7),
     activeSince(30),
     db
@@ -189,9 +194,10 @@ export async function appStats(db: DB) {
         last30: sql<number>`count(*) filter (where ${trades.createdAt} >= ${since(30)})`.mapWith(Number),
         imported: sql<number>`count(*) filter (where ${trades.externalId} is not null)`.mapWith(Number),
       })
-      .from(trades),
-    db.select({ n: count() }).from(tradingAccounts),
-    db.select({ n: count() }).from(strategies),
+      .from(trades)
+      .where(notInArray(trades.userId, demoIds())),
+    db.select({ n: count() }).from(tradingAccounts).where(notInArray(tradingAccounts.userId, demoIds())),
+    db.select({ n: count() }).from(strategies).where(notInArray(strategies.userId, demoIds())),
     // Sign-ups per week (Monday start), the last 8 weeks.
     db
       .select({

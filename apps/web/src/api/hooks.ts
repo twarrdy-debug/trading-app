@@ -9,6 +9,11 @@ import type {
   CalendarRefresh,
   EventHistory,
   MarketAnalysis,
+  ProCandles,
+  BacktestCandles,
+  BacktestSession,
+  BacktestSessionListItem,
+  BacktestTrade,
   CalendarResponse,
   DailySpread,
   Educator,
@@ -27,6 +32,9 @@ import type {
 } from '@trading/api/types';
 import type {
   AnalysisResolution,
+  ProResolution,
+  CreateBacktestSessionInput,
+  OpenBacktestTradeInput,
   BrokerTimezone,
   AdminUpdateUserInput,
   CreateAccountInput,
@@ -79,14 +87,29 @@ export function useOnboarding() {
 export function useUpdateSettings() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (patch: UpdateSettingsInput) => api<PublicUser>('/me', { method: 'PATCH', json: patch }),
+    mutationFn: async (patch: UpdateSettingsInput) => {
+      // The demo saves nothing: a setting (theme, language, layout…) changes only this browser's view.
+      const me = client.getQueryData<PublicUser>(['me']);
+      if (me?.demo) {
+        if (patch.language) {
+          try {
+            localStorage.setItem('language', patch.language);
+          } catch {
+            // The language goes back on reload.
+          }
+        }
+        return { ...me, settings: { ...me.settings, ...patch } } as PublicUser;
+      }
+      return api<PublicUser>('/me', { method: 'PATCH', json: patch });
+    },
     // The dashboard layout shows at once; the server's answer then confirms it.
     onMutate: (patch) => {
       if (!patch.dashboardHidden) return;
       client.setQueryData<PublicUser>(['me'], (me) => (me ? { ...me, settings: { ...me.settings, dashboardHidden: patch.dashboardHidden! } } : me));
     },
     onSuccess: (user, patch) => {
-      client.setQueryData(['me'], user);
+      // The answer has no trade counter (only GET /me counts): keep the one known.
+      client.setQueryData<PublicUser>(['me'], (old) => ({ ...old, ...user, tradesUsed: old?.tradesUsed }));
       // Emotion labels, stats labels and messages come from the API in the user's language.
       if (patch.language) void client.invalidateQueries({ predicate: (q) => q.queryKey[0] !== 'me' });
       // Only the layout changed: nothing to recompute.
@@ -116,6 +139,8 @@ function useInvalidateTrades() {
     void client.invalidateQueries({ queryKey: ['trades'] });
     void client.invalidateQueries({ queryKey: ['stats'] });
     void client.invalidateQueries({ queryKey: ['accounts'] });
+    // The Standard plan's trade counter (me.tradesUsed).
+    if (client.getQueryData<PublicUser>(['me'])?.plan.tradeLimit != null) void client.invalidateQueries({ queryKey: ['me'] });
   };
 }
 
@@ -279,6 +304,15 @@ export const useMarketAnalysis = (instrumentId: string | null, resolution: Analy
     placeholderData: (previous) => previous,
   });
 
+/** Calculator PRO: the pair's CFD and futures candles (the futures about 10 minutes late). */
+export const useProCandles = (pair: string, resolution: ProResolution) =>
+  useQuery({
+    queryKey: ['basis', 'pro', pair, resolution],
+    queryFn: () => api<ProCandles>(`/basis/pro${qs({ pair, resolution })}`),
+    refetchInterval: 60_000,
+    placeholderData: (previous) => (previous?.pairKey === pair ? previous : undefined),
+  });
+
 export interface NewsParams {
   categories?: string[];
   currencies?: string[];
@@ -324,6 +358,7 @@ export function useMt5Import() {
       commit,
       accountId,
       includeSimilar,
+      copyToLinked,
     }: {
       file: File;
       /** Omitted: MT5 server time GMT+2/+3, Tradovate the user's zone. */
@@ -332,11 +367,14 @@ export function useMt5Import() {
       commit: boolean;
       accountId?: string;
       includeSimilar?: boolean;
+      /** The account is linked and the file came from a trade copier: save on every linked account. */
+      copyToLinked?: boolean;
     }) => {
       const body = new FormData();
       // Text fields go first: the API reads them before the file.
       if (timezone) body.append('timezone', timezone);
       if (includeSimilar) body.append('includeSimilar', 'true');
+      if (copyToLinked) body.append('copyToLinked', 'true');
       if (accountId) body.append('accountId', accountId);
       body.append('symbolMap', JSON.stringify(symbolMap));
       body.append('commit', String(commit));
@@ -351,7 +389,18 @@ export function useMt5Import() {
 
 // --- Trading accounts ---------------------------------------------------------
 
-export const useAccounts = () => useQuery({ queryKey: ['accounts'], queryFn: () => api<AccountListItem[]>('/accounts') });
+// Stable selectors: a new function each render would hand out a new list each render.
+const journalOnly = (list: AccountListItem[]) => list.filter((a) => a.type !== 'backtest');
+const backtestOnly = (list: AccountListItem[]) => list.filter((a) => a.type === 'backtest');
+
+/** Every account, backtesting ones included (Settings → Accounts). */
+export const useAllAccounts = () => useQuery({ queryKey: ['accounts'], queryFn: () => api<AccountListItem[]>('/accounts') });
+/** The journal's accounts: backtesting ones never appear in the journal, trades, stats or monitor. */
+export const useAccounts = () =>
+  useQuery({ queryKey: ['accounts'], queryFn: () => api<AccountListItem[]>('/accounts'), select: journalOnly });
+/** Backtesting accounts only. */
+export const useBacktestAccounts = () =>
+  useQuery({ queryKey: ['accounts'], queryFn: () => api<AccountListItem[]>('/accounts'), select: backtestOnly });
 
 function useInvalidateAccounts() {
   const client = useQueryClient();
@@ -370,6 +419,19 @@ export function useSaveAccount() {
         ? api<TradingAccount>(`/accounts/${id}`, { method: 'PATCH', json: input })
         : api<TradingAccount>('/accounts', { method: 'POST', json: input }),
     onSuccess: invalidate,
+  });
+}
+
+/** Links an account with others (a trade copier), or unlinks it with an empty list. */
+export function useLinkAccounts() {
+  const invalidate = useInvalidateAccounts();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, accountIds }: { id: string; accountIds: string[] }) => api<unknown>(`/accounts/${id}/links`, { method: 'PUT', json: { accountIds } }),
+    onSuccess: async () => {
+      await invalidate();
+      await queryClient.invalidateQueries({ queryKey: ['trades'] });
+    },
   });
 }
 
@@ -503,5 +565,77 @@ export function useSaveInstrument() {
       void client.invalidateQueries({ queryKey: ['admin', 'instruments'] });
       void client.invalidateQueries({ queryKey: ['instruments'] });
     },
+  });
+}
+
+// --- Backtesting ---------------------------------------------------------------
+
+/** Past candles of a replay (at most 1000 of the stored resolution per call). */
+export const fetchBacktestCandles = (instrumentId: string, resolution: AnalysisResolution, from: string, to: string) =>
+  api<BacktestCandles>(`/backtest/candles${qs({ instrumentId, resolution, from, to })}`);
+
+export const useBacktestSessions = () => useQuery({ queryKey: ['backtest', 'sessions'], queryFn: () => api<BacktestSessionListItem[]>('/backtest/sessions') });
+
+export const useBacktestSession = (id: string | null) =>
+  useQuery({ queryKey: ['backtest', 'session', id], queryFn: () => api<BacktestSession>(`/backtest/sessions/${id}`), enabled: id != null });
+
+function useBacktestRefresh() {
+  const client = useQueryClient();
+  return (session?: BacktestSession) => {
+    if (session) client.setQueryData(['backtest', 'session', session.id], session);
+    void client.invalidateQueries({ queryKey: ['backtest'] });
+    // A closed position moves the backtesting account's balance.
+    void client.invalidateQueries({ queryKey: ['accounts'] });
+  };
+}
+
+export function useCreateBacktestSession() {
+  const refresh = useBacktestRefresh();
+  return useMutation({
+    mutationFn: (input: CreateBacktestSessionInput) => api<BacktestSession>('/backtest/sessions', { method: 'POST', json: input }),
+    onSuccess: (session) => refresh(session),
+  });
+}
+
+export function useUpdateBacktestSession() {
+  const refresh = useBacktestRefresh();
+  return useMutation({
+    mutationFn: ({ id, ...patch }: { id: string; cursorAt?: string; resolution?: AnalysisResolution; finished?: boolean }) =>
+      api<BacktestSession>(`/backtest/sessions/${id}`, { method: 'PATCH', json: patch }),
+    onSuccess: (session) => refresh(session),
+  });
+}
+
+export function useDeleteBacktestSession() {
+  const refresh = useBacktestRefresh();
+  return useMutation({
+    mutationFn: (id: string) => api<void>(`/backtest/sessions/${id}`, { method: 'DELETE' }),
+    onSuccess: () => refresh(),
+  });
+}
+
+export function useOpenBacktestTrade() {
+  const refresh = useBacktestRefresh();
+  return useMutation({
+    mutationFn: ({ sessionId, ...input }: OpenBacktestTradeInput & { sessionId: string }) =>
+      api<BacktestTrade>(`/backtest/sessions/${sessionId}/trades`, { method: 'POST', json: input }),
+    onSuccess: () => refresh(),
+  });
+}
+
+export function useUpdateBacktestTrade() {
+  const refresh = useBacktestRefresh();
+  return useMutation({
+    mutationFn: ({ id, ...patch }: { id: string; stopLoss?: number | null; takeProfit?: number | null; close?: { price: number; at: string; reason: 'tp' | 'sl' | 'manual' } }) =>
+      api<BacktestTrade>(`/backtest/trades/${id}`, { method: 'PATCH', json: patch }),
+    onSuccess: () => refresh(),
+  });
+}
+
+export function useDeleteBacktestTrade() {
+  const refresh = useBacktestRefresh();
+  return useMutation({
+    mutationFn: (id: string) => api<void>(`/backtest/trades/${id}`, { method: 'DELETE' }),
+    onSuccess: () => refresh(),
   });
 }

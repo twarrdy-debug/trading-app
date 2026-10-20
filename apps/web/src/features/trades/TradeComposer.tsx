@@ -1,5 +1,6 @@
 import type { AccountSummary, Instrument, PublicUser, Trade, TradeMutation } from '@trading/api/types';
 import {
+  SUPPORT_EMAIL,
   AUTO_FX_CURRENCIES,
   canSplit,
   computeTradeMetrics,
@@ -41,6 +42,7 @@ import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
 import { formatAmount, formatDate, formatNumber, formatPrice, formatSize, parseDecimal, toDateTimeLocal, toInputNumber } from '../../lib/format.ts';
 import { instrumentOptions } from '../../lib/instruments.ts';
+import { LinkIcon } from '../account/AccountsManager.tsx';
 import { emptyPart, PartsEditor, partsTotal, ResultPicker, splitEqually, type PartDraft } from './PartsEditor.tsx';
 import { PositionSize, type RiskMode } from './PositionSize.tsx';
 import { onlyImages, ScreenshotDrop } from './ScreenshotDrop.tsx';
@@ -124,6 +126,8 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
     return pick ?? (accounts.length === 1 ? accounts[0]!.id : '');
   });
   const tradeAccount = accounts.find((a) => a.id === accountId);
+  // Linked accounts (a trade copier): the trade is saved, edited and deleted on all of them.
+  const linkedNames = tradeAccount?.linkGroup ? accounts.filter((a) => a.id !== accountId && a.linkGroup === tradeAccount.linkGroup).map((a) => a.name) : [];
   // A prop account trades one market; the instrument list follows it.
   const allowed = tradeAccount?.market ? instruments.filter((i) => i.market === tradeAccount.market) : instruments;
   const [instrumentId, setInstrumentId] = useState(() => {
@@ -341,6 +345,10 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
   };
 
   const busy = saveTrade.isPending || upload.isPending || saveSpread.isPending;
+  // The Standard plan's journal holds a few trades; a new one waits for Pro or VIP once it is full.
+  const tradeLimit = user.plan.tradeLimit;
+  const tradesUsed = user.tradesUsed ?? null;
+  const journalFull = !trade && tradeLimit != null && tradesUsed != null && tradesUsed >= tradeLimit;
   const unit = instrument ? all.units.short[instrument.measureUnit] : '';
   const tone = (v: number | null | undefined) => (v == null || v === 0 ? '' : v > 0 ? 'text-buy' : 'text-sell');
 
@@ -357,6 +365,15 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
 
   return (
     <form onSubmit={submit} onPaste={onPaste} aria-label={trade ? f.editAria : t.title} className="flex flex-col gap-5">
+      {/* Said first, so nobody fills in a trade that cannot be saved. */}
+      {journalFull && (
+        <p role="status" className="m-0 flex flex-wrap items-center justify-between gap-3 rounded-(--radius-control) bg-accent/10 px-3.5 py-3 text-[13px] ring-1 ring-accent/30 ring-inset">
+          <span>{all.plans.tradesFull(tradeLimit!)}</span>
+          <a href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(all.plans.askSubject)}`} className="font-bold text-accent-ink no-underline hover:underline">
+            {all.plans.ask} →
+          </a>
+        </p>
+      )}
       {/* 1. What and when; the session follows from the time. */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[auto_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.2fr)]">
         <Group label={f.direction}>
@@ -372,7 +389,17 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
         <Field label={f.instrument}>
           <Select value={instrumentId} onChange={chooseInstrument} options={instrumentOptions(allowed, { label: (i) => `${i.symbol} · ${i.name}`, favorites: all.instruments.favorites, others: all.instruments.others })} />
         </Field>
-        <Field label={all.accounts.switcher}>
+        <Field
+          label={all.accounts.switcher}
+          help={
+            linkedNames.length > 0 ? (
+              <span className="flex items-start gap-1.5 font-semibold text-warn">
+                <LinkIcon className="mt-px size-3.5 shrink-0" />
+                {trade ? f.linkedEdit(linkedNames.join(', ')) : f.linkedSave(linkedNames.join(', '))}
+              </span>
+            ) : undefined
+          }
+        >
           <Select value={accountId} onChange={chooseAccount} options={[...(accountId ? [] : [{ value: '', label: f.chooseAccount }]), ...accounts.map((a) => ({ value: a.id, label: a.name }))]} />
         </Field>
         <Field label={t.opened} hint={session ? <span className="font-semibold text-accent-ink">{all.tradeSessions[session]}</span> : undefined}>
@@ -616,8 +643,9 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
         </ul>
       )}
 
+      {!trade && !journalFull && tradeLimit != null && tradesUsed != null && <p className="m-0 text-[13px] text-dim">{all.plans.tradesUsed(tradesUsed, tradeLimit)}</p>}
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="submit" variant="primary" size="lg" disabled={busy}>
+        <Button type="submit" variant="primary" size="lg" disabled={busy || journalFull}>
           {busy ? f.saving : trade ? f.saveChanges : t.save}
         </Button>
         {onCancel && (

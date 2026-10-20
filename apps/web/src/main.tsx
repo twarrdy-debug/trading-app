@@ -22,6 +22,8 @@ const SettingsPage = lazyRouteComponent(() => import('./features/settings/Settin
 const StatsPage = lazyRouteComponent(() => import('./features/stats/StatsPage.tsx'), 'StatsPage');
 const AdminPage = lazyRouteComponent(() => import('./features/admin/AdminPage.tsx'), 'AdminPage');
 const AnalysisPage = lazyRouteComponent(() => import('./features/analysis/AnalysisPage.tsx'), 'AnalysisPage');
+const StrategiesPage = lazyRouteComponent(() => import('./features/analysis/AnalysisPage.tsx'), 'StrategiesPage');
+const BacktestPage = lazyRouteComponent(() => import('./features/backtest/BacktestPage.tsx'), 'BacktestPage');
 const DashboardPage = lazyRouteComponent(() => import('./features/dashboard/DashboardPage.tsx'), 'DashboardPage');
 const TradesPage = lazyRouteComponent(() => import('./features/trades/TradesPage.tsx'), 'TradesPage');
 
@@ -59,6 +61,8 @@ const routeTree = rootRoute.addChildren([
     createRoute({ getParentRoute: () => appRoute, path: '/statystyki', component: StatsPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/kalkulator', component: CalculatorPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/analiza', component: AnalysisPage }),
+    createRoute({ getParentRoute: () => appRoute, path: '/analiza/backtesting', component: BacktestPage }),
+    createRoute({ getParentRoute: () => appRoute, path: '/strategie', component: StrategiesPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/kalendarz', component: CalendarPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/news', component: NewsPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/ustawienia', component: SettingsPage }),

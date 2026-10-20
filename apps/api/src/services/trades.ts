@@ -21,8 +21,10 @@ import {
   type FxRateSource,
   type TradeFilters,
   type TradeOutcome,
+  hasFeature,
+  STANDARD_TRADE_LIMIT,
 } from '@trading/shared';
-import { and, desc, eq, getTableColumns, gte, inArray, isNotNull, isNull, lte, sql, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, getTableColumns, gte, inArray, isNotNull, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
 import type { DB } from '../db/client.ts';
 import {
   dailySpreads,
@@ -39,10 +41,10 @@ import {
   tradeScreenshots,
   users,
 } from '../db/schema.ts';
-import { badRequest, notFound } from '../errors.ts';
+import { badRequest, HttpError, notFound } from '../errors.ts';
 import { marketName, t as tr } from '../i18n.ts';
 import type { CurrentUser } from '../plugins/current-user.ts';
-import { accountBalanceCurve, accountLimits, accountOverview, accountTradeRows, balanceAt, getAccount, listAccounts } from './accounts.ts';
+import { accountBalanceCurve, accountLimits, accountOverview, accountTradeRows, balanceAt, getAccount, journalAccounts, linkedAccounts, listAccounts } from './accounts.ts';
 import { getFxRate, supportsAutoRate, type FxProvider } from './fx.ts';
 
 export interface TradeContext {
@@ -76,12 +78,28 @@ function assertPositionSize(instrument: Instrument, size: number) {
 async function assertAccount(db: DB, user: CurrentUser, accountId: string | null | undefined, instrument: Instrument) {
   if (!accountId) throw badRequest('accountRequired');
   const account = await getAccount(db, user, accountId);
+  if (account.type === 'backtest') throw badRequest('backtestAccountTrade');
   if (account.market && account.market !== instrument.market) {
     throw badRequest('accountMarketMismatch', {
       account: account.name,
       market: marketName(user.language, account.market),
       symbol: instrument.symbol,
     });
+  }
+}
+
+/** Trades in the journal, a linked trade counted once (its copies are not). */
+export async function journalTradeCount(db: DB, user: CurrentUser) {
+  const [row] = await db.select({ n: count() }).from(trades).where(and(eq(trades.userId, user.id), isNull(trades.copyOf)));
+  return row?.n ?? 0;
+}
+
+/** The Standard plan keeps at most STANDARD_TRADE_LIMIT trades: refuses adding `adding` more beyond it. */
+export async function assertTradeRoom(db: DB, user: CurrentUser, adding: number) {
+  if (hasFeature(user.role, 'unlimitedTrades')) return;
+  const used = await journalTradeCount(db, user);
+  if (used + adding > STANDARD_TRADE_LIMIT) {
+    throw new HttpError(403, adding > 1 ? 'tradeLimitImport' : 'tradeLimit', { limit: STANDARD_TRADE_LIMIT, left: Math.max(0, STANDARD_TRADE_LIMIT - used) });
   }
 }
 
@@ -285,8 +303,27 @@ const collectWarnings = (user: CurrentUser, d: TradeDraft, fxWarning: string | n
   ...(fxWarning ? [fxWarning] : []),
 ];
 
-/** `externalId` marks a trade imported from a platform (see services/mt5-import.ts). */
-export async function createTrade(ctx: TradeContext, user: CurrentUser, input: CreateTradeInput, { externalId }: { externalId?: string } = {}) {
+/**
+ * Saves a trade, and on linked accounts (a trade copier, `trading_accounts.link_group`) a copy on
+ * each of the others, unless `linked` is false. `externalId` marks a trade imported from a platform
+ * (see services/mt5-import.ts); only the first one carries it.
+ */
+export async function createTrade(
+  ctx: TradeContext,
+  user: CurrentUser,
+  input: CreateTradeInput,
+  { externalId, linked = true }: { externalId?: string; linked?: boolean } = {},
+) {
+  await assertTradeRoom(ctx.db, user, 1);
+  const first = await insertTrade(ctx, user, input, { externalId });
+  if (linked && input.accountId) {
+    const others = await linkedAccounts(ctx.db, user, await getAccount(ctx.db, user, input.accountId));
+    for (const other of others) await insertTrade(ctx, user, { ...input, accountId: other.id }, { copyOf: first.id });
+  }
+  return { trade: await getTrade(ctx.db, user, first.id), warnings: first.warnings, fxWarning: first.fxWarning };
+}
+
+async function insertTrade(ctx: TradeContext, user: CurrentUser, input: CreateTradeInput, { externalId, copyOf }: { externalId?: string; copyOf?: string }) {
   const { db } = ctx;
   const { emotionKeys, parts: partInput, checkedRuleIds, ...input2 } = input;
   const draft: TradeDraft = { ...input2 };
@@ -307,7 +344,7 @@ export async function createTrade(ctx: TradeContext, user: CurrentUser, input: C
   const id = await db.transaction(async (tx) => {
     const [row] = await tx
       .insert(trades)
-      .values({ ...toRow(draft), ...columns, ...source, ...strategy, userId: user.id, externalId: externalId ?? null })
+      .values({ ...toRow(draft), ...columns, ...source, ...strategy, userId: user.id, externalId: externalId ?? null, copyOf: copyOf ?? null })
       .returning({ id: trades.id });
     if (emotionKeys.length > 0) {
       await tx.insert(tradeEmotions).values(emotionKeys.map((emotionKey) => ({ tradeId: row!.id, emotionKey })));
@@ -315,13 +352,35 @@ export async function createTrade(ctx: TradeContext, user: CurrentUser, input: C
     if (parts.length > 0) await tx.insert(tradeExits).values(parts.map((p, i) => ({ ...p, tradeId: row!.id, sortOrder: i })));
     return row!.id;
   });
-  return { trade: await getTrade(db, user, id), warnings: collectWarnings(user, draft, warning), fxWarning: warning };
+  return { id, warnings: collectWarnings(user, draft, warning), fxWarning: warning };
 }
 
+/** The trade a group of linked copies hangs on (the trade itself when it is not a copy), and all of the group. */
+async function linkedGroup(db: DB, userId: string, trade: { id: string; copyOf: string | null }) {
+  const source = trade.copyOf ?? trade.id;
+  const rows = await db
+    .select({ id: trades.id })
+    .from(trades)
+    .where(and(eq(trades.userId, userId), or(eq(trades.id, source), eq(trades.copyOf, source))));
+  return { source, ids: rows.map((r) => r.id) };
+}
+
+/** Edits a trade; on linked accounts the same change goes to every copy at once (owner's rule). */
 export async function updateTrade(ctx: TradeContext, user: CurrentUser, id: string, patch: Partial<CreateTradeInput>) {
-  const { db } = ctx;
-  const [existing] = await db.select().from(trades).where(and(eq(trades.id, id), eq(trades.userId, user.id)));
+  const [existing] = await ctx.db.select().from(trades).where(and(eq(trades.id, id), eq(trades.userId, user.id)));
   if (!existing) throw notFound('tradeNotFound');
+  const result = await updateOne(ctx, user, existing, patch);
+  const { accountId: _accountId, ...shared } = patch;
+  for (const otherId of (await linkedGroup(ctx.db, user.id, existing)).ids.filter((other) => other !== id)) {
+    const [other] = await ctx.db.select().from(trades).where(eq(trades.id, otherId));
+    if (other) await updateOne(ctx, user, other, shared);
+  }
+  return { trade: await getTrade(ctx.db, user, id), warnings: result.warnings };
+}
+
+async function updateOne(ctx: TradeContext, user: CurrentUser, existing: typeof trades.$inferSelect, patch: Partial<CreateTradeInput>) {
+  const { db } = ctx;
+  const id = existing.id;
 
   const { emotionKeys, parts: partPatch, checkedRuleIds, ...fields } = patch;
   const draft: TradeDraft = {
@@ -394,7 +453,7 @@ export async function updateTrade(ctx: TradeContext, user: CurrentUser, id: stri
       }
     }
   });
-  return { trade: await getTrade(db, user, id), warnings: collectWarnings(user, draft, warning) };
+  return { warnings: collectWarnings(user, draft, warning) };
 }
 
 /**
@@ -408,10 +467,11 @@ function selectNumbered(db: DB, userId: string) {
     db
       .select({
         id: trades.id,
-        dayIndex: sql<number>`row_number() over (partition by ${trades.tradeDate} order by ${trades.openedAt}, ${trades.createdAt})`
+        // Copies on linked accounts are one setup: they take their source's number and do not count.
+        dayIndex: sql<number>`count(*) filter (where ${trades.copyOf} is null) over (partition by ${trades.tradeDate} order by ${trades.openedAt}, ${trades.createdAt} rows between unbounded preceding and current row)`
           .mapWith(Number)
           .as('day_index'),
-        dayCount: sql<number>`count(*) over (partition by ${trades.tradeDate})`.mapWith(Number).as('day_count'),
+        dayCount: sql<number>`count(*) filter (where ${trades.copyOf} is null) over (partition by ${trades.tradeDate})`.mapWith(Number).as('day_count'),
         accountDayIndex: sql<number>`row_number() over (partition by ${trades.tradeDate}, ${trades.accountId} order by ${trades.openedAt}, ${trades.createdAt})`
           .mapWith(Number)
           .as('account_day_index'),
@@ -478,10 +538,12 @@ async function importantNewsDuring(db: DB, rows: NumberedRow[]) {
 async function decorate(db: DB, user: CurrentUser, rows: NumberedRow[]) {
   const ids = rows.map((r) => r.id);
   const strategyIds = [...new Set(rows.map((r) => r.strategyId).filter((id): id is string => id != null))];
+  // Copies on linked accounts show their source's screenshots, and every row its group's accounts.
+  const sourceIds = [...new Set(rows.map((r) => r.copyOf ?? r.id))];
   const [emotionRows, screenshotRows, exitRows, strategyRows, ruleCounts] = ids.length
     ? await Promise.all([
         db.select().from(tradeEmotions).where(inArray(tradeEmotions.tradeId, ids)),
-        db.select().from(tradeScreenshots).where(inArray(tradeScreenshots.tradeId, ids)),
+        db.select().from(tradeScreenshots).where(inArray(tradeScreenshots.tradeId, sourceIds)),
         db.select().from(tradeExits).where(inArray(tradeExits.tradeId, ids)).orderBy(tradeExits.sortOrder),
         strategyIds.length ? db.select({ id: strategies.id, name: strategies.name }).from(strategies).where(inArray(strategies.id, strategyIds)) : [],
         strategyIds.length
@@ -492,6 +554,12 @@ async function decorate(db: DB, user: CurrentUser, rows: NumberedRow[]) {
   const accounts = await listAccounts(db, user);
   const accountRows = await accountTradeRows(db, user, accounts.map((a) => a.id));
   const redNews = await importantNewsDuring(db, rows);
+  const groupRows = ids.length
+    ? await db
+        .select({ id: trades.id, copyOf: trades.copyOf, accountId: trades.accountId, pnlAccount: trades.pnlAccount })
+        .from(trades)
+        .where(and(eq(trades.userId, user.id), or(inArray(trades.id, sourceIds), inArray(trades.copyOf, sourceIds))))
+    : [];
 
   return rows.map(({ userId: _userId, instrumentSymbol, measureUnit, market, unitSize, unitValue, ...t }) => {
     const risk = riskQuote({ measureUnit, unitSize, unitValue }, t);
@@ -557,8 +625,25 @@ async function decorate(db: DB, user: CurrentUser, rows: NumberedRow[]) {
           })
           .map(({ id, title, publishedAt }) => ({ id, title, publishedAt }))
       : [],
+    /**
+     * The same trade on linked accounts (a trade copier): every account of the group with its
+     * result, and the group's total; null when the trade is on one account only.
+     */
+    linked: (() => {
+      const source = t.copyOf ?? t.id;
+      const group = groupRows.filter((g) => g.id === source || g.copyOf === source);
+      if (group.length < 2) return null;
+      const pnls = group.map((g) => g.pnlAccount);
+      return {
+        sourceId: source,
+        /** True when the row stands for the whole group (the all-accounts list), false on one account's own copy. */
+        grouped: false,
+        accounts: group.map((g) => ({ tradeId: g.id, accountId: g.accountId, name: accounts.find((a) => a.id === g.accountId)?.name ?? null, pnlAccount: g.pnlAccount })),
+        pnlTotal: pnls.some((p) => p == null) ? null : round2(pnls.reduce<number>((sum, p) => sum + (p ?? 0), 0)),
+      };
+    })(),
     screenshots: screenshotRows
-      .filter((s) => s.tradeId === t.id)
+      .filter((s) => s.tradeId === (t.copyOf ?? t.id))
       .map((s) => ({ id: s.id, url: `/files/${s.storageKey}`, mimeType: s.mimeType, sizeBytes: s.sizeBytes })),
     };
   });
@@ -590,7 +675,8 @@ function filterConditions(f: Partial<TradeFilters>): SQL[] {
 }
 
 export async function listTrades(db: DB, user: CurrentUser, filters: TradeFilters) {
-  const where = and(...filterConditions(filters));
+  // Across all accounts a trade on linked accounts is listed once (with `linked`); one account shows its own copy.
+  const where = and(...filterConditions(filters), filters.account ? undefined : isNull(trades.copyOf));
   const [rows, [total]] = await Promise.all([
     selectNumbered(db, user.id)
       .where(where)
@@ -602,15 +688,18 @@ export async function listTrades(db: DB, user: CurrentUser, filters: TradeFilter
       .from(trades)
       .where(and(eq(trades.userId, user.id), where)),
   ]);
-  return { items: await decorate(db, user, rows), total: total!.count };
+  const items = await decorate(db, user, rows);
+  return {
+    items: filters.account ? items : items.map((t) => (t.linked ? { ...t, linked: { ...t.linked, grouped: true } } : t)),
+    total: total!.count,
+  };
 }
 
+/** Deletes a trade; on linked accounts its copies go with it (deleting the source cascades). */
 export async function deleteTrade(db: DB, user: CurrentUser, id: string) {
-  const [deleted] = await db
-    .delete(trades)
-    .where(and(eq(trades.id, id), eq(trades.userId, user.id)))
-    .returning({ id: trades.id });
-  if (!deleted) throw notFound('tradeNotFound');
+  const [existing] = await db.select({ id: trades.id, copyOf: trades.copyOf }).from(trades).where(and(eq(trades.id, id), eq(trades.userId, user.id)));
+  if (!existing) throw notFound('tradeNotFound');
+  await db.delete(trades).where(and(eq(trades.id, existing.copyOf ?? existing.id), eq(trades.userId, user.id)));
 }
 
 // --- Trading monitor ---------------------------------------------------------
@@ -624,7 +713,7 @@ export async function tradingMonitor(db: DB, user: CurrentUser) {
   const today = toLocalDate(new Date(), user.timezone);
   const [rows, accounts] = await Promise.all([
     selectNumbered(db, user.id).where(eq(trades.tradeDate, today)).orderBy(trades.openedAt),
-    listAccounts(db, user),
+    journalAccounts(db, user),
   ]);
   const isLoss = (t: (typeof rows)[number]) => tradeOutcome(t) === 'loss';
 
@@ -746,14 +835,23 @@ function streakStats(outcomes: TradeOutcome[]) {
 
 /** Stats over closed trades. Money totals are in the user's current account currency. */
 export async function tradeStats(db: DB, user: CurrentUser, filters: Pick<TradeFilters, 'account' | 'instrumentId' | 'dateFrom' | 'dateTo'>) {
-  const rows = await selectNumbered(db, user.id)
+  const fetched = await selectNumbered(db, user.id)
     .where(and(isNotNull(trades.exitPrice), ...filterConditions(filters)))
     .orderBy(trades.openedAt);
+  // Across all accounts a trade on linked accounts counts once (win rate, streaks, R), with the
+  // money of every copy added to it; one account's stats count its own copy.
+  const copyPnl = new Map<string, number>();
+  if (!filters.account) {
+    for (const r of fetched) if (r.copyOf && r.pnlAccount != null) copyPnl.set(r.copyOf, (copyPnl.get(r.copyOf) ?? 0) + r.pnlAccount);
+  }
+  const rows = filters.account
+    ? fetched
+    : fetched.filter((r) => !r.copyOf).map((r) => (copyPnl.has(r.id) && r.pnlAccount != null ? { ...r, pnlAccount: round2(r.pnlAccount + copyPnl.get(r.id)!) } : r));
   const emotionRows = rows.length
     ? await db.select().from(tradeEmotions).where(inArray(tradeEmotions.tradeId, rows.map((r) => r.id)))
     : [];
   const educatorRows = await db.select({ id: users.id, name: users.displayName }).from(users).where(eq(users.role, 'educator'));
-  const accounts = await listAccounts(db, user);
+  const accounts = await journalAccounts(db, user);
   // Each account's own daily limits for the discipline checks.
   const accountsById = new Map(accounts.map((a) => [a.id, a]));
 

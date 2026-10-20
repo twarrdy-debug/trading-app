@@ -26,6 +26,10 @@ import {
 } from './enums.ts';
 import { BROKER_TIMEZONES } from './dates.ts';
 import { ANALYSIS_RESOLUTIONS } from './analysis.ts';
+import { PRO_RESOLUTIONS } from './calculator-pro.ts';
+import { CFD_FUTURES_PAIRS } from './instruments.ts';
+import { ASSIGNABLE_ROLES, INVITE_ROLES } from './plans.ts';
+import { CANDLE_PALETTE_KEYS } from './chart.ts';
 
 /**
  * Custom validation messages are message keys; the API translates them into the user's
@@ -64,6 +68,9 @@ const isValidTimeZone = (tz: string) => {
   }
 };
 
+/** A #RRGGBB colour. */
+const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'validation.color');
+
 export const updateSettingsSchema = z
   .object({
     displayName: z.string().trim().min(1).max(80),
@@ -97,6 +104,15 @@ export const updateSettingsSchema = z
     emailWeekAhead: z.boolean(),
     emailDaySummary: z.boolean(),
     emailUpdates: z.boolean(),
+    /** Candle colours on the analysis chart; null = the calm default palette. */
+    chartStyle: z
+      .object({
+        palette: z.enum([...CANDLE_PALETTE_KEYS, 'custom']),
+        up: hexColor.optional(),
+        down: hexColor.optional(),
+        hollow: z.boolean(),
+      })
+      .nullable(),
   })
   .partial();
 
@@ -140,7 +156,7 @@ export type WhatsNewInput = z.infer<typeof whatsNewSchema>;
 export const createInviteSchema = z.object({
   /** Only this address can use it; any address when omitted. */
   email: z.email().optional(),
-  role: z.enum(['user', 'vip', 'educator']).default('user'),
+  role: z.enum(INVITE_ROLES).default('standard'),
   /** Days until it expires; null = never. */
   expiresInDays: z.number().int().min(1).max(365).nullable().default(14),
   /** Own code (letters, digits, dashes; stored upper-case); a random one when omitted. */
@@ -201,7 +217,16 @@ export const updateAccountSchema = accountFields.partial();
 /** Market analysis of one instrument: candles at this resolution (H4 by default). */
 export const marketAnalysisQuerySchema = z.object({ resolution: z.enum(ANALYSIS_RESOLUTIONS).default('H4') });
 
+/** Calculator PRO: both markets' candles of one pair at one resolution. */
+export const proCandlesQuerySchema = z.object({
+  pair: z.enum(CFD_FUTURES_PAIRS.map((p) => p.key) as [string, ...string[]]),
+  resolution: z.enum(PRO_RESOLUTIONS).default('M5'),
+});
+
 /** Deleting an account: keep its trades without an account, move them to another account, or delete them. */
+/** The accounts to link with one (empty: unlink it). */
+export const accountLinksSchema = z.object({ accountIds: z.array(z.uuid()).max(20) });
+
 export const deleteAccountQuerySchema = z.object({
   trades: z.enum(['keep', 'move', 'delete']).default('keep'),
   moveTo: z.uuid().optional(),
@@ -242,7 +267,7 @@ export const updateInstrumentSchema = z
 /** Admin: change a user's role or block the account. */
 export const adminUpdateUserSchema = z
   .object({
-    role: z.enum(ROLE_KEYS),
+    role: z.enum(ASSIGNABLE_ROLES),
     disabled: z.boolean(),
   })
   .partial();
@@ -373,6 +398,14 @@ export const mt5ImportFieldsSchema = z.object({
     .transform((v) => v === 'true'),
   /** Also import trades that look like ones entered by hand (same instrument, direction and account, opened within 15 minutes). */
   includeSimilar: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /**
+   * The account is linked with others and the file's trades came from a trade copier: save each one
+   * on every linked account too. Off by default, as each platform account usually has its own file.
+   */
+  copyToLinked: z
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
@@ -536,3 +569,54 @@ export type UpdateTradeInput = z.infer<typeof updateTradeSchema>;
 export type TradeFilters = z.infer<typeof tradeFiltersSchema>;
 export type CreateSignalInput = z.infer<typeof createSignalSchema>;
 export type CreateLevelInput = z.infer<typeof createLevelSchema>;
+
+// --- Backtesting ---------------------------------------------------------------
+
+export const BACKTEST_EXIT_REASONS = ['tp', 'sl', 'manual'] as const;
+export type BacktestExitReason = (typeof BACKTEST_EXIT_REASONS)[number];
+
+/** Historical candles for a replay: at most 960 periods per request (Capital.com refuses 1000). */
+export const backtestCandlesQuerySchema = z.object({
+  instrumentId: z.uuid(),
+  resolution: z.enum(ANALYSIS_RESOLUTIONS),
+  from: isoDateTime,
+  to: isoDateTime,
+});
+
+export const createBacktestSessionSchema = z.object({
+  accountId: z.uuid(),
+  instrumentId: z.uuid(),
+  resolution: z.enum(ANALYSIS_RESOLUTIONS),
+  /** Where the replay starts: candles after it are hidden. */
+  startAt: isoDateTime,
+  /** Optional: each order then ticks the strategy's rules. */
+  strategyId: z.uuid().nullable().optional(),
+});
+
+export const updateBacktestSessionSchema = z.object({
+  /** The last candle shown (the replay's "now"). */
+  cursorAt: isoDateTime.optional(),
+  resolution: z.enum(ANALYSIS_RESOLUTIONS).optional(),
+  finished: z.boolean().optional(),
+});
+
+export const openBacktestTradeSchema = z.object({
+  direction: z.enum(DIRECTIONS),
+  size: z.number().positive().max(100_000),
+  entryPrice: price,
+  stopLoss: price.nullable().optional(),
+  takeProfit: price.nullable().optional(),
+  /** Replay time of the fill. */
+  openedAt: isoDateTime,
+  checkedRuleIds: z.array(z.uuid()).max(MAX_STRATEGY_RULES).optional(),
+});
+
+export const updateBacktestTradeSchema = z.object({
+  stopLoss: price.nullable().optional(),
+  takeProfit: price.nullable().optional(),
+  /** Closes the position: at its SL or TP when a candle reached it, or by hand at the candle's close. */
+  close: z.object({ price, at: isoDateTime, reason: z.enum(BACKTEST_EXIT_REASONS) }).optional(),
+});
+
+export type CreateBacktestSessionInput = z.infer<typeof createBacktestSessionSchema>;
+export type OpenBacktestTradeInput = z.infer<typeof openBacktestTradeSchema>;

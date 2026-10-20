@@ -14,6 +14,7 @@ import { Field, Input, Segmented } from '../../components/ui/Field.tsx';
 import { Panel } from '../../components/ui/Panel.tsx';
 import { useLanguage, useT } from '../../i18n/index.tsx';
 import { currentLocale, formatAmount, formatMoney, formatNumber, formatPrice, parseDecimal } from '../../lib/format.ts';
+import { ProPanel, type ProLevel } from './ProPanel.tsx';
 
 // Every CFD ↔ futures pair (gold and the three US indices). Mini and micro futures quote the same
 // price, so they are one side of the conversion; only the money per contract differs.
@@ -252,12 +253,15 @@ export function CalculatorPage() {
       <div className="flex flex-wrap items-center gap-4">
         <h1 className="m-0 text-2xl font-bold tracking-tight">{t.title}</h1>
         <div className="grow" />
-        <Segmented
-          label={t.pair}
-          value={PAIR.key}
-          onChange={choosePair}
-          options={CFD_FUTURES_PAIRS.map((p) => ({ value: p.key, label: p.label[language] }))}
-        />
+        {/* Six markets do not fit a phone: the switch scrolls sideways instead of the page. */}
+        <div className="max-w-full overflow-x-auto">
+          <Segmented
+            label={t.pair}
+            value={PAIR.key}
+            onChange={choosePair}
+            options={CFD_FUTURES_PAIRS.map((p) => ({ value: p.key, label: p.label[language] }))}
+          />
+        </div>
       </div>
       <p className="m-0 -mt-2 font-mono text-sm text-dim">
         {PAIR.cfd} ↔ {FUT} · <span className="font-sans">{t.miniMicro}</span>
@@ -481,6 +485,17 @@ export function CalculatorPage() {
           )}
         </div>
       </section>
+
+      <ProPanel
+        pair={PAIR}
+        levelsSide={levelsSide}
+        levels={levelTiles
+          .map((tile) => ({ tag: tile.row, label: tile.label, price: parseDecimal(levels[tile.key]) }))
+          .filter((l): l is ProLevel => l.price != null)}
+        convert={ready ? convertTo : null}
+        tick={tick}
+        copyHeader={(side) => `${side === 'futures' ? FUT : PAIR.cfd}${sideWord ? ` - ${sideWord}` : ''}`}
+      />
     </main>
   );
 }

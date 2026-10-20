@@ -1,5 +1,5 @@
 import type { AdminUser, PublicUser } from '@trading/api/types';
-import { ROLE_KEYS, type RoleKey } from '@trading/shared';
+import { ASSIGNABLE_ROLES, type RoleKey } from '@trading/shared';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ApiError } from '../../api/client.ts';
@@ -25,7 +25,7 @@ export function AdminUsers({ me }: { me: PublicUser }) {
   const shown = q ? users.filter((u) => u.displayName.toLowerCase().includes(q) || (u.email ?? '').toLowerCase().includes(q)) : users;
   const fail = (err: unknown) => setMessage({ text: err instanceof ApiError ? err.lines.join(' ') : String(err), tone: 'error' });
 
-  const changeRole = (u: AdminUser, role: RoleKey) => {
+  const changeRole = (u: AdminUser, role: (typeof ASSIGNABLE_ROLES)[number]) => {
     if (role === u.role || !window.confirm(t.confirmRole(u.displayName, roleName(role)))) return;
     update.mutate({ id: u.id, patch: { role } }, { onSuccess: () => setMessage({ text: t.done.role(u.displayName, roleName(role)), tone: 'ok' }), onError: fail });
   };
@@ -112,8 +112,8 @@ export function AdminUsers({ me }: { me: PublicUser }) {
                         aria-label={`${t.columns.role}: ${u.displayName}`}
                         value={u.role}
                         disabled={self || busy}
-                        onChange={(role) => changeRole(u, role as RoleKey)}
-                        options={ROLE_KEYS.map((r) => ({ value: r, label: roleName(r) }))}
+                        onChange={(role) => changeRole(u, role as (typeof ASSIGNABLE_ROLES)[number])}
+                        options={ASSIGNABLE_ROLES.map((r) => ({ value: r, label: roleName(r) }))}
                       />
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">

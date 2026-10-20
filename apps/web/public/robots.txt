@@ -9,6 +9,7 @@ Disallow: /transakcje
 Disallow: /statystyki
 Disallow: /kalkulator
 Disallow: /analiza
+Disallow: /strategie
 Disallow: /kalendarz
 Disallow: /news
 Disallow: /ustawienia

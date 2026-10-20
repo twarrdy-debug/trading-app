@@ -19,8 +19,8 @@ import { instruments, trades } from '../db/schema.ts';
 import { badRequest } from '../errors.ts';
 import { t } from '../i18n.ts';
 import type { CurrentUser } from '../plugins/current-user.ts';
-import { getAccount } from './accounts.ts';
-import { createTrade, type TradeContext } from './trades.ts';
+import { getAccount, linkedAccounts } from './accounts.ts';
+import { assertTradeRoom, createTrade, type TradeContext } from './trades.ts';
 import { isZip, xlsxRows } from './xlsx.ts';
 
 type Report = { format: 'mt5'; report: Mt5Report } | { format: 'tradovate'; trades: TradovateTrade[] };
@@ -139,6 +139,7 @@ export async function importMt5(ctx: TradeContext, user: CurrentUser, bytes: Uin
 
   const list = await ctx.db.select().from(instruments).where(eq(instruments.active, true));
   const account = await getAccount(ctx.db, user, fields.accountId);
+  if (account.type === 'backtest') throw badRequest('backtestAccountTrade');
   const existing = new Set(
     (
       await ctx.db
@@ -225,6 +226,8 @@ export async function importMt5(ctx: TradeContext, user: CurrentUser, bytes: Uin
   }
 
   if (fields.commit) {
+    // The Standard plan's limit: the whole import fits, or nothing is saved.
+    await assertTradeRoom(ctx.db, user, rows.filter((r) => r.status === 'ready').length);
     for (const row of rows) {
       if (row.status !== 'ready') continue;
       const fees = round2(-(row.commission + row.swap));
@@ -252,7 +255,7 @@ export async function importMt5(ctx: TradeContext, user: CurrentUser, bytes: Uin
           emotionKeys: [],
           accountId: account.id,
         },
-        { externalId: row.externalId },
+        { externalId: row.externalId, linked: fields.copyToLinked },
       );
       // Price-side warnings are skipped: in MT5 the stop is often moved past the entry later on.
       if (result.fxWarning) warnings.add(result.fxWarning);
@@ -264,6 +267,8 @@ export async function importMt5(ctx: TradeContext, user: CurrentUser, bytes: Uin
   return {
     format: file.format,
     account: platformAccount,
+    /** The app account's linked accounts: the dialog asks whether the trades came from a trade copier. */
+    linkedAccounts: (await linkedAccounts(ctx.db, user, account)).map((a) => ({ id: a.id, name: a.name })),
     currency,
     timezone,
     positions: rows.map(({ exits: _exits, ...row }) => row),

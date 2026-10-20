@@ -36,7 +36,8 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const [picked, setPicked] = useState<Language | null>(null);
   const settingsLanguage = me?.settings.language;
   useEffect(() => setPicked(null), [settingsLanguage]);
-  const language = picked ?? settingsLanguage ?? storedLanguage();
+  // The demo is one shared user: it reads in the language picked on the public pages (and kept by its settings, locally).
+  const language = picked ?? (me?.demo ? storedLanguage() : settingsLanguage) ?? storedLanguage();
   const t = DICTIONARIES[language];
   // Set synchronously so formatting during this render already uses the language.
   setFormatLocale(t.locale);

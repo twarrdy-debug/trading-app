@@ -1,6 +1,11 @@
 import type { PublicUser } from '@trading/api/types';
 import {
   ACCENT_COLORS,
+  CANDLE_PALETTE_KEYS,
+  CANDLE_PALETTES,
+  candleColors,
+  DEFAULT_CANDLE_PALETTE,
+  type ChartStyle,
   ACCOUNT_CURRENCY_CHOICES,
   AUTO_FX_CURRENCIES,
   LANGUAGES,
@@ -10,7 +15,7 @@ import {
   type UpdateSettingsInput,
 } from '@trading/shared';
 import { Link, useParams } from '@tanstack/react-router';
-import { useEffect, useId, useState, type FormEvent, type InputHTMLAttributes, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type InputHTMLAttributes, type ReactNode } from 'react';
 import { AuthError, authApi } from '../../api/auth.ts';
 import { ApiError } from '../../api/client.ts';
 import { useQueryClient } from '@tanstack/react-query';
@@ -597,6 +602,9 @@ function AppearanceSection({ user, save }: { user: PublicUser; save: Save }) {
           })}
         </div>
       </Row>
+      <Row label={t.candles} help={t.candlesHelp}>
+        <CandleColors style={s.chartStyle} save={save} />
+      </Row>
       <Row label={t.language} help={t.languageHelp}>
         <Segmented
           label={t.language}
@@ -606,6 +614,77 @@ function AppearanceSection({ user, save }: { user: PublicUser; save: Save }) {
         />
       </Row>
     </Card>
+  );
+}
+
+/**
+ * Candle colours on the analysis chart: calm palettes (shared/chart.ts) or two own colours, and
+ * rising candles filled or as outlines. Saved on the account like the other settings.
+ */
+function CandleColors({ style, save }: { style: ChartStyle | null; save: Save }) {
+  const t = useT().settings;
+  const theme = (document.documentElement.dataset.theme === 'light' ? 'light' : 'dark') as 'light' | 'dark';
+  const current = candleColors(style, theme);
+  const palette = style?.palette ?? DEFAULT_CANDLE_PALETTE;
+  const [own, setOwn] = useState({ up: current.up, down: current.down });
+  // The colour picker reports every step while dragging: save once it settles.
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const set = (next: Partial<ChartStyle>) => save({ chartStyle: { palette, hollow: current.hollow, ...(palette === 'custom' ? own : {}), ...next } });
+  const swatch = (up: string, down: string, hollow: boolean) => (
+    <span aria-hidden className="flex items-end gap-[3px]">
+      <span className="h-5 w-2.5 rounded-[3px]" style={hollow ? { boxShadow: `inset 0 0 0 1.5px ${up}` } : { background: up }} />
+      <span className="h-3.5 w-2.5 rounded-[3px]" style={{ background: down }} />
+    </span>
+  );
+  return (
+    <div className="flex flex-col gap-3">
+      <div role="group" aria-label={t.candles} className="flex flex-wrap gap-2 md:justify-end">
+        {CANDLE_PALETTE_KEYS.map((key) => {
+          const colors = CANDLE_PALETTES[key][theme];
+          return (
+            <button key={key} type="button" aria-pressed={palette === key} onClick={() => set({ palette: key, hollow: key === 'mono' })} className={`flex h-10 items-center gap-2.5 px-3 text-[13px] ${toggleClass(palette === key)}`}>
+              {swatch(colors.up, colors.down, key === 'mono')}
+              {t.palettes[key]}
+            </button>
+          );
+        })}
+        <button type="button" aria-pressed={palette === 'custom'} onClick={() => set({ palette: 'custom', ...own })} className={`flex h-10 items-center gap-2.5 px-3 text-[13px] ${toggleClass(palette === 'custom')}`}>
+          {swatch(own.up, own.down, current.hollow)}
+          {t.palettes.custom}
+        </button>
+      </div>
+      {palette === 'custom' && (
+        <div className="flex flex-wrap gap-2 md:justify-end">
+          {(['up', 'down'] as const).map((side) => (
+            <label key={side} className="flex h-10 cursor-pointer items-center gap-2 rounded-(--radius-control) bg-raised px-3 text-[13px] font-semibold">
+              <input
+                type="color"
+                value={own[side]}
+                onChange={(e) => {
+                  const next = { ...own, [side]: e.target.value };
+                  setOwn(next);
+                  clearTimeout(timer.current);
+                  timer.current = setTimeout(() => set({ palette: 'custom', ...next }), 400);
+                }}
+                className="size-6 cursor-pointer rounded-md border-0 bg-transparent p-0"
+              />
+              {side === 'up' ? t.candleUp : t.candleDown}
+            </label>
+          ))}
+        </div>
+      )}
+      <div className="md:self-end">
+        <Segmented<'filled' | 'hollow'>
+          label={t.candleBodies}
+          value={current.hollow ? 'hollow' : 'filled'}
+          onChange={(v) => set({ hollow: v === 'hollow' })}
+          options={[
+            { value: 'filled', label: t.candleFilled },
+            { value: 'hollow', label: t.candleHollow },
+          ]}
+        />
+      </div>
+    </div>
   );
 }
 

@@ -1,6 +1,7 @@
 import {
   ASSET_CLASSES,
   BIASES,
+  type ChartStyle,
   DIRECTIONS,
   EVENT_CATEGORIES,
   EVENT_IMPACTS,
@@ -89,7 +90,8 @@ export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   email: text('email').unique(),
   displayName: text('display_name').notNull(),
-  role: roleKey('role').notNull().default('user').references(() => roles.key),
+  /** The database default is the old `user`, renamed `pro`; sign-ups get `standard` or their invite's role. */
+  role: roleKey('role').notNull().default('pro').references(() => roles.key),
   accountCurrency: char('account_currency', { length: 3 }).notNull().default('USD'),
   theme: theme('theme').notNull().default('dark'),
   language: language('language').notNull().default('pl'),
@@ -117,10 +119,14 @@ export const users = pgTable('users', {
   image: text('image'),
   /** Better Auth two-factor plugin: sign-in also asks for a code from an authenticator app. */
   twoFactorEnabled: boolean('two_factor_enabled').notNull().default(false),
+  /** The public demo's user (sample data, read-only, entered without signing in); never in admin lists or e-mails. */
+  demo: boolean('demo').notNull().default(false),
   /** E-mails the user can turn off (settings or the link in each one): week ahead, day summary, what's new. */
   emailWeekAhead: boolean('email_week_ahead').notNull().default(true),
   emailDaySummary: boolean('email_day_summary').notNull().default(true),
   emailUpdates: boolean('email_updates').notNull().default(true),
+  /** Candle colours on the analysis chart (`ChartStyle`, shared/chart.ts); null = the calm default. */
+  chartStyle: jsonb('chart_style').$type<ChartStyle>(),
   ...timestamps,
 });
 
@@ -221,7 +227,7 @@ export const invites = pgTable('invites', {
   /** When set, only this address can use the invite. */
   email: text('email'),
   /** Role given to the new user. */
-  role: roleKey('role').notNull().default('user'),
+  role: roleKey('role').notNull().default('pro'),
   expiresAt: timestamp('expires_at', { withTimezone: true }),
   usedBy: uuid('used_by').references(() => users.id, { onDelete: 'set null' }),
   /** Single-use: when it was used. Multi-use: the latest sign-up with it. */
@@ -335,6 +341,11 @@ export const tradingAccounts = pgTable(
     maxTradesPerDay: smallint('max_trades_per_day'),
     /** Own losses warning threshold; null = the user's default (users.loss_streak_alert). */
     lossStreakAlert: smallint('loss_streak_alert'),
+    /**
+     * Linked accounts (since 2026-10-20) share one id here: a trade saved on one of them is saved
+     * on every one (a trade copier); null = not linked.
+     */
+    linkGroup: uuid('link_group'),
     ...timestamps,
   },
   (t) => [index('trading_accounts_user_idx').on(t.userId)],
@@ -352,6 +363,8 @@ export const trades = pgTable(
     instrumentId: uuid('instrument_id')
       .notNull()
       .references(() => instruments.id),
+    /** A copy on a linked account points to the trade it copies; deleting that removes the copies. */
+    copyOf: uuid('copy_of').references((): AnyPgColumn => trades.id, { onDelete: 'cascade' }),
     direction: direction('direction').notNull(),
     openedAt: timestamp('opened_at', { withTimezone: true }).notNull(),
     closedAt: timestamp('closed_at', { withTimezone: true }),
@@ -394,6 +407,7 @@ export const trades = pgTable(
     ...timestamps,
   },
   (t) => [
+    index('trades_copy_of_idx').on(t.copyOf),
     index('trades_user_date_idx').on(t.userId, t.tradeDate, t.openedAt),
     index('trades_user_instrument_idx').on(t.userId, t.instrumentId),
     index('trades_account_idx').on(t.accountId),
@@ -619,6 +633,69 @@ export const strategyRules = pgTable(
     sortOrder: smallint('sort_order').notNull().default(0),
   },
   (t) => [index('strategy_rules_strategy_idx').on(t.strategyId)],
+);
+
+// --- Backtesting ---------------------------------------------------------------
+
+/**
+ * A replay of one instrument from a chosen moment, on a backtest account (type `backtest`): its
+ * trades never reach the journal, the stats or the monitor. `cursorAt` is the last candle shown.
+ */
+export const backtestSessions = pgTable(
+  'backtest_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => tradingAccounts.id, { onDelete: 'cascade' }),
+    instrumentId: uuid('instrument_id')
+      .notNull()
+      .references(() => instruments.id),
+    /** AnalysisResolution (M3 included, so not the timeframe enum). */
+    resolution: text('resolution').notNull(),
+    startAt: timestamp('start_at', { withTimezone: true }).notNull(),
+    cursorAt: timestamp('cursor_at', { withTimezone: true }).notNull(),
+    strategyId: uuid('strategy_id').references(() => strategies.id, { onDelete: 'set null' }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [index('backtest_sessions_user_idx').on(t.userId), index('backtest_sessions_account_idx').on(t.accountId)],
+);
+
+/** A simulated position of a backtesting session; times are replay times. */
+export const backtestTrades = pgTable(
+  'backtest_trades',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => backtestSessions.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    direction: direction('direction').notNull(),
+    size: numeric('size', { precision: 18, scale: 4, mode: 'number' }).notNull(),
+    entryPrice: priceCol('entry_price').notNull(),
+    stopLoss: priceCol('stop_loss'),
+    takeProfit: priceCol('take_profit'),
+    /** The stop loss when the position was opened: the initial risk that R is measured against. */
+    initialStopLoss: priceCol('initial_stop_loss'),
+    openedAt: timestamp('opened_at', { withTimezone: true }).notNull(),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    exitPrice: priceCol('exit_price'),
+    /** tp, sl or manual. */
+    exitReason: text('exit_reason'),
+    resultUnits: numeric('result_units', { precision: 18, scale: 2, mode: 'number' }),
+    /** Result in the user's account currency. */
+    pnl: moneyCol('pnl'),
+    rMultiple: numeric('r_multiple', { precision: 10, scale: 2, mode: 'number' }),
+    checkedRuleIds: uuid('checked_rule_ids').array().notNull().default([]),
+    ...timestamps,
+  },
+  (t) => [index('backtest_trades_session_idx').on(t.sessionId)],
 );
 
 /**

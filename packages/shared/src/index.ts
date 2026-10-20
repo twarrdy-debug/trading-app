@@ -13,3 +13,7 @@ export * from './app.ts';
 export * from './password.ts';
 export * from './analysis.ts';
 export * from './indicators.ts';
+export * from './chart.ts';
+export * from './calculator-pro.ts';
+export * from './backtest.ts';
+export * from './plans.ts';

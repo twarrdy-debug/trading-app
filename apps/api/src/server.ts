@@ -4,6 +4,7 @@ import { seed } from './db/seed-data.ts';
 import { loadEnv } from './env.ts';
 import { startBasisScheduler } from './services/basis.ts';
 import { forexFactorySource, startCalendarScheduler } from './services/calendar.ts';
+import { startDemoScheduler } from './services/demo.ts';
 import { startDigestScheduler } from './services/digests.ts';
 import { startAnalysisScheduler } from './services/market-analysis.ts';
 import { financialJuiceRss, startNewsScheduler } from './services/news.ts';
@@ -36,7 +37,9 @@ const stopDigests =
   env.DIGEST_INTERVAL_MINUTES > 0
     ? startDigestScheduler(database.db, env, app.mailer, (msg) => app.log.info(msg), env.DIGEST_INTERVAL_MINUTES)
     : () => {};
+const stopDemo = startDemoScheduler(database.db, { fx: app.fx, quotes: app.quotes, market: app.market }, (msg) => app.log.info(msg));
 app.addHook('onClose', async () => {
+  stopDemo();
   stopDigests();
   stopBasis();
   stopAnalysis();

@@ -1,3 +1,4 @@
+import { INVITE_ROLES } from '@trading/shared';
 import { useState } from 'react';
 import { useCreateInvite, useDeleteInvite, useInvites } from '../../api/auth.ts';
 import { ApiError } from '../../api/client.ts';
@@ -7,7 +8,7 @@ import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
 import { formatDateTime } from '../../lib/format.ts';
 
-type InviteRole = 'user' | 'vip' | 'educator';
+type InviteRole = (typeof INVITE_ROLES)[number];
 const VALIDITY = { d14: 14, d30: 30, d90: 90, d365: 365, never: null } as const;
 type Validity = keyof typeof VALIDITY;
 
@@ -18,7 +19,7 @@ export function InvitesManager({ timezone }: { timezone: string }) {
   const create = useCreateInvite();
   const remove = useDeleteInvite();
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState<InviteRole>('user');
+  const [role, setRole] = useState<InviteRole>('standard');
   const [code, setCode] = useState('');
   const [multiUse, setMultiUse] = useState(false);
   const [validity, setValidity] = useState<Validity>('d14');
@@ -81,7 +82,7 @@ export function InvitesManager({ timezone }: { timezone: string }) {
           <Select
             value={role}
             onChange={setRole}
-            options={(['user', 'vip', 'educator'] as const).map((r) => ({ value: r, label: t.roles[r]! }))}
+            options={INVITE_ROLES.map((r) => ({ value: r, label: t.roles[r]! }))}
           />
         </Field>
         <Button size="md" variant="primary" onClick={submit} disabled={create.isPending} className="whitespace-nowrap">

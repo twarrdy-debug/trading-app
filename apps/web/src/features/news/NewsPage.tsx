@@ -1,3 +1,4 @@
+import { PlanGate } from '../plans/PlanLocked.tsx';
 import type { NewsItem, NewsResponse } from '@trading/api/types';
 import {
   matchKeywords,
@@ -263,7 +264,24 @@ function Upcoming({ timezone }: { timezone: string }) {
   );
 }
 
+/** News (`/news`): Pro and VIP only; the demo shows it locked too (outside data, for signed-in users). */
 export function NewsPage() {
+  const { data: me } = useMe();
+  const t = useT();
+  if (me?.demo || (me && !me.plan.features.includes('news'))) {
+    return (
+      <main className="page">
+        <h1 className="m-0 text-2xl font-bold tracking-tight">{t.nav.news}</h1>
+        <PlanGate feature="news" demo={{ title: t.demo.newsTitle, text: t.demo.newsText }} plan={{ title: t.plans.newsTitle, text: t.plans.newsText }}>
+          {null}
+        </PlanGate>
+      </main>
+    );
+  }
+  return <NewsScreen />;
+}
+
+function NewsScreen() {
   const all = useT();
   const t = all.news;
   const language = useLanguage();
