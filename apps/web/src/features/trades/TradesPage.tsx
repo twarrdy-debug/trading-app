@@ -175,6 +175,13 @@ export function TradesPage() {
           <Button size="sm" variant="primary" onClick={newTrade} className="whitespace-nowrap">
             + {all.table.newTrade}
           </Button>
+          {/* The import right of it, the same yellow tile (MT5 / Tradovate files). */}
+          <Button size="sm" variant="primary" onClick={() => setImportOpen(true)} title={t.importMt5Help} className="whitespace-nowrap">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14" />
+            </svg>
+            {t.importMt5}
+          </Button>
         </header>
         {composerOpen && (
           <div className="border-t border-line p-4 sm:p-5">
@@ -207,12 +214,6 @@ export function TradesPage() {
               </svg>
               {all.table.filters}
               {activeFilters > 0 && <span className="rounded-full bg-accent px-1.5 text-[11px] font-bold text-on-accent">{activeFilters}</span>}
-            </Button>
-            <Button size="sm" onClick={() => setImportOpen(true)} title={t.importMt5Help}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14" />
-              </svg>
-              {t.importMt5}
             </Button>
             <IconButton label={all.table.exportCsv} onClick={() => downloadCsv(items, (id) => accounts.find((a) => a.id === id)?.name ?? '')}>
               <path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8l-5-5Z" />
