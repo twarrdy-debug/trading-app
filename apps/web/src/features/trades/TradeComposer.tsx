@@ -17,6 +17,7 @@ import {
   type TradePartInput,
   type TradeSource,
   coinOf,
+  analysisSource,
 } from '@trading/shared';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useState, type ClipboardEvent, type FormEvent, type ReactNode } from 'react';
@@ -45,6 +46,7 @@ import { instrumentOptions } from '../../lib/instruments.ts';
 import { LinkIcon } from '../account/AccountsManager.tsx';
 import { emptyPart, PartsEditor, partsTotal, ResultPicker, splitEqually, type PartDraft } from './PartsEditor.tsx';
 import { PositionSize, type RiskMode } from './PositionSize.tsx';
+import { TradeChart } from './TradeChart.tsx';
 import { onlyImages, ScreenshotDrop } from './ScreenshotDrop.tsx';
 
 /** The last choices, so the next trade needs fewer clicks (per browser). */
@@ -100,7 +102,7 @@ function draftsOf(trade: Trade): PartDraft[] {
       tpText: toInputNumber(p.takeProfit),
       slText,
       result: p.result,
-      priceText: p.result === 'manual' ? toInputNumber(p.price) : '',
+      priceText: p.result === 'manual' || (p.result === 'be' && p.price != null && p.price !== trade.entryPrice) ? toInputNumber(p.price) : '',
       closedAt: localTime(p.closedAt),
     };
   });
@@ -222,7 +224,8 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
     previousStop = partStop;
     const tp = parseDecimal(p.tpText) ?? null;
     const size = split ? (parseDecimal(p.sizeText) ?? null) : position;
-    const price = p.result === 'tp' ? tp : p.result === 'sl' ? partStop : p.result === 'be' ? entryNum : p.result === 'manual' ? (parseDecimal(p.priceText) ?? null) : null;
+    const price =
+      p.result === 'tp' ? tp : p.result === 'sl' ? partStop : p.result === 'be' ? (parseDecimal(p.priceText) ?? entryNum) : p.result === 'manual' ? (parseDecimal(p.priceText) ?? null) : null;
     return { draft: p, size, tp, stop: partStop, price };
   });
   const closedParts = resolved.filter((r) => r.price != null && r.size != null);
@@ -256,6 +259,45 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
     const [a, b] = splitEqually(position, 2, step);
     setSplit(true);
     setParts([{ ...single, sizeText: toInputNumber(a) }, emptyPart({ sizeText: toInputNumber(b) })]);
+  };
+
+  // The chart (Pro and VIP; not the demo): its lines and these fields are the same levels.
+  const chartOn = !user.demo && user.plan.features.includes('analysis') && instrument != null && analysisSource(instrument.symbol) != null;
+  const chartTps = split ? parts.map((p) => parseDecimal(p.tpText) ?? null) : [parseDecimal(single.tpText) ?? null];
+  /** Money and R at a level, for its label on the chart ("−$243 · −1R"). */
+  const levelLabel = (price: number) => {
+    if (!instrument || entryNum == null || position == null || rate == null) return '';
+    const units = ((price - entryNum) * (direction === 'long' ? 1 : -1)) / instrument.unitSize;
+    const money = units * instrument.unitValue * position * rate;
+    const risk = stop != null && stop !== entryNum ? Math.abs(entryNum - stop) / instrument.unitSize : null;
+    return `${formatAmount(money, account)}${risk ? ` · ${formatNumber(units / risk, true)}R` : ''}`;
+  };
+  /** Parts re-sized equally (several TPs close the position in parts). */
+  const sizedEqually = (list: PartDraft[]) => {
+    if (position == null || position < list.length * step - 1e-9) return list;
+    const sizes = splitEqually(position, list.length, step);
+    return list.map((p, i) => ({ ...p, sizeText: toInputNumber(sizes[i]) }));
+  };
+  const setTarget = (index: number, price: number) => {
+    const text = toInputNumber(price);
+    if (split) setParts((list) => list.map((p, i) => (i === index ? { ...p, tpText: text } : p)));
+    else updateSingle({ tpText: text });
+  };
+  const addTarget = (price: number) => {
+    const text = toInputNumber(price);
+    if (!split && single.tpText.trim() === '') return updateSingle({ tpText: text });
+    const next = split ? [...parts, emptyPart({ tpText: text })] : [single, emptyPart({ tpText: text })];
+    // A second TP needs room for a part each (at least one step).
+    if (position == null || position < next.length * step - 1e-9) return setErrors([t.tpNeedsSize(formatSize(next.length * step))]);
+    setSplit(true);
+    setParts(sizedEqually(next));
+  };
+  const removeTarget = () => {
+    if (!split) return updateSingle({ tpText: '' });
+    const next = parts.slice(0, -1);
+    if (next.length > 1) return setParts(sizedEqually(next));
+    setSplit(false);
+    setParts([{ ...next[0]!, sizeText: '' }]);
   };
 
   const addFiles = (added: File[]) => setFiles((current) => [...current, ...added]);
@@ -308,6 +350,8 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
       stopLoss: r.stop,
       result: r.draft.result,
       ...(r.draft.result === 'manual' ? { price: r.price! } : {}),
+      // A breakeven close at its own price (empty: the entry).
+      ...(r.draft.result === 'be' && parseDecimal(r.draft.priceText) != null ? { price: parseDecimal(r.draft.priceText)! } : {}),
       closedAt: r.draft.result === 'open' ? null : toIso(r.draft.closedAt || now),
     }));
 
@@ -374,265 +418,292 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
           </a>
         </p>
       )}
-      {/* 1. What and when; the session follows from the time. */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[auto_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.2fr)]">
-        <Group label={f.direction}>
-          <div className="flex gap-1.5" role="group" aria-label={f.direction}>
-            <Button variant="buy" size="md" selected={direction === 'long'} onClick={() => setDirection('long')} className="w-20">
-              BUY
-            </Button>
-            <Button variant="sell" size="md" selected={direction === 'short'} onClick={() => setDirection('short')} className="w-20">
-              SELL
-            </Button>
+      <div className={chartOn ? 'grid items-start gap-5 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]' : 'contents'}>
+        {/* The chart (Pro and VIP) beside the fields on wide screens, above them otherwise. */}
+        {chartOn && instrument && (
+          <div className="2xl:sticky 2xl:top-4 2xl:order-2">
+            <TradeChart
+              instrument={instrument}
+              direction={direction}
+              levels={{ entry: entryNum, stopLoss: stop, takeProfits: chartTps }}
+              timeZone={user.settings.timezone}
+              labelFor={levelLabel}
+              onEntry={(p) => setEntry(toInputNumber(p))}
+              onStop={(p) => setStopText(toInputNumber(p))}
+              onTarget={setTarget}
+              onAddTarget={addTarget}
+              onRemoveTarget={removeTarget}
+            />
           </div>
-        </Group>
-        <Field label={f.instrument}>
-          <Select value={instrumentId} onChange={chooseInstrument} options={instrumentOptions(allowed, { label: (i) => `${i.symbol} · ${i.name}`, favorites: all.instruments.favorites, others: all.instruments.others })} />
-        </Field>
-        <Field
-          label={all.accounts.switcher}
-          help={
-            linkedNames.length > 0 ? (
-              <span className="flex items-start gap-1.5 font-semibold text-warn">
-                <LinkIcon className="mt-px size-3.5 shrink-0" />
-                {trade ? f.linkedEdit(linkedNames.join(', ')) : f.linkedSave(linkedNames.join(', '))}
-              </span>
-            ) : undefined
-          }
-        >
-          <Select value={accountId} onChange={chooseAccount} options={[...(accountId ? [] : [{ value: '', label: f.chooseAccount }]), ...accounts.map((a) => ({ value: a.id, label: a.name }))]} />
-        </Field>
-        <Field label={t.opened} hint={session ? <span className="font-semibold text-accent-ink">{all.tradeSessions[session]}</span> : undefined}>
-          <DateTimePicker value={openedAt} onChange={setOpenedAt} />
-        </Field>
-      </div>
-
-      {/* 2. Size: presets, ×2, +step, or from the risk. */}
-      <Group label={t.size}>
-        <PositionSize
-          value={sizeText}
-          onChange={(text) => {
-            setSizeText(text);
-            if (!canSplit(parseDecimal(text) ?? null, step) && split) {
-              setSplit(false);
-              setParts([single]);
+        )}
+        <div className={chartOn ? 'flex min-w-0 flex-col gap-5 2xl:order-1' : 'contents'}>
+        {/* 1. What and when; the session follows from the time. */}
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[auto_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.2fr)]">
+          <Group label={f.direction}>
+            <div className="flex gap-1.5" role="group" aria-label={f.direction}>
+              <Button variant="buy" size="md" selected={direction === 'long'} onClick={() => setDirection('long')} className="w-20">
+                BUY
+              </Button>
+              <Button variant="sell" size="md" selected={direction === 'short'} onClick={() => setDirection('short')} className="w-20">
+                SELL
+              </Button>
+            </div>
+          </Group>
+          <Field label={f.instrument}>
+            <Select value={instrumentId} onChange={chooseInstrument} options={instrumentOptions(allowed, { label: (i) => `${i.symbol} · ${i.name}`, favorites: all.instruments.favorites, others: all.instruments.others })} />
+          </Field>
+          <Field
+            label={all.accounts.switcher}
+            help={
+              linkedNames.length > 0 ? (
+                <span className="flex items-start gap-1.5 font-semibold text-warn">
+                  <LinkIcon className="mt-px size-3.5 shrink-0" />
+                  {trade ? f.linkedEdit(linkedNames.join(', ')) : f.linkedSave(linkedNames.join(', '))}
+                </span>
+              ) : undefined
             }
-          }}
-          isFutures={isFutures}
-          isCrypto={isCrypto}
-          unitLabel={unitLabel}
-          riskText={riskText}
-          onRiskText={setRiskText}
-          riskMode={riskMode}
-          onRiskMode={setRiskMode}
-          sizedFromRisk={sizedFromRisk}
-          riskBlocker={riskBlocker}
-          currencySymbol={currencySymbol(account)}
-        />
-      </Group>
-
-      {/* 3. Levels. */}
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Field label={f.entry}>
-          <Input inputMode="decimal" value={entry} onChange={(e) => setEntry(e.target.value)} placeholder="0,00" className="font-semibold" />
-        </Field>
-        <Field label={t.stopLoss}>
-          <Input inputMode="decimal" value={stopText} onChange={(e) => setStopText(e.target.value)} placeholder="—" />
-        </Field>
-        <Field label={t.takeProfit} hint={split ? t.tpInParts : undefined}>
-          <Input inputMode="decimal" value={split ? '' : single.tpText} onChange={(e) => updateSingle({ tpText: e.target.value })} placeholder={split ? '↓' : '—'} disabled={split} />
-        </Field>
-      </div>
-
-      {/* 4. How it ended: as a whole, or part by part. */}
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-end gap-3">
-          {!split && (
-            <>
-              <Group label={t.outcome}>
-                <ResultPicker label={t.outcome} value={single.result} onChange={(result) => updateSingle({ result })} />
-              </Group>
-              {single.result === 'manual' && (
-                <Field label={t.closePrice} className="w-36">
-                  <Input inputMode="decimal" value={single.priceText} onChange={(e) => updateSingle({ priceText: e.target.value })} />
-                </Field>
-              )}
-              {single.result !== 'open' && (
-                <Field label={t.closedAt} className="w-52">
-                  <DateTimePicker value={single.closedAt} onChange={(closedAt) => updateSingle({ closedAt })} clearable placeholder={t.closedNow} />
-                </Field>
-              )}
-            </>
-          )}
-          {split && <span className="eyebrow">{t.parts}</span>}
-          <span className="grow" />
-          <div className="flex flex-col items-end gap-1">
-            <button
-              type="button"
-              aria-pressed={split}
-              onClick={toggleSplit}
-              disabled={!split && !splittable}
-              className={`flex h-11 items-center gap-2 px-4 text-[13px] font-semibold disabled:cursor-not-allowed disabled:opacity-45 ${toggleClass(split)}`}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                {split ? <path d="M4 12h16" /> : <path d="M4 7h16M4 12h10M4 17h6" />}
-              </svg>
-              {split ? t.splitOff : t.splitOn}
-            </button>
-            {!split && !splittable && <span className="text-[11px] text-dim">{t.splitTooSmall(formatSize(2 * step), unitLabel)}</span>}
-          </div>
+          >
+            <Select value={accountId} onChange={chooseAccount} options={[...(accountId ? [] : [{ value: '', label: f.chooseAccount }]), ...accounts.map((a) => ({ value: a.id, label: a.name }))]} />
+          </Field>
+          <Field label={t.opened} hint={session ? <span className="font-semibold text-accent-ink">{all.tradeSessions[session]}</span> : undefined}>
+            <DateTimePicker value={openedAt} onChange={setOpenedAt} />
+          </Field>
         </div>
-        {split && <PartsEditor parts={parts} onChange={setParts} total={position} step={step} unitLabel={unitLabel} isFutures={isFutures} tradeStop={stopText} />}
-      </div>
 
-      {/* 5. What it comes to; per-part pips only here. Always in view, with dashes until known. */}
-      <dl className="m-0 grid grid-cols-2 gap-px overflow-hidden rounded-(--radius-control) border border-line bg-line text-[13px] lg:grid-cols-4">
-        <Metric label={t.risk}>
-          {preview?.riskUnits == null ? (
-            '—'
-          ) : (
-            <>
-              {formatNumber(preview.riskUnits)} {unit}
-              {riskMoney ? <span className="text-dim"> · {formatAmount(riskMoney, account, false)}</span> : null}
-              {riskMoney && balance ? <span className="text-dim"> · {formatNumber((riskMoney / balance) * 100)}%</span> : null}
-            </>
-          )}
-        </Metric>
-        <Metric label={t.plannedRR}>{preview?.plannedRR == null ? '—' : `1 : ${formatNumber(preview.plannedRR)}`}</Metric>
-        <Metric label={t.result}>
-          {!preview || closedParts.length === 0 ? (
-            <span className="text-dim">{preview ? all.common.open : '—'}</span>
-          ) : (
-            <>
-              <span className={`font-semibold ${tone(preview.pnlAccount ?? preview.pnlQuote)}`}>
-                {preview.pnlAccount != null ? formatAmount(preview.pnlAccount, account) : formatAmount(preview.pnlQuote, instrument?.quoteCurrency)}
-              </span>
-              <span className="text-dim">
-                {' · '}
-                {partPips.length > 1 ? `${partPips.join(' + ')} = ` : ''}
-                {formatNumber(preview.resultUnits, true)} {unit} · {formatNumber(preview.rMultiple, true)} R
-              </span>
-            </>
-          )}
-        </Metric>
-        <Metric label={leverage != null && (isCfd || isCrypto) ? f.margin(leverage) : t.margin}>{margin != null ? formatAmount(margin, account, false) : '—'}</Metric>
-      </dl>
+        {/* 2. Size: presets, ×2, +step, or from the risk. */}
+        <Group label={t.size}>
+          <PositionSize
+            value={sizeText}
+            onChange={(text) => {
+              setSizeText(text);
+              if (!canSplit(parseDecimal(text) ?? null, step) && split) {
+                setSplit(false);
+                setParts([single]);
+              }
+            }}
+            isFutures={isFutures}
+            isCrypto={isCrypto}
+            unitLabel={unitLabel}
+            riskText={riskText}
+            onRiskText={setRiskText}
+            riskMode={riskMode}
+            onRiskMode={setRiskMode}
+            sizedFromRisk={sizedFromRisk}
+            riskBlocker={riskBlocker}
+            currencySymbol={currencySymbol(account)}
+          />
+        </Group>
 
-      {/* 6. Psychology and context, always in view. */}
-      <div className="grid gap-5 lg:grid-cols-2">
-        <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
-          <legend className="mb-2 text-sm font-semibold">{f.emotions}</legend>
-          <div className="flex flex-wrap gap-1.5">
-            {emotions.data?.map((em) => {
-              const checked = emotionKeys.includes(em.key);
-              return (
-                <label key={em.key} className={`flex h-9 cursor-pointer items-center rounded-full! px-3.5 text-[13px] has-focus-visible:outline-2 has-focus-visible:outline-accent-ink ${toggleClass(checked)}`}>
-                  <input type="checkbox" className="sr-only" checked={checked} onChange={() => setEmotionKeys((keys) => (checked ? keys.filter((k) => k !== em.key) : [...keys, em.key]))} />
-                  {em.label}
-                </label>
-              );
-            })}
-          </div>
-        </fieldset>
-        <Field label={f.notes}>
-          <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={10_000} rows={3} className="min-h-0 font-sans" />
-        </Field>
-        <ScreenshotDrop
-          saved={trade?.screenshots ?? []}
-          onRemoveSaved={(id) => trade && removeShot.mutate({ tradeId: trade.id, screenshotId: id })}
-          pending={files}
-          onAdd={addFiles}
-          onRemovePending={(i) => setFiles((current) => current.filter((_, j) => j !== i))}
-        />
-        {strategies.length > 0 && (
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-sm font-semibold">{t.strategy}</span>
-              <div className="w-56">
-                <Select
-                  aria-label={t.strategy}
-                  value={strategyId}
-                  onChange={(id) => {
-                    setStrategyId(id);
-                    setCheckedRuleIds([]);
-                  }}
-                  options={[{ value: '', label: t.noStrategy }, ...strategies.map((s) => ({ value: s.id, label: s.name }))]}
-                />
-              </div>
-              {strategy && <span className="font-mono text-xs text-dim">{t.rulesKept(checkedRuleIds.length, strategy.rules.length)}</span>}
-            </div>
-            {strategy && strategy.rules.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {strategy.rules.map((rule) => {
-                  const on = checkedRuleIds.includes(rule.id);
-                  return (
-                    <button key={rule.id} type="button" aria-pressed={on} onClick={() => setCheckedRuleIds(on ? checkedRuleIds.filter((id) => id !== rule.id) : [...checkedRuleIds, rule.id])} className={`rounded-full px-3 py-1.5 text-xs ${toggleClass(on)}`}>
-                      {on ? '✓ ' : ''}
-                      {rule.label}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+        {/* 3. Levels. */}
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label={f.entry}>
+            <Input inputMode="decimal" value={entry} onChange={(e) => setEntry(e.target.value)} placeholder="0,00" className="font-semibold" />
+          </Field>
+          <Field label={t.stopLoss}>
+            <Input inputMode="decimal" value={stopText} onChange={(e) => setStopText(e.target.value)} placeholder="—" />
+          </Field>
+          <Field label={t.takeProfit} hint={split ? t.tpInParts : undefined}>
+            <Input inputMode="decimal" value={split ? '' : single.tpText} onChange={(e) => updateSingle({ tpText: e.target.value })} placeholder={split ? '↓' : '—'} disabled={split} />
+          </Field>
+        </div>
 
-      {/* 7. Advanced: signal, source, spread, rate. */}
-      <div className="flex flex-col gap-3">
-        <Button size="sm" variant="ghost" aria-expanded={advanced} onClick={() => setAdvanced((a) => !a)} className="self-start">
-          {advanced ? '− ' : '+ '}
-          {t.advanced}
-        </Button>
-        {advanced && (
-          <div className="grid gap-4 rounded-(--radius-control) border border-line p-4 lg:grid-cols-2">
-            {!trade && (
-              <div className="flex flex-col gap-2">
-                <span className="eyebrow">{f.pasteSignal}</span>
-                <Textarea aria-label={f.signalText} placeholder={'XAUUSD - SELL\nIN: 4406.50\nSL: 4414\nTP1: 4390\nTP2: 4384'} value={signalText} onChange={(e) => setSignalText(e.target.value)} className="min-h-24" />
-                <Button size="sm" onClick={loadSignal} disabled={!signalText.trim() || parseSignal.isPending} className="self-start">
-                  {f.loadSignal}
-                </Button>
-                {signalNotes.length > 0 && (
-                  <ul className="m-0 list-none text-[13px] text-dim">
-                    {signalNotes.map((line) => (
-                      <li key={line}>{line}</li>
-                    ))}
-                  </ul>
+        {/* 4. How it ended: as a whole, or part by part. */}
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-end gap-3">
+            {!split && (
+              <>
+                <Group label={t.outcome}>
+                  <ResultPicker label={t.outcome} value={single.result} onChange={(result) => updateSingle({ result })} />
+                </Group>
+                {(single.result === 'manual' || single.result === 'be') && (
+                  <Field label={t.closePrice} className="w-36">
+                    <Input
+                      inputMode="decimal"
+                      value={single.priceText}
+                      onChange={(e) => updateSingle({ priceText: e.target.value })}
+                      // BE: empty means the entry price.
+                      placeholder={single.result === 'be' ? entry : undefined}
+                    />
+                  </Field>
                 )}
-              </div>
-            )}
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-col gap-2">
-                <span className="eyebrow">{f.source}</span>
-                <Segmented label={f.sourceAria} value={source} onChange={setSource} options={[{ value: 'own', label: f.own }, { value: 'educator', label: f.educator }]} />
-                {source === 'educator' && (
-                  <>
-                    <Select aria-label={f.educator} value={educatorId} onChange={setEducatorId} options={[{ value: '', label: f.chooseEducator }, ...(educators.data ?? []).map((ed) => ({ value: ed.id, label: ed.displayName }))]} />
-                    {user.role === 'admin' && (
-                      <div className="flex gap-2">
-                        <Input aria-label={f.newEducator} placeholder={f.addEducator} value={newEducator} onChange={(e) => setNewEducator(e.target.value)} />
-                        <Button size="md" disabled={!newEducator.trim() || createEducator.isPending} onClick={() => createEducator.mutate(newEducator.trim(), { onSuccess: (ed) => (setEducatorId(ed.id), setNewEducator('')) })}>
-                          {f.add}
-                        </Button>
-                      </div>
-                    )}
-                  </>
+                {single.result !== 'open' && (
+                  <Field label={t.closedAt} className="w-52">
+                    <DateTimePicker value={single.closedAt} onChange={(closedAt) => updateSingle({ closedAt })} clearable placeholder={t.closedNow} />
+                  </Field>
                 )}
-              </div>
-              {isCfd && spread.data && (
-                <Field label={t.spread(instrument?.symbol ?? '')} hint={spread.data.suggestion ? f.lastSpread(formatNumber(spread.data.suggestion.spread), formatDate(spread.data.suggestion.date).slice(0, 5)) : undefined}>
-                  <Input inputMode="decimal" value={spreadText} onChange={(e) => setSpreadText(e.target.value)} placeholder={unit} disabled={!spread.data.askUser} />
-                </Field>
-              )}
-              {instrument && !sameCurrency && (
-                <Field label={f.fxRate(`${instrument.quoteCurrency}/${account}`)} hint={f.fxHint}>
-                  <Input inputMode="decimal" value={fxRate} onChange={(e) => setFxRate(e.target.value)} placeholder={autoFx.data ? `auto · ${formatPrice(autoFx.data.rate)}` : 'auto'} />
-                </Field>
-              )}
+              </>
+            )}
+            {split && <span className="eyebrow">{t.parts}</span>}
+            <span className="grow" />
+            <div className="flex flex-col items-end gap-1">
+              <button
+                type="button"
+                aria-pressed={split}
+                onClick={toggleSplit}
+                disabled={!split && !splittable}
+                className={`flex h-11 items-center gap-2 px-4 text-[13px] font-semibold disabled:cursor-not-allowed disabled:opacity-45 ${toggleClass(split)}`}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                  {split ? <path d="M4 12h16" /> : <path d="M4 7h16M4 12h10M4 17h6" />}
+                </svg>
+                {split ? t.splitOff : t.splitOn}
+              </button>
+              {!split && !splittable && <span className="text-[11px] text-dim">{t.splitTooSmall(formatSize(2 * step), unitLabel)}</span>}
             </div>
           </div>
-        )}
+          {split && <PartsEditor parts={parts} onChange={setParts} total={position} step={step} unitLabel={unitLabel} isFutures={isFutures} tradeStop={stopText} />}
+        </div>
+
+        {/* 5. What it comes to; per-part pips only here. Always in view, with dashes until known. */}
+        <dl className="m-0 grid grid-cols-2 gap-px overflow-hidden rounded-(--radius-control) border border-line bg-line text-[13px] lg:grid-cols-4">
+          <Metric label={t.risk}>
+            {preview?.riskUnits == null ? (
+              '—'
+            ) : (
+              <>
+                {formatNumber(preview.riskUnits)} {unit}
+                {riskMoney ? <span className="text-dim"> · {formatAmount(riskMoney, account, false)}</span> : null}
+                {riskMoney && balance ? <span className="text-dim"> · {formatNumber((riskMoney / balance) * 100)}%</span> : null}
+              </>
+            )}
+          </Metric>
+          <Metric label={t.plannedRR}>{preview?.plannedRR == null ? '—' : `1 : ${formatNumber(preview.plannedRR)}`}</Metric>
+          <Metric label={t.result}>
+            {!preview || closedParts.length === 0 ? (
+              <span className="text-dim">{preview ? all.common.open : '—'}</span>
+            ) : (
+              <>
+                <span className={`font-semibold ${tone(preview.pnlAccount ?? preview.pnlQuote)}`}>
+                  {preview.pnlAccount != null ? formatAmount(preview.pnlAccount, account) : formatAmount(preview.pnlQuote, instrument?.quoteCurrency)}
+                </span>
+                <span className="text-dim">
+                  {' · '}
+                  {partPips.length > 1 ? `${partPips.join(' + ')} = ` : ''}
+                  {formatNumber(preview.resultUnits, true)} {unit} · {formatNumber(preview.rMultiple, true)} R
+                </span>
+              </>
+            )}
+          </Metric>
+          <Metric label={leverage != null && (isCfd || isCrypto) ? f.margin(leverage) : t.margin}>{margin != null ? formatAmount(margin, account, false) : '—'}</Metric>
+        </dl>
+
+        {/* 6. Psychology and context, always in view. */}
+        <div className="grid gap-5 lg:grid-cols-2">
+          <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
+            <legend className="mb-2 text-sm font-semibold">{f.emotions}</legend>
+            <div className="flex flex-wrap gap-1.5">
+              {emotions.data?.map((em) => {
+                const checked = emotionKeys.includes(em.key);
+                return (
+                  <label key={em.key} className={`flex h-9 cursor-pointer items-center rounded-full! px-3.5 text-[13px] has-focus-visible:outline-2 has-focus-visible:outline-accent-ink ${toggleClass(checked)}`}>
+                    <input type="checkbox" className="sr-only" checked={checked} onChange={() => setEmotionKeys((keys) => (checked ? keys.filter((k) => k !== em.key) : [...keys, em.key]))} />
+                    {em.label}
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+          <Field label={f.notes}>
+            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={10_000} rows={3} className="min-h-0 font-sans" />
+          </Field>
+          <ScreenshotDrop
+            saved={trade?.screenshots ?? []}
+            onRemoveSaved={(id) => trade && removeShot.mutate({ tradeId: trade.id, screenshotId: id })}
+            pending={files}
+            onAdd={addFiles}
+            onRemovePending={(i) => setFiles((current) => current.filter((_, j) => j !== i))}
+          />
+          {strategies.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm font-semibold">{t.strategy}</span>
+                <div className="w-56">
+                  <Select
+                    aria-label={t.strategy}
+                    value={strategyId}
+                    onChange={(id) => {
+                      setStrategyId(id);
+                      setCheckedRuleIds([]);
+                    }}
+                    options={[{ value: '', label: t.noStrategy }, ...strategies.map((s) => ({ value: s.id, label: s.name }))]}
+                  />
+                </div>
+                {strategy && <span className="font-mono text-xs text-dim">{t.rulesKept(checkedRuleIds.length, strategy.rules.length)}</span>}
+              </div>
+              {strategy && strategy.rules.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {strategy.rules.map((rule) => {
+                    const on = checkedRuleIds.includes(rule.id);
+                    return (
+                      <button key={rule.id} type="button" aria-pressed={on} onClick={() => setCheckedRuleIds(on ? checkedRuleIds.filter((id) => id !== rule.id) : [...checkedRuleIds, rule.id])} className={`rounded-full px-3 py-1.5 text-xs ${toggleClass(on)}`}>
+                        {on ? '✓ ' : ''}
+                        {rule.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 7. Advanced: signal, source, spread, rate. */}
+        <div className="flex flex-col gap-3">
+          <Button size="sm" variant="ghost" aria-expanded={advanced} onClick={() => setAdvanced((a) => !a)} className="self-start">
+            {advanced ? '− ' : '+ '}
+            {t.advanced}
+          </Button>
+          {advanced && (
+            <div className="grid gap-4 rounded-(--radius-control) border border-line p-4 lg:grid-cols-2">
+              {!trade && (
+                <div className="flex flex-col gap-2">
+                  <span className="eyebrow">{f.pasteSignal}</span>
+                  <Textarea aria-label={f.signalText} placeholder={'XAUUSD - SELL\nIN: 4406.50\nSL: 4414\nTP1: 4390\nTP2: 4384'} value={signalText} onChange={(e) => setSignalText(e.target.value)} className="min-h-24" />
+                  <Button size="sm" onClick={loadSignal} disabled={!signalText.trim() || parseSignal.isPending} className="self-start">
+                    {f.loadSignal}
+                  </Button>
+                  {signalNotes.length > 0 && (
+                    <ul className="m-0 list-none text-[13px] text-dim">
+                      {signalNotes.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-2">
+                  <span className="eyebrow">{f.source}</span>
+                  <Segmented label={f.sourceAria} value={source} onChange={setSource} options={[{ value: 'own', label: f.own }, { value: 'educator', label: f.educator }]} />
+                  {source === 'educator' && (
+                    <>
+                      <Select aria-label={f.educator} value={educatorId} onChange={setEducatorId} options={[{ value: '', label: f.chooseEducator }, ...(educators.data ?? []).map((ed) => ({ value: ed.id, label: ed.displayName }))]} />
+                      {user.role === 'admin' && (
+                        <div className="flex gap-2">
+                          <Input aria-label={f.newEducator} placeholder={f.addEducator} value={newEducator} onChange={(e) => setNewEducator(e.target.value)} />
+                          <Button size="md" disabled={!newEducator.trim() || createEducator.isPending} onClick={() => createEducator.mutate(newEducator.trim(), { onSuccess: (ed) => (setEducatorId(ed.id), setNewEducator('')) })}>
+                            {f.add}
+                          </Button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+                {isCfd && spread.data && (
+                  <Field label={t.spread(instrument?.symbol ?? '')} hint={spread.data.suggestion ? f.lastSpread(formatNumber(spread.data.suggestion.spread), formatDate(spread.data.suggestion.date).slice(0, 5)) : undefined}>
+                    <Input inputMode="decimal" value={spreadText} onChange={(e) => setSpreadText(e.target.value)} placeholder={unit} disabled={!spread.data.askUser} />
+                  </Field>
+                )}
+                {instrument && !sameCurrency && (
+                  <Field label={f.fxRate(`${instrument.quoteCurrency}/${account}`)} hint={f.fxHint}>
+                    <Input inputMode="decimal" value={fxRate} onChange={(e) => setFxRate(e.target.value)} placeholder={autoFx.data ? `auto · ${formatPrice(autoFx.data.rate)}` : 'auto'} />
+                  </Field>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+        </div>
       </div>
 
       {errors.length > 0 && (

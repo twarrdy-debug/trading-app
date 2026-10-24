@@ -1,8 +1,8 @@
 import { unlink } from 'node:fs/promises';
 import path from 'node:path';
-import { accountLinksSchema, createAccountSchema, deleteAccountQuerySchema, idParams, updateAccountSchema } from '@trading/shared';
+import { accountAdjustmentSchema, accountDayParams, accountLinksSchema, createAccountSchema, deleteAccountQuerySchema, idParams, updateAccountSchema } from '@trading/shared';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { accountOverviews, createAccount, deleteAccount, setAccountLinks, updateAccount } from '../services/accounts.ts';
+import { accountDayBalance, accountOverviews, createAccount, deleteAccount, deleteAdjustment, listAdjustments, setAccountLinks, setAdjustment, updateAccount } from '../services/accounts.ts';
 
 const tags = ['konta'];
 
@@ -28,6 +28,23 @@ export const accountRoutes: FastifyPluginAsyncZod = async (app) => {
   app.delete('/accounts/:id', { schema: { tags, params: idParams, querystring: deleteAccountQuerySchema } }, async (req, reply) => {
     const files = await deleteAccount(app.db, req.user, req.params.id, req.query);
     await Promise.all(files.map((key) => unlink(path.join(app.uploadDir, key)).catch(() => undefined)));
+    return reply.status(204).send();
+  });
+
+  // --- Balance corrections (fees and commissions the trade reports leave out) ---
+
+  app.get('/accounts/:id/adjustments', { schema: { tags, params: idParams } }, (req) => listAdjustments(app.db, req.user, req.params.id));
+
+  /** The app's balance at the end of a day and that day's correction, if any. */
+  app.get('/accounts/:id/balance/:date', { schema: { tags, params: accountDayParams } }, (req) => accountDayBalance(app.db, req.user, req.params.id, req.params.date));
+
+  /** The broker's end-of-day balance: the difference against the app's is saved as that day's correction. */
+  app.put('/accounts/:id/adjustments/:date', { schema: { tags, params: accountDayParams, body: accountAdjustmentSchema } }, (req) =>
+    setAdjustment(app.db, req.user, req.params.id, req.params.date, req.body),
+  );
+
+  app.delete('/accounts/:id/adjustments/:date', { schema: { tags, params: accountDayParams } }, async (req, reply) => {
+    await deleteAdjustment(app.db, req.user, req.params.id, req.params.date);
     return reply.status(204).send();
   });
 };

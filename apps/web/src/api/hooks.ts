@@ -10,6 +10,10 @@ import type {
   EventHistory,
   MarketAnalysis,
   ProCandles,
+  ApiKeyListItem,
+  AccountAdjustment,
+  AccountDayBalance,
+  CreatedApiKey,
   BacktestCandles,
   BacktestSession,
   BacktestSessionListItem,
@@ -33,6 +37,7 @@ import type {
 import type {
   AnalysisResolution,
   ProResolution,
+  CreateApiKeyInput,
   CreateBacktestSessionInput,
   OpenBacktestTradeInput,
   BrokerTimezone,
@@ -637,5 +642,58 @@ export function useDeleteBacktestTrade() {
   return useMutation({
     mutationFn: (id: string) => api<void>(`/backtest/trades/${id}`, { method: 'DELETE' }),
     onSuccess: () => refresh(),
+  });
+}
+
+// --- API keys (a trading bot) -----------------------------------------------------
+
+export const useApiKeys = (enabled = true) => useQuery({ queryKey: ['api-keys'], queryFn: () => api<ApiKeyListItem[]>('/api-keys'), enabled });
+
+export function useCreateApiKey() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateApiKeyInput) => api<CreatedApiKey>('/api-keys', { method: 'POST', json: input }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ['api-keys'] }),
+  });
+}
+
+export function useRevokeApiKey() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<void>(`/api-keys/${id}`, { method: 'DELETE' }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ['api-keys'] }),
+  });
+}
+
+// --- Account balance corrections ---------------------------------------------------
+
+export const useAdjustments = (accountId: string) =>
+  useQuery({ queryKey: ['accounts', accountId, 'adjustments'], queryFn: () => api<AccountAdjustment[]>(`/accounts/${accountId}/adjustments`) });
+
+/** The app's balance at the end of a day (and that day's correction), for the form's preview. */
+export const useAccountDayBalance = (accountId: string, date: string) =>
+  useQuery({ queryKey: ['accounts', accountId, 'balance', date], queryFn: () => api<AccountDayBalance>(`/accounts/${accountId}/balance/${date}`), enabled: /^\d{4}-\d{2}-\d{2}$/.test(date) });
+
+export function useSetAdjustment() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ accountId, date, balance, note }: { accountId: string; date: string; balance: number; note: string | null }) =>
+      api<AccountAdjustment>(`/accounts/${accountId}/adjustments/${date}`, { method: 'PUT', json: { balance, note } }),
+    // The balance, drawdown and target move; so does the account's balance chart.
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['accounts'] });
+      void client.invalidateQueries({ queryKey: ['stats'] });
+    },
+  });
+}
+
+export function useDeleteAdjustment() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ accountId, date }: { accountId: string; date: string }) => api<void>(`/accounts/${accountId}/adjustments/${date}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['accounts'] });
+      void client.invalidateQueries({ queryKey: ['stats'] });
+    },
   });
 }

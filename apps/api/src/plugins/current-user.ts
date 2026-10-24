@@ -20,8 +20,11 @@ declare module 'fastify' {
   }
 }
 
-/** Reachable without a session: health, API docs, auth endpoints and their config, the signed unsubscribe link, entering and leaving the demo. */
-const PUBLIC_PREFIXES = ['/health', '/docs', '/auth/', '/auth-config', '/email/unsubscribe', '/demo'];
+/**
+ * Reachable without a session: health, API docs, auth endpoints and their config, the signed
+ * unsubscribe link, entering and leaving the demo, and the bot door (which checks its own API key).
+ */
+const PUBLIC_PREFIXES = ['/health', '/docs', '/auth/', '/auth-config', '/email/unsubscribe', '/demo', '/bot/'];
 
 /** Screens the demo does not open (owner's choice): the analysis, backtesting and news, all on outside data. */
 const DEMO_LOCKED = ['/analysis', '/backtest', '/news', '/basis/pro', '/levels', '/checklists'];
@@ -35,6 +38,7 @@ const PLAN_ROUTES: [string, Feature][] = [
   ['/backtest', 'backtest'],
   ['/news', 'news'],
   ['/basis/pro', 'calculatorPro'],
+  ['/api-keys', 'apiKeys'],
 ];
 
 /**

@@ -3,7 +3,8 @@ import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { twoFactor } from 'better-auth/plugins/two-factor';
-import { eq } from 'drizzle-orm';
+import { and, eq, gt, isNull, sql } from 'drizzle-orm';
+import { randomBytes } from 'node:crypto';
 import type { DB } from './db/client.ts';
 import { authAccounts, authSessions, authTwoFactors, authVerifications, users } from './db/schema.ts';
 import type { Env } from './env.ts';
@@ -22,6 +23,9 @@ import type { Mailer } from './services/mailer.ts';
  */
 /** Endpoints that set a new password from `newPassword`. */
 const PASSWORD_PATHS = new Set(['/reset-password', '/change-password']);
+
+/** Wrong passwords in a row before the account locks until its password is reset (owner's rule). */
+export const SIGN_IN_ATTEMPTS = 5;
 
 export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mailer }) {
   return betterAuth({
@@ -55,6 +59,10 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
       disableSignUp: env.REGISTRATION === 'closed',
       revokeSessionsOnPasswordReset: true,
       resetPasswordTokenExpiresIn: 60 * 60,
+      // A new password also lifts a lock from wrong passwords (the e-mailed reset is the way out).
+      onPasswordReset: async ({ user }) => {
+        await db.update(users).set({ failedSignIns: 0, signInLockedAt: null }).where(eq(users.id, user.id));
+      },
       sendResetPassword: async ({ user, token }) => {
         const [row] = await db.select({ language: users.language }).from(users).where(eq(users.id, user.id));
         const language = row?.language ?? 'pl';
@@ -120,8 +128,13 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
         }
         // A blocked account cannot sign in (the API refuses it anyway; this gives a clear message).
         if (ctx.path === '/sign-in/email' && typeof ctx.body?.email === 'string') {
-          const [row] = await db.select({ disabledAt: users.disabledAt }).from(users).where(eq(users.email, ctx.body.email.trim().toLowerCase()));
+          const [row] = await db
+            .select({ disabledAt: users.disabledAt, signInLockedAt: users.signInLockedAt })
+            .from(users)
+            .where(eq(users.email, ctx.body.email.trim().toLowerCase()));
           if (row?.disabledAt) throw new APIError('FORBIDDEN', { message: 'Account blocked', code: 'ACCOUNT_DISABLED' });
+          // Locked after wrong passwords: no password is even checked until it is reset.
+          if (row?.signInLockedAt) throw new APIError('FORBIDDEN', { message: 'Account locked', code: 'ACCOUNT_LOCKED' });
         }
         if (ctx.path !== '/sign-up/email') return;
         if (env.REGISTRATION === 'invite') {
@@ -134,6 +147,40 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
           const [taken] = await db.select({ id: users.id }).from(users).where(eq(users.email, ctx.body.email.trim().toLowerCase()));
           if (taken) throw new APIError('UNPROCESSABLE_ENTITY', { message: 'User already exists', code: 'USER_ALREADY_EXISTS' });
         }
+      }),
+      after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== '/sign-in/email' || typeof ctx.body?.email !== 'string') return;
+        const email = ctx.body.email.trim().toLowerCase();
+        const returned = ctx.context.returned;
+        const failed = returned instanceof APIError && (returned.body as { code?: string } | undefined)?.code === 'INVALID_EMAIL_OR_PASSWORD';
+        if (!failed) {
+          // A right password (a 2FA step may still follow) starts the count again.
+          if (!(returned instanceof APIError)) await db.update(users).set({ failedSignIns: 0 }).where(and(eq(users.email, email), gt(users.failedSignIns, 0)));
+          return;
+        }
+        const [row] = await db
+          .update(users)
+          .set({ failedSignIns: sql`${users.failedSignIns} + 1` })
+          .where(and(eq(users.email, email), isNull(users.signInLockedAt)))
+          .returning({ id: users.id, failedSignIns: users.failedSignIns });
+        if (!row || row.failedSignIns < SIGN_IN_ATTEMPTS) return;
+        // The fifth wrong password locks the account and e-mails a link to set a new one.
+        await db.update(users).set({ signInLockedAt: new Date() }).where(eq(users.id, row.id));
+        const token = randomBytes(18).toString('base64url');
+        await ctx.context.internalAdapter.createVerificationValue({
+          value: row.id,
+          identifier: `reset-password:${token}`,
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        });
+        const [user] = await db.select({ language: users.language, email: users.email }).from(users).where(eq(users.id, row.id));
+        const url = `${env.PUBLIC_URL}/nowe-haslo?token=${encodeURIComponent(token)}`;
+        try {
+          await mailer.send(passwordResetEmail({ language: user?.language ?? 'pl', publicUrl: env.PUBLIC_URL, email: user?.email ?? email, url }));
+        } catch {
+          // The lock stays; the reset page sends a new link on request.
+        }
+        // Said at once (Better Auth keeps the 401 of the wrong password; the code is what counts).
+        throw new APIError('FORBIDDEN', { message: 'Account locked', code: 'ACCOUNT_LOCKED' });
       }),
     },
   });

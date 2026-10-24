@@ -16,7 +16,6 @@ const AppShell = lazyRouteComponent(() => import('./layout/AppShell.tsx'), 'AppS
 const ComingSoon = lazyRouteComponent(() => import('./layout/AppShell.tsx'), 'ComingSoon');
 const CalculatorPage = lazyRouteComponent(() => import('./features/calculator/CalculatorPage.tsx'), 'CalculatorPage');
 const CalendarPage = lazyRouteComponent(() => import('./features/calendar/CalendarPage.tsx'), 'CalendarPage');
-const JournalPage = lazyRouteComponent(() => import('./features/journal/JournalPage.tsx'), 'JournalPage');
 const NewsPage = lazyRouteComponent(() => import('./features/news/NewsPage.tsx'), 'NewsPage');
 const SettingsPage = lazyRouteComponent(() => import('./features/settings/SettingsPage.tsx'), 'SettingsPage');
 const StatsPage = lazyRouteComponent(() => import('./features/stats/StatsPage.tsx'), 'StatsPage');
@@ -50,7 +49,14 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: '/wypisz', component: UnsubscribePage }),
   appRoute.addChildren([
     createRoute({ getParentRoute: () => appRoute, path: '/dashboard', component: DashboardPage }),
-    createRoute({ getParentRoute: () => appRoute, path: '/dziennik', component: JournalPage }),
+    // The journal page was a trimmed copy of the statistics (removed 2026-10-24): old links open Trades.
+    createRoute({
+      getParentRoute: () => appRoute,
+      path: '/dziennik',
+      beforeLoad: () => {
+        throw redirect({ to: '/transakcje', replace: true });
+      },
+    }),
     createRoute({
       getParentRoute: () => appRoute,
       path: '/transakcje',

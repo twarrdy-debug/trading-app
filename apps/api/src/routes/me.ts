@@ -1,4 +1,4 @@
-import { featuresOf, hasFeature, STANDARD_TRADE_LIMIT, updateSettingsSchema, type DashboardWidget } from '@trading/shared';
+import { apiAllowed, featuresOf, hasFeature, STANDARD_TRADE_LIMIT, updateSettingsSchema, type DashboardWidget } from '@trading/shared';
 import { eq } from 'drizzle-orm';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { users } from '../db/schema.ts';
@@ -19,7 +19,7 @@ export const toPublicUser = (u: CurrentUser, authenticated = true, demo = false)
   /** Two-factor sign-in (authenticator app) is on. */
   twoFactorEnabled: u.twoFactorEnabled,
   /** What the role's plan includes, and the journal's trade limit (null: none). */
-  plan: { features: featuresOf(u.role), tradeLimit: hasFeature(u.role, 'unlimitedTrades') ? null : STANDARD_TRADE_LIMIT },
+  plan: { features: featuresOf(u.role).filter((f) => f !== 'apiKeys' || apiAllowed(u)), tradeLimit: hasFeature(u.role, 'unlimitedTrades') ? null : STANDARD_TRADE_LIMIT },
   settings: {
     accountCurrency: u.accountCurrency,
     theme: u.theme,

@@ -309,7 +309,7 @@ export function Mt5ImportDialog({
                       <td className="px-3 py-2">
                         <span
                           className={`rounded-md px-2 py-0.5 font-sans text-[11px] font-bold ${
-                            p.direction === 'long' ? 'bg-buy-soft text-buy' : 'bg-sell-soft text-sell'
+                            p.direction === 'long' ? 'bg-long-soft text-long' : 'bg-sell-soft text-sell'
                           }`}
                         >
                           {p.direction === 'long' ? all.table.long : all.table.short}

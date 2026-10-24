@@ -77,7 +77,9 @@ export function DateTimePicker({ value, onChange, mode = 'datetime', clearable =
       const target = e.target as Node;
       if (!panelRef.current?.contains(target) && !buttonRef.current?.contains(target)) setOpen(false);
     };
-    const onScroll = (e: Event) => !panelRef.current?.contains(e.target as Node) && setOpen(false);
+    // The page moving (scrolled, or a phone's keyboard pushing it up for the hour box) moves the
+    // panel with its field rather than closing it: closing made the time impossible to set on phones.
+    const onScroll = (e: Event) => !panelRef.current?.contains(e.target as Node) && place();
     document.addEventListener('pointerdown', onDown);
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', place);
@@ -251,7 +253,8 @@ export function DateTimePicker({ value, onChange, mode = 'datetime', clearable =
               })}
             </div>
             {mode === 'datetime' && (
-              <div className="flex items-center gap-2 border-t border-line pt-3">
+              // Two lines when the row does not fit (it used to push "Done" outside the panel).
+              <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
                 <span className="text-xs text-dim">{t.time}</span>
                 <input
                   aria-label={t.hour}
@@ -268,20 +271,21 @@ export function DateTimePicker({ value, onChange, mode = 'datetime', clearable =
                   {...timeBox('m')}
                   className="h-9 w-12 rounded-lg border border-line bg-raised text-center font-mono text-sm outline-none focus:border-accent-ink"
                 />
-                <span className="grow" />
-                <button
-                  type="button"
-                  onClick={() => {
-                    onChange(nowLocal());
-                    close();
-                  }}
-                  className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-accent-ink hover:bg-chip"
-                >
-                  {t.now}
-                </button>
-                <button type="button" onClick={() => close()} className="rounded-lg bg-chip px-2.5 py-1.5 text-xs font-semibold hover:brightness-110">
-                  {t.done}
-                </button>
+                <span className="ml-auto flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onChange(nowLocal());
+                      close();
+                    }}
+                    className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-accent-ink hover:bg-chip"
+                  >
+                    {t.now}
+                  </button>
+                  <button type="button" onClick={() => close()} className="rounded-lg bg-chip px-2.5 py-1.5 text-xs font-semibold hover:brightness-110">
+                    {t.done}
+                  </button>
+                </span>
               </div>
             )}
             {mode === 'date' && (

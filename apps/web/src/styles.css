@@ -39,6 +39,9 @@
   --buy: #147a48;
   --sell: #c0303c;
   --buy-soft: #e3f5eb;
+  /* Long/BUY positions are blue (owner, 2026-10-24); green stays for gains and wins. */
+  --long: #1f6fd1;
+  --long-soft: #e7f0fc;
   --sell-soft: #fce8ea;
   --on-side: #ffffff;
   --warn-bg: #fff4de;
@@ -90,6 +93,8 @@
   --buy: #3dd68c;
   --sell: #ff6b77;
   --buy-soft: rgb(61 214 140 / 0.14);
+  --long: #4c9aff;
+  --long-soft: rgb(76 154 255 / 0.16);
   --sell-soft: rgb(255 107 119 / 0.14);
   --on-side: #0e1116;
   --warn-bg: #2a2210;
@@ -134,6 +139,8 @@
   --color-buy: var(--buy);
   --color-sell: var(--sell);
   --color-buy-soft: var(--buy-soft);
+  --color-long: var(--long);
+  --color-long-soft: var(--long-soft);
   --color-sell-soft: var(--sell-soft);
   --color-on-side: var(--on-side);
   --color-warn-bg: var(--warn-bg);

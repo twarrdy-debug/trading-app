@@ -5,7 +5,7 @@ type Size = 'sm' | 'md' | 'lg' | 'xl';
 
 const VARIANTS: Record<Variant, string> = {
   primary: 'bg-accent text-on-accent font-bold hover:brightness-105',
-  buy: 'border-[1.5px] border-buy bg-buy-soft text-buy font-bold',
+  buy: 'border-[1.5px] border-long bg-long-soft text-long font-bold',
   sell: 'border-[1.5px] border-sell bg-sell-soft text-sell font-bold',
   secondary: 'border border-line bg-panel text-ink font-semibold hover:bg-raised',
   ghost: 'bg-transparent text-dim font-semibold hover:bg-chip hover:text-ink',

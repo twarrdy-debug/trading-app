@@ -26,6 +26,8 @@ import { adminRoutes } from './routes/admin.ts';
 import { analysisRoutes } from './routes/analysis.ts';
 import { backtestRoutes } from './routes/backtest.ts';
 import { demoRoutes } from './routes/demo.ts';
+import { apiKeyRoutes } from './routes/api-keys.ts';
+import { botRoutes } from './routes/bot.ts';
 import { authRoutes } from './routes/auth.ts';
 import { basisRoutes } from './routes/basis.ts';
 import { calendarRoutes } from './routes/calendar.ts';
@@ -169,6 +171,8 @@ export async function buildApp({
   await app.register(analysisRoutes);
   await app.register(backtestRoutes);
   await app.register(demoRoutes);
+  await app.register(apiKeyRoutes);
+  await app.register(botRoutes);
   await app.register(strategyRoutes);
   await app.register(adminRoutes);
   await app.register(emailRoutes);

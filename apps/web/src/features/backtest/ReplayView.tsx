@@ -219,7 +219,7 @@ function Replay({ session, onExit }: { session: Session; onExit: () => void }) {
     const boxes: ChartBox[] = [];
     for (const tr of trades) {
       if (!tr.closedAt) {
-        lines.push({ price: tr.entryPrice, label: tr.direction === 'long' ? 'BUY' : 'SELL', color: 'accent' });
+        lines.push({ price: tr.entryPrice, label: tr.direction === 'long' ? 'BUY' : 'SELL', color: tr.direction === 'long' ? 'long' : 'sell' });
         if (tr.stopLoss != null) lines.push({ price: tr.stopLoss, label: 'SL', color: 'sell' });
         if (tr.takeProfit != null) lines.push({ price: tr.takeProfit, label: 'TP', color: 'buy' });
       } else if (tr.exitPrice != null) {
@@ -362,7 +362,7 @@ function Replay({ session, onExit }: { session: Session; onExit: () => void }) {
               return (
                 <div key={tr.id} className="flex flex-col gap-1.5 rounded-(--radius-control) bg-raised p-3">
                   <div className="flex items-center justify-between gap-2">
-                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${tr.direction === 'long' ? 'bg-buy-soft text-buy' : 'bg-sell-soft text-sell'}`}>
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${tr.direction === 'long' ? 'bg-long-soft text-long' : 'bg-sell-soft text-sell'}`}>
                       {tr.direction === 'long' ? 'BUY' : 'SELL'} · {formatSize(tr.size)}
                     </span>
                     <span className="font-mono text-xs text-dim">
@@ -488,7 +488,7 @@ function Summary({ session, currency, when, finished, onFinish }: { session: Ses
                   return (
                     <tr key={tr.id} className="border-t border-line">
                       <td className="py-2 pr-3 font-mono">{when(tr.openedAt)}</td>
-                      <td className={`py-2 pr-3 text-[11px] font-bold ${tr.direction === 'long' ? 'text-buy' : 'text-sell'}`}>{tr.direction === 'long' ? 'BUY' : 'SELL'}</td>
+                      <td className={`py-2 pr-3 text-[11px] font-bold ${tr.direction === 'long' ? 'text-long' : 'text-sell'}`}>{tr.direction === 'long' ? 'BUY' : 'SELL'}</td>
                       <td className="py-2 pr-3 font-mono">
                         {formatPrice(tr.entryPrice)} → {formatPrice(tr.exitPrice)}
                       </td>

@@ -71,7 +71,7 @@ export const WELCOME: Record<Language, WelcomeCopy> = {
           'Zrzuty ekranu, emocje i notatki przy każdej transakcji',
         ],
         link: 'Otwórz dziennik',
-        path: '/dziennik',
+        path: '/transakcje',
       },
       {
         kicker: 'Monitor tradingu',
@@ -162,7 +162,7 @@ export const WELCOME: Record<Language, WelcomeCopy> = {
           'Screenshots, emotions and notes on every trade',
         ],
         link: 'Open the journal',
-        path: '/dziennik',
+        path: '/transakcje',
       },
       {
         kicker: 'Trading monitor',

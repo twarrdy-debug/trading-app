@@ -2105,6 +2105,129 @@ describe('authentication', () => {
     expect((await plain('POST', '/auth/sign-in/email', { email: 'tfa@example.com', password })).json().twoFactorRedirect).toBeUndefined();
     expect((await plain('GET', '/me')).json().twoFactorEnabled).toBe(false);
   });
+
+  it('locks an account after five wrong passwords until it is reset by e-mail', async () => {
+    const user = browser();
+    const { code } = (await authApp.inject({ method: 'POST', url: '/invites', headers: { cookie: await ownerCookie() }, payload: {} })).json();
+    const password = 'Lock-me-pass-1!';
+    await signUpAndActivate(user, { name: 'Lock', email: 'lock@example.com', password, inviteCode: code });
+    const signIn = (pw: string) => browser()('POST', '/auth/sign-in/email', { email: 'lock@example.com', password: pw });
+
+    // A right password in between starts the count again.
+    for (let i = 0; i < 3; i++) expect((await signIn('Wrong-pass-1!')).statusCode).toBe(401);
+    expect((await signIn(password)).statusCode).toBe(200);
+    for (let i = 0; i < 4; i++) expect((await signIn('Wrong-pass-1!')).json().code).toBe('INVALID_EMAIL_OR_PASSWORD');
+    const before = sent.length;
+    const fifth = await signIn('Wrong-pass-1!');
+    expect(fifth.statusCode).toBeGreaterThanOrEqual(400);
+    expect(fifth.json().code).toBe('ACCOUNT_LOCKED');
+    // Locked: even the right password is refused, and a reset link went out.
+    expect((await signIn(password)).json().code).toBe('ACCOUNT_LOCKED');
+    const mail = sent.slice(before).find((m) => m.to === 'lock@example.com')!;
+    expect(mail.text).toContain('/nowe-haslo?token=');
+    const token = decodeURIComponent(mail.text.match(/token=([^\s]+)/)![1]!);
+    expect((await user('POST', '/auth/reset-password', { token, newPassword: 'Lock-me-pass-2!' })).statusCode).toBe(200);
+    expect((await signIn('Lock-me-pass-2!')).statusCode).toBe(200);
+    expect((await signIn('Wrong-pass-1!')).json().code).toBe('INVALID_EMAIL_OR_PASSWORD');
+  });
+
+  it('lets a bot add closed trades with a 2FA-protected key, and nothing else', async () => {
+    const { createOTP } = await import('@better-auth/utils/otp');
+    const { base32 } = await import('@better-auth/utils/base32');
+    const { apiKeys } = await import('../src/db/schema.ts');
+    const { eq } = await import('drizzle-orm');
+    const user = browser();
+    const { code: invite } = (await authApp.inject({ method: 'POST', url: '/invites', headers: { cookie: await ownerCookie() }, payload: { role: 'pro' } })).json();
+    const password = 'Bot-owner-pass-1!';
+    await signUpAndActivate(user, { name: 'Bot owner', email: 'bot@example.com', password, inviteCode: invite });
+    const account = (await user('POST', '/accounts', { name: 'Bot account', type: 'live', size: 10_000 })).json();
+    const other = (await user('POST', '/accounts', { name: 'Other', type: 'live', size: 10_000 })).json();
+    const keyBody = { name: 'Bot', accountId: account.id, password, code: '000000' };
+
+    // Only for users an admin turned API access on for.
+    expect((await user('POST', '/api-keys', keyBody)).json().code).toBe('apiKeyNotEnabled');
+    expect((await user('GET', '/me')).json().plan.features).not.toContain('apiKeys');
+    const me = (await user('GET', '/me')).json();
+    const setAccess = async (on: boolean) =>
+      authApp.inject({ method: 'PATCH', url: `/admin/users/${me.id}`, headers: { cookie: await ownerCookie(), origin }, payload: { apiAccess: on } });
+    expect((await setAccess(true)).json().apiAccess).toBe(true);
+    expect((await user('GET', '/me')).json().plan.features).toContain('apiKeys');
+    // A key needs 2FA on.
+    expect((await user('POST', '/api-keys', keyBody)).json().code).toBe('apiKey2fa');
+    const enabled = (await user('POST', '/auth/two-factor/enable', { password })).json();
+    const secret = new TextDecoder().decode(base32.decode(new URL(enabled.totpURI).searchParams.get('secret')!));
+    const totp = () => createOTP(secret).totp();
+    expect((await user('POST', '/auth/two-factor/verify-totp', { code: await totp() })).statusCode).toBe(200);
+
+    // The password and a current code, checked again.
+    expect((await user('POST', '/api-keys', { ...keyBody, password: 'Wrong-pass-1!', code: await totp() })).json().code).toBe('apiKeyPassword');
+    expect((await user('POST', '/api-keys', { ...keyBody, code: '000000' })).json().code).toBe('apiKeyCode');
+    expect((await user('POST', '/api-keys', { ...keyBody, code: await totp(), expiresInDays: 91 })).statusCode).toBe(400);
+    const made = await user('POST', '/api-keys', { ...keyBody, code: await totp() });
+    expect(made.statusCode).toBe(201);
+    const { key } = made.json();
+    expect(key).toMatch(/^alx_[A-Za-z0-9_-]{40,}$/);
+    // Only its HMAC is stored, and the list never shows it.
+    const [stored] = await authDb.db.select().from(apiKeys);
+    expect(stored!.keyHash).not.toContain(key.slice(4, 20));
+    expect(JSON.stringify((await user('GET', '/api-keys')).json())).not.toContain(key.slice(4));
+
+    const bot = (method: 'GET' | 'POST', url: string, payload?: object, headers: Record<string, string> = {}) =>
+      authApp.inject({ method, url, payload, headers: { authorization: `Bearer ${key}`, ...headers } });
+    const trade = (externalId: string, extra: object = {}) => ({
+      externalId, symbol: 'NAS100', direction: 'buy', size: 1, entryPrice: 20_000, exitPrice: 20_050, stopLoss: 19_980,
+      openedAt: '2026-10-20T13:00:00Z', closedAt: '2026-10-20T14:00:00Z', ...extra,
+    });
+
+    // The key opens the bot door and no other.
+    expect((await bot('GET', '/bot/v1/ping')).json()).toMatchObject({ ok: true });
+    for (const url of ['/me', '/trades', '/accounts', '/api-keys', '/admin/users', '/trades/stats']) {
+      expect((await bot('GET', url)).statusCode, url).toBe(401);
+    }
+    expect((await authApp.inject({ method: 'GET', url: '/bot/v1/ping' })).statusCode).toBe(401);
+    expect((await authApp.inject({ method: 'GET', url: '/bot/v1/ping', headers: { authorization: `Bearer ${key}x` } })).statusCode).toBe(401);
+
+    const created = await bot('POST', '/bot/v1/trades', trade('order-1'));
+    expect(created.statusCode).toBe(201);
+    expect(Object.keys(created.json()).sort()).toEqual(['id', 'status']);
+    // The same order again adds nothing.
+    expect((await bot('POST', '/bot/v1/trades', trade('order-1'))).json()).toMatchObject({ status: 'duplicate', id: created.json().id });
+    // Strict input: an unknown field (like another account) is refused, as is an unknown symbol.
+    expect((await bot('POST', '/bot/v1/trades', trade('order-2', { accountId: other.id }))).statusCode).toBe(400);
+    expect((await bot('POST', '/bot/v1/trades', trade('order-3', { symbol: 'NOPE' }))).json().code).toBe('botUnknownSymbol');
+    // Saved on the key's account only.
+    const list = (await user('GET', '/trades')).json();
+    expect(list.items).toHaveLength(1);
+    expect(list.items[0]).toMatchObject({ accountId: account.id, direction: 'long', positionSize: 1 });
+
+    // An address list: only from there.
+    const fenced = (await user('POST', '/api-keys', { ...keyBody, name: 'Fenced', ipAllowlist: ['203.0.113.0/24'], code: await totp() })).json();
+    const fencedBot = (ip: string) => authApp.inject({ method: 'GET', url: '/bot/v1/ping', headers: { authorization: `Bearer ${fenced.key}`, 'cf-connecting-ip': ip } });
+    expect((await fencedBot('198.51.100.7')).statusCode).toBe(403);
+    expect((await fencedBot('203.0.113.9')).statusCode).toBe(200);
+
+    // Expired, revoked, or the password changed: the key stops working.
+    await authDb.db.update(apiKeys).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(apiKeys.id, fenced.id));
+    expect((await fencedBot('203.0.113.9')).statusCode).toBe(401);
+    const keys = (await user('GET', '/api-keys')).json();
+    expect(keys.find((k: { id: string }) => k.id === fenced.id).status).toBe('expired');
+    expect(keys.find((k: { id: string }) => k.id === made.json().id).events.map((e: { outcome: string }) => e.outcome)).toEqual(expect.arrayContaining(['created', 'duplicate', 'refused']));
+    // The admin turning API access off ends the keys at once.
+    const third = (await user('POST', '/api-keys', { ...keyBody, name: 'Third', code: await totp() })).json();
+    await setAccess(false);
+    expect((await authApp.inject({ method: 'GET', url: '/bot/v1/ping', headers: { authorization: `Bearer ${third.key}` } })).statusCode).toBe(401);
+    await setAccess(true);
+    expect((await authApp.inject({ method: 'GET', url: '/bot/v1/ping', headers: { authorization: `Bearer ${third.key}` } })).statusCode).toBe(401);
+    // A changed password ends a key too (a fresh one, made after access came back).
+    const fourth = (await user('POST', '/api-keys', { ...keyBody, name: 'Fourth', code: await totp() })).json();
+    const ping = () => authApp.inject({ method: 'GET', url: '/bot/v1/ping', headers: { authorization: `Bearer ${fourth.key}` } });
+    expect((await ping()).statusCode).toBe(200);
+    expect((await user('POST', '/auth/change-password', { currentPassword: password, newPassword: 'Bot-owner-pass-2!' })).statusCode).toBe(200);
+    expect((await ping()).statusCode).toBe(401);
+    const after = (await user('GET', '/api-keys')).json();
+    expect(after.find((k: { id: string }) => k.id === fourth.id).status).toBe('revoked');
+    expect(after.find((k: { id: string }) => k.id === made.json().id).status).toBe('revoked');
+  });
 });
 
 describe('request limits', () => {
@@ -2280,6 +2403,44 @@ describe('backtesting', () => {
   });
 });
 
+describe('breakeven close price', () => {
+  it('closes a breakeven at the price given, or at the entry without one', async () => {
+    const base = { instrumentId: ids.XAUUSD, direction: 'long', openedAt: '2026-10-21T09:00:00Z', entryPrice: 4000, stopLoss: 3990, positionSize: 1 };
+    const exact = (await post('/trades', { ...base, parts: [{ size: 1, result: 'be', closedAt: '2026-10-21T10:00:00Z' }] })).json().trade;
+    expect(exact).toMatchObject({ exitPrice: 4000, outcome: 'breakeven' });
+    // A few pips over the entry (fees covered): still breakeven within 0.1R, at its own price.
+    const near = (await post('/trades', { ...base, parts: [{ size: 1, result: 'be', price: 4000.5, closedAt: '2026-10-21T10:00:00Z' }] })).json().trade;
+    expect(near).toMatchObject({ exitPrice: 4000.5, resultUnits: 5, outcome: 'breakeven' });
+    expect(near.parts[0]).toMatchObject({ result: 'be', price: 4000.5 });
+  });
+});
+
+describe('balance corrections', () => {
+  it('saves the broker balance of a day as a correction of the account balance only', async () => {
+    const account = (await post('/accounts', { name: 'Lucid', type: 'prop', market: 'cfd', size: 50_000, maxDrawdownAmount: 2_500, drawdownType: 'eod' })).json();
+    // +$500 closed on 20 Oct (gold, 50 pips of $10 a lot).
+    await post('/trades', { accountId: account.id, instrumentId: ids.XAUUSD, direction: 'long', openedAt: '2026-10-20T09:00:00Z', closedAt: '2026-10-20T10:00:00Z', entryPrice: 4000, exitPrice: 4005, positionSize: 1 });
+    expect((await app.inject({ url: `/accounts/${account.id}/balance/2026-10-20` })).json()).toMatchObject({ computed: 50_500, adjustment: null });
+
+    // The broker showed $43.20 less (fees the report leaves out).
+    const saved = (await app.inject({ method: 'PUT', url: `/accounts/${account.id}/adjustments/2026-10-20`, payload: { balance: 50_456.8, note: 'Lucid fees' } })).json();
+    expect(saved).toMatchObject({ date: '2026-10-20', amount: -43.2, balance: 50_456.8 });
+    const overview = (await app.inject({ url: '/accounts' })).json().find((a: { id: string }) => a.id === account.id);
+    expect(overview).toMatchObject({ balance: 50_456.8, adjustments: -43.2, trades: 1 });
+    // The end-of-day floor follows the corrected close of that day.
+    expect(overview.prop.floor).toBe(47_956.8);
+    // Trade statistics stay the trades' own.
+    expect((await app.inject({ url: `/trades/stats?account=${account.id}` })).json().summary.pnl).toBe(500);
+
+    // The same day again replaces it (measured without its own earlier correction).
+    expect((await app.inject({ method: 'PUT', url: `/accounts/${account.id}/adjustments/2026-10-20`, payload: { balance: 50_480 } })).json().amount).toBe(-20);
+    expect((await app.inject({ url: `/accounts/${account.id}/adjustments` })).json()).toHaveLength(1);
+    expect((await app.inject({ method: 'PUT', url: `/accounts/${account.id}/adjustments/2999-01-01`, payload: { balance: 1 } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'DELETE', url: `/accounts/${account.id}/adjustments/2026-10-20` })).statusCode).toBe(204);
+    expect((await app.inject({ url: '/accounts' })).json().find((a: { id: string }) => a.id === account.id).balance).toBe(50_500);
+  });
+});
+
 describe('plans', () => {
   it('gives Standard the journal with five trades and one account, and Pro everything', async () => {
     const created = (await post('/educators', { displayName: 'Standard trader', email: 'standard@example.com' })).json();
@@ -2287,7 +2448,7 @@ describe('plans', () => {
     const headers = { 'x-user-id': created.id };
     const as = (method: 'GET' | 'POST', url: string, payload?: object) => app.inject({ method, url, headers, ...(payload ? { payload } : {}) });
 
-    for (const url of ['/analysis/overview', '/news', '/backtest/sessions', '/basis/pro?pair=gold']) {
+    for (const url of ['/analysis/overview', '/news', '/backtest/sessions', '/basis/pro?pair=gold', '/api-keys']) {
       const res = await as('GET', url);
       expect(res.statusCode, url).toBe(403);
       expect(res.json().code).toBe('planPro');

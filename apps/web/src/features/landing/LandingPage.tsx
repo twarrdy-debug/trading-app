@@ -238,7 +238,6 @@ function HeroApp() {
   const menu: [NavIconName, string][] = [
     ['dashboard', all.nav.dashboard],
     ['trades', all.nav.trades],
-    ['journal', all.nav.journal],
     ['calculator', all.nav.calculator],
     ['calendar', all.nav.calendar],
     ['news', all.nav.news],
@@ -397,7 +396,7 @@ function JournalVisual() {
         {rows.map((row) => (
           <li key={row.symbol} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 ${row.pnl > 0 ? 'bg-buy-soft' : 'bg-sell-soft'}`}>
             <InstrumentBadge symbol={row.symbol} />
-            <span className={`hidden rounded-md px-1.5 py-0.5 text-[10.5px] font-bold sm:inline ${row.side === 'LONG' ? 'bg-buy-soft text-buy' : 'bg-sell-soft text-sell'}`}>{row.side}</span>
+            <span className={`hidden rounded-md px-1.5 py-0.5 text-[10.5px] font-bold sm:inline ${row.side === 'LONG' ? 'bg-long-soft text-long' : 'bg-sell-soft text-sell'}`}>{row.side}</span>
             <span className="grow" />
             <span className="flex flex-col items-end">
               <span className={`font-mono text-sm font-bold whitespace-nowrap ${row.pnl > 0 ? 'text-buy' : 'text-sell'}`}>{formatAmount(row.pnl, 'USD')}</span>

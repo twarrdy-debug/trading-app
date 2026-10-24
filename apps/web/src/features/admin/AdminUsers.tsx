@@ -30,11 +30,19 @@ export function AdminUsers({ me }: { me: PublicUser }) {
     update.mutate({ id: u.id, patch: { role } }, { onSuccess: () => setMessage({ text: t.done.role(u.displayName, roleName(role)), tone: 'ok' }), onError: fail });
   };
   const toggleBlock = (u: AdminUser) => {
-    const block = !u.disabledAt;
+    const block = !u.disabledAt && !u.signInLockedAt;
     if (block && !window.confirm(t.confirmBlock(u.displayName))) return;
     update.mutate(
       { id: u.id, patch: { disabled: block } },
       { onSuccess: () => setMessage({ text: block ? t.done.block(u.displayName) : t.done.unblock(u.displayName), tone: 'ok' }), onError: fail },
+    );
+  };
+  const toggleApi = (u: AdminUser) => {
+    const on = !u.apiAccess;
+    if (!window.confirm(on ? t.confirmApiOn(u.displayName) : t.confirmApiOff(u.displayName))) return;
+    update.mutate(
+      { id: u.id, patch: { apiAccess: on } },
+      { onSuccess: () => setMessage({ text: on ? t.done.apiOn(u.displayName) : t.done.apiOff(u.displayName), tone: 'ok' }), onError: fail },
     );
   };
   const run = (u: AdminUser, kind: AdminUserAction) => {
@@ -93,9 +101,9 @@ export function AdminUsers({ me }: { me: PublicUser }) {
             <tbody>
               {shown.map((u) => {
                 const self = u.id === me.id;
-                const status = u.disabledAt ? 'disabled' : !u.onboardedAt ? 'onboarding' : !u.canSignIn ? 'noPassword' : 'active';
+                const status = u.disabledAt ? 'disabled' : u.signInLockedAt ? 'locked' : !u.onboardedAt ? 'onboarding' : !u.canSignIn ? 'noPassword' : 'active';
                 const statusTone =
-                  status === 'disabled' ? 'bg-sell-soft text-sell' : status === 'active' ? 'bg-buy-soft text-buy' : 'bg-warn-bg text-warn';
+                  status === 'disabled' || status === 'locked' ? 'bg-sell-soft text-sell' : status === 'active' ? 'bg-buy-soft text-buy' : 'bg-warn-bg text-warn';
                 return (
                   <tr key={u.id} className={`border-b border-line align-top last:border-b-0 ${u.disabledAt ? 'opacity-70' : ''}`}>
                     <td className="px-4 py-3">
@@ -137,6 +145,11 @@ export function AdminUsers({ me }: { me: PublicUser }) {
                             {t.twoFactorBadge}
                           </span>
                         )}
+                        {u.apiAccess && (
+                          <span title={t.apiOn} className="rounded-full bg-accent/15 px-2 py-1 text-[11px] font-bold text-accent-ink">
+                            {t.apiBadge}
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -148,7 +161,8 @@ export function AdminUsers({ me }: { me: PublicUser }) {
                             { key: 'revoke', label: t.actions.revoke, disabled: u.activeSessions === 0, onSelect: () => run(u, 'revoke') },
                             { key: 'reset', label: t.actions.reset, disabled: !u.email, onSelect: () => run(u, 'reset') },
                             { key: 'twoFactor', label: t.actions.twoFactor, disabled: !u.twoFactorEnabled, onSelect: () => run(u, 'twoFactor') },
-                            { key: 'block', label: u.disabledAt ? t.actions.unblock : t.actions.block, onSelect: () => toggleBlock(u) },
+                            { key: 'api', label: u.apiAccess ? t.actions.apiOff : t.actions.apiOn, onSelect: () => toggleApi(u) },
+                            { key: 'block', label: u.disabledAt || u.signInLockedAt ? t.actions.unblock : t.actions.block, onSelect: () => toggleBlock(u) },
                             { key: 'delete', label: t.actions.delete, danger: true, onSelect: () => run(u, 'delete') },
                           ]}
                         />

@@ -401,11 +401,11 @@ export function MarketPanel() {
                   {a?.sentiment ? (
                     <>
                       <div className="flex justify-between text-sm font-bold">
-                        <span className="text-buy">{t.buyers(formatNumber(Math.round(a.sentiment.long)))}</span>
+                        <span className="text-long">{t.buyers(formatNumber(Math.round(a.sentiment.long)))}</span>
                         <span className="text-sell">{t.sellers(formatNumber(Math.round(a.sentiment.short)))}</span>
                       </div>
                       <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-full" aria-hidden>
-                        <span className="bg-buy" style={{ width: `${a.sentiment.long}%` }} />
+                        <span className="bg-long" style={{ width: `${a.sentiment.long}%` }} />
                         <span className="bg-sell" style={{ width: `${a.sentiment.short}%` }} />
                       </div>
                       <span className="text-[11.5px] text-dim">{t.sentimentHelp}</span>

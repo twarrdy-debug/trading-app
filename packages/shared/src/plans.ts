@@ -6,7 +6,7 @@ import type { RoleKey } from './enums.ts';
  * STANDARD_TRADE_LIMIT trades in all), statistics, strategies, the plain calculator and the calendar,
  * on one trading account. The educator role is withdrawn for now; its users became Pro.
  */
-export const FEATURES = ['analysis', 'backtest', 'news', 'calculatorPro', 'multipleAccounts', 'unlimitedTrades'] as const;
+export const FEATURES = ['analysis', 'backtest', 'news', 'calculatorPro', 'multipleAccounts', 'unlimitedTrades', 'apiKeys'] as const;
 export type Feature = (typeof FEATURES)[number];
 
 /** Trades a Standard account may keep in the journal; more need Pro or VIP. */
@@ -21,3 +21,9 @@ export const featuresOf = (role: RoleKey): Feature[] => FEATURES.filter((f) => h
 export const ASSIGNABLE_ROLES = ['standard', 'pro', 'vip', 'admin'] as const;
 /** Roles an invitation can give. */
 export const INVITE_ROLES = ['standard', 'pro', 'vip'] as const;
+
+/**
+ * API keys (a trading bot): the plan must have them and an admin must have turned them on for the
+ * user (`users.api_access`); an admin always may.
+ */
+export const apiAllowed = (user: { role: RoleKey; apiAccess: boolean }) => hasFeature(user.role, 'apiKeys') && (user.role === 'admin' || user.apiAccess);

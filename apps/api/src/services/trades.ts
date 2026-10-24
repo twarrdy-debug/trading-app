@@ -214,7 +214,10 @@ function resolveParts(instrument: Instrument, draft: TradeDraft, parts: TradePar
     } else if (p.result === 'sl') {
       price = stopLoss;
       if (price == null) throw badRequest('partNoStop', { n: i + 1 });
-    } else if (p.result === 'be') price = draft.entryPrice;
+    } else if (p.result === 'be') {
+      // Breakeven is rarely exactly the entry: a price given wins, the entry otherwise.
+      price = p.price ?? draft.entryPrice;
+    }
     else if (p.result === 'manual') {
       price = p.price ?? null;
       if (price == null) throw badRequest('partNoPrice', { n: i + 1 });

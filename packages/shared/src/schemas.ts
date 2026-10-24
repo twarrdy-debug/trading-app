@@ -269,6 +269,8 @@ export const adminUpdateUserSchema = z
   .object({
     role: z.enum(ASSIGNABLE_ROLES),
     disabled: z.boolean(),
+    /** API keys for a trading bot; turning it off revokes the user's keys. */
+    apiAccess: z.boolean(),
   })
   .partial();
 
@@ -620,3 +622,67 @@ export const updateBacktestTradeSchema = z.object({
 
 export type CreateBacktestSessionInput = z.infer<typeof createBacktestSessionSchema>;
 export type OpenBacktestTradeInput = z.infer<typeof openBacktestTradeSchema>;
+
+// --- API keys (a trading bot) -------------------------------------------------------
+
+/** A key lives at most this many days; then a new one is made (owner's rule). */
+export const API_KEY_MAX_DAYS = 90;
+export const MAX_API_KEYS = 5;
+
+/** One IPv4 or IPv6 address, or an IPv4 range in CIDR form ("203.0.113.0/24"). */
+const ipOrRange = z
+  .string()
+  .trim()
+  .refine(
+    (v) => /^(\d{1,3})(\.\d{1,3}){3}(\/(\d|[12]\d|3[0-2]))?$/.test(v) ? v.split('/')[0]!.split('.').every((n) => Number(n) <= 255) : /^[0-9a-f:]+$/i.test(v) && v.includes(':'),
+    'validation.ip',
+  );
+
+export const createApiKeySchema = z.object({
+  name: z.string().trim().min(1).max(60),
+  /** The one trading account the key adds trades to. */
+  accountId: z.uuid(),
+  expiresInDays: z.number().int().min(1).max(API_KEY_MAX_DAYS).default(API_KEY_MAX_DAYS),
+  /** Empty: any address. */
+  ipAllowlist: z.array(ipOrRange).max(10).default([]),
+  /** The account's password and a code from the authenticator app, checked again for every key. */
+  password: z.string().min(1).max(128),
+  code: z.string().trim().regex(/^\d{6}$/, 'validation.totpCode'),
+});
+export type CreateApiKeyInput = z.infer<typeof createApiKeySchema>;
+
+/**
+ * A closed trade sent by a bot (POST /bot/v1/trades). Strict: an unknown field is refused, so a
+ * typo never goes unnoticed. `externalId` is the bot's own id for the trade: sending it again adds
+ * nothing.
+ */
+export const botTradeSchema = z
+  .object({
+    externalId: z.string().regex(/^[A-Za-z0-9_.:-]{1,100}$/, 'validation.externalId'),
+    /** The app's symbol or the broker's ("NAS100", "XAUUSDm", "NQZ6"…). */
+    symbol: z.string().trim().min(1).max(40),
+    direction: z.enum(['long', 'short', 'buy', 'sell']),
+    size: z.number().positive().max(100_000),
+    entryPrice: z.number().positive(),
+    exitPrice: z.number().positive(),
+    stopLoss: z.number().positive().nullable().optional(),
+    takeProfit: z.number().positive().nullable().optional(),
+    openedAt: isoDateTime,
+    closedAt: isoDateTime,
+    fees: z.number().min(0).max(1_000_000).nullable().optional(),
+    notes: z.string().max(2000).nullable().optional(),
+  })
+  .strict();
+export type BotTradeInput = z.infer<typeof botTradeSchema>;
+
+// --- Account balance corrections -------------------------------------------------
+
+/** An account and a day (the user's time zone). */
+export const accountDayParams = z.object({ id: z.uuid(), date: isoDate });
+
+/** The broker's balance at the end of that day; the app saves the difference as a correction. */
+export const accountAdjustmentSchema = z.object({
+  balance: z.number().min(0).max(1_000_000_000),
+  note: z.string().trim().max(200).nullable().optional(),
+});
+export type AccountAdjustmentInput = z.infer<typeof accountAdjustmentSchema>;

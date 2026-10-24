@@ -91,6 +91,8 @@ export function LoginPage() {
   const [errors, setErrors] = useState<string[]>([]);
   /** The password was right and the account has 2FA: the code step is shown. */
   const [secondStep, setSecondStep] = useState(false);
+  /** Locked after wrong passwords: the way out is a new password (a link was e-mailed). */
+  const [locked, setLocked] = useState(false);
 
   const finish = async () => {
     await resetSession();
@@ -110,6 +112,7 @@ export function LoginPage() {
         await finish();
       }
     } catch (err) {
+      setLocked(err instanceof AuthError && err.code === 'ACCOUNT_LOCKED');
       setErrors([errorText(err)]);
     } finally {
       setBusy(false);
@@ -157,6 +160,11 @@ export function LoginPage() {
           <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </Field>
         <Errors lines={errors} />
+        {locked && (
+          <Link to="/reset-hasla" className={`-mt-2 text-sm ${linkClass}`}>
+            {t.lockedResend}
+          </Link>
+        )}
         <Button type="submit" variant="primary" size="lg" disabled={busy}>
           {busy ? t.signingIn : t.signIn}
         </Button>

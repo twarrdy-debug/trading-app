@@ -16,7 +16,6 @@ const LOCKED_BY: Record<string, Feature> = { '/analiza': 'analysis', '/news': 'n
 export const NAV = [
   { to: '/dashboard', label: 'dashboard', icon: 'dashboard' },
   { to: '/transakcje', label: 'trades', icon: 'trades' },
-  { to: '/dziennik', label: 'journal', icon: 'journal' },
   { to: '/statystyki', label: 'stats', icon: 'stats' },
   { to: '/analiza', label: 'analysis', icon: 'analysis' },
   { to: '/strategie', label: 'strategies', icon: 'strategies' },

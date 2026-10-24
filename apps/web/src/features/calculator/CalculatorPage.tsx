@@ -427,7 +427,7 @@ export function CalculatorPage() {
         <header className="flex flex-wrap items-center gap-x-3 gap-y-2 px-5 pt-4 pb-3">
           <h2 className="m-0 text-[15px] font-bold">{t.levelsTitle}</h2>
           {sideWord && (
-            <span title={directionReason} className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${direction === 'long' ? 'bg-buy-soft text-buy' : 'bg-sell-soft text-sell'}`}>
+            <span title={directionReason} className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${direction === 'long' ? 'bg-long-soft text-long' : 'bg-sell-soft text-sell'}`}>
               {sideWord}
             </span>
           )}

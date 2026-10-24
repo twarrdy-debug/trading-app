@@ -62,6 +62,16 @@ export interface ChartLine {
   color: string;
 }
 
+/** A level the user moves by dragging it (entry, stop loss, take profits in the trade form). */
+export interface EditableLine {
+  id: string;
+  price: number;
+  label: string;
+  /** A colour token name (without "--"). */
+  color: string;
+  dashed?: boolean;
+}
+
 export interface ChartLineSeries {
   key: string;
   label: string;
@@ -214,6 +224,8 @@ export function TradingChart({
   focus,
   periodMs,
   followNewest = false,
+  editLines,
+  onLineDrag,
 }: {
   candles: ChartCandle[];
   overlays: ChartLineSeries[];
@@ -238,6 +250,9 @@ export function TradingChart({
   periodMs?: number;
   /** Always bring a newly added candle into view (a replay), even after the user scrolled away. */
   followNewest?: boolean;
+  /** Levels drawn bold with their label, moved by dragging (mouse or finger); `onLineDrag` gets the new price. */
+  editLines?: EditableLine[];
+  onLineDrag?: (id: string, price: number) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   /** Index of the candle under the cursor (null: the last one). */
@@ -427,6 +442,82 @@ export function TradingChart({
     const half = Math.round((box.current?.clientWidth ?? 900) / BAR_PX / 2);
     ref.chart.timeScale().setVisibleLogicalRange({ from: index - half, to: index + half });
   }, [focus, candles, resetKey, theme]);
+
+  // Editable levels: drawn on the candles, dragged with the pointer while the chart holds still.
+  const edit = useRef({ lines: editLines ?? [], onDrag: onLineDrag });
+  edit.current = { lines: editLines ?? [], onDrag: onLineDrag };
+  useEffect(() => {
+    const ref = chartRef.current;
+    if (!ref || !editLines?.length) return;
+    const drawn = editLines.map((l) =>
+      ref.candles.createPriceLine({
+        price: l.price,
+        color: token(l.color),
+        lineWidth: 2,
+        lineStyle: l.dashed ? LineStyle.Dashed : LineStyle.Solid,
+        axisLabelVisible: true,
+        title: l.label,
+      }),
+    );
+    return () => {
+      if (chartRef.current !== ref) return;
+      for (const l of drawn) ref.candles.removePriceLine(l);
+    };
+  }, [editLines, resetKey, theme]);
+
+  useEffect(() => {
+    const el = box.current;
+    const ref = chartRef.current;
+    if (!el || !ref || !onLineDrag) return;
+    let dragging: string | null = null;
+    const yOf = (e: PointerEvent) => e.clientY - el.getBoundingClientRect().top;
+    // The line under the pointer, within a few pixels (more for a finger).
+    const hit = (e: PointerEvent) => {
+      const reach = e.pointerType === 'touch' ? 14 : 6;
+      const y = yOf(e);
+      return edit.current.lines.find((l) => {
+        const ly = ref.candles.priceToCoordinate(l.price);
+        return ly != null && Math.abs(ly - y) <= reach;
+      });
+    };
+    const hold = (still: boolean) => ref.chart.applyOptions({ handleScroll: !still, handleScale: !still });
+    const down = (e: PointerEvent) => {
+      const line = hit(e);
+      if (!line) return;
+      dragging = line.id;
+      hold(true);
+      el.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const move = (e: PointerEvent) => {
+      if (!dragging) {
+        el.style.cursor = hit(e) ? 'ns-resize' : '';
+        return;
+      }
+      const price = ref.candles.coordinateToPrice(yOf(e));
+      if (price != null) edit.current.onDrag?.(dragging, price);
+      e.preventDefault();
+    };
+    const up = (e: PointerEvent) => {
+      if (!dragging) return;
+      dragging = null;
+      hold(false);
+      if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+    };
+    // Capture phase: the chart's own panning never sees a drag that starts on a line.
+    el.addEventListener('pointerdown', down, { capture: true });
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+    return () => {
+      el.removeEventListener('pointerdown', down, { capture: true });
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      el.style.cursor = '';
+    };
+  }, [onLineDrag, resetKey, theme]);
 
   // Time left until the last candle closes, under its price label on the axis (as on TradingView).
   const [countdown, setCountdown] = useState<{ y: number; width: number; text: string; up: boolean } | null>(null);

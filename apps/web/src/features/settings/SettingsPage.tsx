@@ -30,6 +30,7 @@ import { DEFAULT_ACCENT } from '../../lib/theme.ts';
 import { AccountsManager } from '../account/AccountsManager.tsx';
 import { FavoriteInstrumentsPicker } from './FavoriteInstruments.tsx';
 import { KeywordAlertsFields } from '../news/KeywordAlerts.tsx';
+import { ApiKeysSection } from './ApiKeys.tsx';
 
 const TIMEZONES = ['Europe/Warsaw', 'Europe/London', 'America/New_York', 'America/Chicago', 'Asia/Tokyo', 'UTC'];
 
@@ -43,6 +44,7 @@ const SECTIONS = [
   { slug: 'instrumenty', key: 'instruments' },
   { slug: 'alerty', key: 'alerts' },
   { slug: 'maile', key: 'emails' },
+  { slug: 'api', key: 'apiKeys' },
 ] as const;
 type SectionKey = (typeof SECTIONS)[number]['key'];
 
@@ -143,6 +145,8 @@ function Section({ section, user, save }: { section: SectionKey; user: PublicUse
       );
     case 'emails':
       return <EmailsSection user={user} save={save} />;
+    case 'apiKeys':
+      return <ApiKeysSection user={user} />;
   }
 }
 

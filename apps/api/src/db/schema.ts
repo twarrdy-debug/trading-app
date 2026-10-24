@@ -121,6 +121,11 @@ export const users = pgTable('users', {
   twoFactorEnabled: boolean('two_factor_enabled').notNull().default(false),
   /** The public demo's user (sample data, read-only, entered without signing in); never in admin lists or e-mails. */
   demo: boolean('demo').notNull().default(false),
+  /** An admin turned on API keys for this user (a trading bot); off by default. */
+  apiAccess: boolean('api_access').notNull().default(false),
+  /** Wrong passwords in a row; at SIGN_IN_ATTEMPTS the account locks until the password is reset. */
+  failedSignIns: smallint('failed_sign_ins').notNull().default(0),
+  signInLockedAt: timestamp('sign_in_locked_at', { withTimezone: true }),
   /** E-mails the user can turn off (settings or the link in each one): week ahead, day summary, what's new. */
   emailWeekAhead: boolean('email_week_ahead').notNull().default(true),
   emailDaySummary: boolean('email_day_summary').notNull().default(true),
@@ -633,6 +638,86 @@ export const strategyRules = pgTable(
     sortOrder: smallint('sort_order').notNull().default(0),
   },
   (t) => [index('strategy_rules_strategy_idx').on(t.strategyId)],
+);
+
+// --- Account balance corrections ------------------------------------------------
+
+/**
+ * The balance a broker showed at the end of a day (fees and commissions the reports leave out,
+ * e.g. on Lucid): `amount` is the difference against the app's balance then, counted in the
+ * account's balance, drawdown and target (not in trade statistics). One per account and day.
+ */
+export const accountAdjustments = pgTable(
+  'account_adjustments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => tradingAccounts.id, { onDelete: 'cascade' }),
+    /** The day it closes, in the user's time zone. */
+    date: date('date').notNull(),
+    /** The balance as the broker showed it. */
+    balance: moneyCol('balance').notNull(),
+    /** The correction: that balance minus the app's balance at the end of the day. */
+    amount: moneyCol('amount').notNull(),
+    note: text('note'),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex('account_adjustments_account_date_idx').on(t.accountId, t.date)],
+);
+
+// --- API keys (a bot adding trades) --------------------------------------------
+
+/**
+ * A key a trading bot uses to add closed trades to one trading account (POST /bot/v1/trades only).
+ * Only the key's HMAC is stored. `securityStamp` fingerprints the password and the 2FA secret at
+ * creation: a changed password or 2FA (or 2FA turned off) makes the key stop working.
+ */
+export const apiKeys = pgTable(
+  'api_keys',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => tradingAccounts.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** The key's first characters, to recognise it in the list. */
+    prefix: text('prefix').notNull(),
+    keyHash: text('key_hash').notNull().unique(),
+    securityStamp: text('security_stamp').notNull(),
+    /** Client IPs or IPv4 CIDR ranges allowed to use it; empty = any. */
+    ipAllowlist: text('ip_allowlist').array().notNull().default([]),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    lastUsedIp: text('last_used_ip'),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [index('api_keys_user_idx').on(t.userId)],
+);
+
+/** What a key did: trades added, repeats skipped, requests refused (with the client IP). */
+export const apiKeyEvents = pgTable(
+  'api_key_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    keyId: uuid('key_id')
+      .notNull()
+      .references(() => apiKeys.id, { onDelete: 'cascade' }),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+    ip: text('ip'),
+    /** created, duplicate or refused. */
+    outcome: text('outcome').notNull(),
+    tradeId: uuid('trade_id'),
+    message: text('message'),
+  },
+  (t) => [index('api_key_events_key_idx').on(t.keyId, t.at)],
 );
 
 // --- Backtesting ---------------------------------------------------------------

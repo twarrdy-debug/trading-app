@@ -173,7 +173,7 @@ function OutcomeBadge({ outcome }: { outcome: Outcome }) {
 function DirectionMark({ direction }: { direction: Trade['direction'] }) {
   const t = useT().table;
   return direction === 'long' ? (
-    <span className="rounded-md border border-buy/40 bg-buy-soft px-2 py-0.5 font-sans text-[11px] font-bold text-buy uppercase">{t.long}</span>
+    <span className="rounded-md border border-long/40 bg-long-soft px-2 py-0.5 font-sans text-[11px] font-bold text-long uppercase">{t.long}</span>
   ) : (
     <span className="rounded-md border border-sell/40 bg-sell-soft px-2 py-0.5 font-sans text-[11px] font-bold text-sell uppercase">{t.short}</span>
   );

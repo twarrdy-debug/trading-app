@@ -2,22 +2,9 @@ import type { AdminUpdateUserInput, UpdateInstrumentInput } from '@trading/share
 import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
-import { and, asc, count, desc, eq, gte, isNotNull, max, notInArray, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, isNotNull, isNull, max, notInArray, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.ts';
-import {
-  authSessions,
-  authTwoFactors,
-  economicEvents,
-  instrumentCurrencies,
-  instruments,
-  invites,
-  newsItems,
-  strategies,
-  tradeScreenshots,
-  trades,
-  tradingAccounts,
-  users,
-} from '../db/schema.ts';
+import { apiKeys, authSessions, authTwoFactors, economicEvents, instrumentCurrencies, instruments, invites, newsItems, strategies, tradeScreenshots, trades, tradingAccounts, users } from '../db/schema.ts';
 import { HttpError, notFound } from '../errors.ts';
 import type { CurrentUser } from '../plugins/current-user.ts';
 import { basisOverview } from './basis.ts';
@@ -61,6 +48,8 @@ export async function listUsers(db: DB) {
       disabledAt: users.disabledAt,
       signupCode: users.signupCode,
       twoFactorEnabled: users.twoFactorEnabled,
+      apiAccess: users.apiAccess,
+      signInLockedAt: users.signInLockedAt,
       trades: sql<number>`coalesce(${tradeCounts.n}, 0)`.mapWith(Number),
       lastTradeAt: tradeCounts.lastTradeAt,
       accounts: sql<number>`coalesce(${accountCounts.n}, 0)`.mapWith(Number),
@@ -106,9 +95,14 @@ export async function updateUser(db: DB, admin: CurrentUser, id: string, patch: 
     .set({
       ...(patch.role ? { role: patch.role } : {}),
       ...(patch.disabled === undefined ? {} : { disabledAt: patch.disabled ? new Date() : null }),
+      // Unblocking also lifts a lock from wrong passwords.
+      ...(patch.disabled === false ? { signInLockedAt: null, failedSignIns: 0 } : {}),
+      ...(patch.apiAccess === undefined ? {} : { apiAccess: patch.apiAccess }),
     })
     .where(eq(users.id, id));
   if (patch.disabled) await revokeSessions(db, id);
+  // API access taken away: the user's keys end at once.
+  if (patch.apiAccess === false) await db.update(apiKeys).set({ revokedAt: new Date() }).where(and(eq(apiKeys.userId, id), isNull(apiKeys.revokedAt)));
   return (await listUsers(db)).find((u) => u.id === id)!;
 }
 

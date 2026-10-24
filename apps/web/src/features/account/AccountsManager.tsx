@@ -9,6 +9,7 @@ import { Select } from '../../components/ui/Select.tsx';
 import { useT } from '../../i18n/index.tsx';
 import { currencyLabel, formatAmount, formatNumber, parseDecimal, toInputNumber } from '../../lib/format.ts';
 import { accountKind } from './AccountViews.tsx';
+import { BalanceCorrection } from './BalanceCorrection.tsx';
 
 type Unit = 'pct' | 'amount';
 
@@ -33,6 +34,7 @@ export function AccountsManager({ currency }: { currency: string }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [linking, setLinking] = useState<string | null>(null);
+  const [correcting, setCorrecting] = useState<string | null>(null);
   const linkedTo = (a: AccountSummary) => (a.linkGroup ? accounts.filter((o) => o.id !== a.id && o.linkGroup === a.linkGroup) : []);
 
   return (
@@ -55,6 +57,7 @@ export function AccountsManager({ currency }: { currency: string }) {
                     {propSummary(all, a, currency)}
                     {a.leverage ? ` · 1:${a.leverage}` : ''}
                     {a.maxTradesPerDay != null || a.lossStreakAlert != null ? ` · ${t.ownLimits(a.maxTradesPerDay, a.lossStreakAlert)}` : ''}
+                    {a.adjustments !== 0 ? ` · ${all.corrections.inBalance(formatAmount(a.adjustments, currency))}` : ''}
                   </span>
                   {linkedTo(a).length > 0 && (
                     <span className="mt-1 inline-flex items-center gap-1.5 self-start rounded-full bg-warn-bg px-2.5 py-0.5 text-[11px] font-semibold text-warn">
@@ -63,6 +66,11 @@ export function AccountsManager({ currency }: { currency: string }) {
                     </span>
                   )}
                 </div>
+                {a.type !== 'backtest' && (
+                  <Button size="sm" variant="ghost" aria-expanded={correcting === a.id} onClick={() => setCorrecting(correcting === a.id ? null : a.id)}>
+                    {all.corrections.button}
+                  </Button>
+                )}
                 {a.type !== 'backtest' && (
                   <Button size="sm" variant="ghost" aria-expanded={linking === a.id} onClick={() => setLinking(linking === a.id ? null : a.id)}>
                     {t.link}
@@ -77,6 +85,7 @@ export function AccountsManager({ currency }: { currency: string }) {
               </div>
               {deleting === a.id && <DeleteAccount account={a} others={accounts.filter((o) => o.id !== a.id && o.type !== 'backtest')} onDone={() => setDeleting(null)} />}
               {linking === a.id && <LinkAccounts account={a} accounts={accounts} onDone={() => setLinking(null)} />}
+              {correcting === a.id && <BalanceCorrection account={a} currency={currency} onDone={() => setCorrecting(null)} />}
             </li>
           ),
         )}

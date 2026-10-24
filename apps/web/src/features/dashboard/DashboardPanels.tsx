@@ -59,7 +59,7 @@ export function RecentTrades({ trades, currency, timezone }: { trades: Trade[]; 
             return (
               <li key={trade.id} className="flex items-center gap-3 rounded-(--radius-control) border border-line bg-raised px-3.5 py-3">
                 <span
-                  className={`flex size-9 shrink-0 items-center justify-center rounded-[10px] ${long ? 'bg-buy-soft text-buy' : 'bg-sell-soft text-sell'}`}
+                  className={`flex size-9 shrink-0 items-center justify-center rounded-[10px] ${long ? 'bg-long-soft text-long' : 'bg-sell-soft text-sell'}`}
                   aria-label={long ? 'Long' : 'Short'}
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>

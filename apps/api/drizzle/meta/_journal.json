@@ -239,6 +239,34 @@
       "when": 1792516228583,
       "tag": "0033_roles_plans",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1792741128971,
+      "tag": "0034_api_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1792741666765,
+      "tag": "0035_api_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792796556424,
+      "tag": "0036_account_adjustments",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1792797454079,
+      "tag": "0037_sign_in_lock",
+      "breakpoints": true
     }
   ]
 }

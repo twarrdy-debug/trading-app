@@ -32,7 +32,10 @@ export const partsTotal = (parts: PartDraft[]) => round4(parts.reduce((sum, p) =
 const RESULTS: PartResult[] = ['open', 'tp', 'sl', 'be', 'manual'];
 
 /** One grid for the header and every row, so the columns line up (the result toggles need ~17 rem). */
-const COLUMNS = 'md:grid-cols-[1.25rem_7.5rem_minmax(0,1fr)_minmax(0,1fr)_17.5rem_11.5rem_2.25rem]';
+const COLUMNS = '@4xl:grid-cols-[1.25rem_7.5rem_minmax(0,1fr)_minmax(0,1fr)_17.5rem_11.5rem_2.25rem]';
+/** A card per part when narrower (beside the chart): size, TP and SL in a row, the result under them. */
+const CARD = '@lg:grid-cols-[1.25rem_repeat(3,minmax(0,1fr))]';
+const UNDER = '@lg:col-span-3 @lg:col-start-2 @4xl:col-span-1 @4xl:col-start-auto';
 
 /** Open / TP / SL / BE / other price, as one row of toggles. */
 export function ResultPicker({ value, onChange, label, compact = false }: { value: PartResult; onChange: (r: PartResult) => void; label: string; compact?: boolean }) {
@@ -89,11 +92,12 @@ export function PartsEditor({ parts, onChange, total, step, unitLabel, isFutures
     return p.slText.trim() || previous;
   }, tradeStop.trim());
 
-  const head = 'hidden text-[11px] font-semibold text-dim md:block';
-  const cellLabel = 'text-[11px] font-semibold text-dim md:hidden';
+  const head = 'hidden text-[11px] font-semibold text-dim @4xl:block';
+  const cellLabel = 'text-[11px] font-semibold text-dim @4xl:hidden';
   return (
-    <div className="flex flex-col gap-2">
-      <div className={`grid gap-x-2.5 ${COLUMNS} md:items-center`}>
+    // Laid out by the room it has (a container), not the window: beside the chart the form is narrow.
+    <div className="@container flex flex-col gap-2">
+      <div className={`grid gap-x-2.5 ${COLUMNS} @4xl:items-center`}>
         <span className={head}>{t.partNo}</span>
         <span className={head}>{unitLabel}</span>
         <span className={head}>TP</span>
@@ -108,7 +112,7 @@ export function PartsEditor({ parts, onChange, total, step, unitLabel, isFutures
         return (
           <div
             key={i}
-            className={`relative grid items-center gap-2.5 rounded-(--radius-control) border border-line bg-panel p-2.5 ${COLUMNS} md:border-0 md:bg-transparent md:p-0`}
+            className={`relative grid items-center gap-2.5 rounded-(--radius-control) border border-line bg-panel p-2.5 ${CARD} ${COLUMNS} @4xl:border-0 @4xl:bg-transparent @4xl:p-0`}
           >
             <span className="font-mono text-[13px] font-semibold text-dim">{i + 1}</span>
             <label className="flex flex-col gap-1">
@@ -137,13 +141,21 @@ export function PartsEditor({ parts, onChange, total, step, unitLabel, isFutures
                 className="h-10"
               />
             </label>
-            <div className="flex flex-col gap-1">
+            <div className={`flex flex-col gap-1 ${UNDER}`}>
               <span className={cellLabel}>{t.outcome}</span>
               <ResultPicker compact label={t.partResult(i + 1)} value={p.result} onChange={(result) => update(i, { result })} />
             </div>
-            <div className={`flex flex-col gap-1.5 ${p.result === 'open' ? 'max-md:hidden' : ''}`}>
-              {p.result === 'manual' && (
-                <Input aria-label={t.closePrice} inputMode="decimal" value={p.priceText} onChange={(e) => update(i, { priceText: e.target.value })} placeholder={t.closePrice} className="h-10" />
+            <div className={`flex flex-col gap-1.5 ${UNDER} ${p.result === 'open' ? '@max-4xl:hidden' : ''}`}>
+              {(p.result === 'manual' || p.result === 'be') && (
+                <Input
+                  aria-label={t.closePrice}
+                  inputMode="decimal"
+                  value={p.priceText}
+                  onChange={(e) => update(i, { priceText: e.target.value })}
+                  // BE: empty means the entry price.
+                  placeholder={p.result === 'be' ? t.beAtEntry : t.closePrice}
+                  className="h-10"
+                />
               )}
               {p.result !== 'open' && (
                 <DateTimePicker value={p.closedAt} onChange={(v) => update(i, { closedAt: v })} clearable aria-label={t.partClosedAt(i + 1)} placeholder={t.closedNow} className="[&>button]:h-10" />
@@ -154,7 +166,7 @@ export function PartsEditor({ parts, onChange, total, step, unitLabel, isFutures
               aria-label={t.removePart(i + 1)}
               disabled={parts.length <= 2}
               onClick={() => onChange(parts.filter((_, j) => j !== i))}
-              className="absolute top-1.5 right-1.5 flex size-9 items-center justify-center justify-self-end rounded-lg text-dim hover:bg-chip hover:text-sell disabled:invisible md:static"
+              className="absolute top-1.5 right-1.5 flex size-9 items-center justify-center justify-self-end rounded-lg text-dim hover:bg-chip hover:text-sell disabled:invisible @4xl:static"
             >
               ✕
             </button>

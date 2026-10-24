@@ -1,9 +1,9 @@
-import { hasFeature, toLocalDate, type CreateAccountInput, type UpdateAccountInput } from '@trading/shared';
+import { hasFeature, toLocalDate, zonedTimeToUtc, type AccountAdjustmentInput, type CreateAccountInput, type UpdateAccountInput } from '@trading/shared';
 import { marketName } from '../i18n.ts';
 import { randomUUID } from 'node:crypto';
-import { and, asc, count, eq, inArray, isNotNull, ne, notInArray } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNotNull, ne, notInArray } from 'drizzle-orm';
 import type { DB } from '../db/client.ts';
-import { backtestSessions, backtestTrades, instruments, tradeScreenshots, tradingAccounts, trades } from '../db/schema.ts';
+import { accountAdjustments, backtestSessions, backtestTrades, instruments, tradeScreenshots, tradingAccounts, trades } from '../db/schema.ts';
 import { badRequest, HttpError, notFound } from '../errors.ts';
 import type { CurrentUser } from '../plugins/current-user.ts';
 
@@ -15,6 +15,8 @@ export interface AccountTradeRow {
   /** Close time in ms (open time for trades closed without a time). */
   at: number;
   tradeDate: string;
+  /** Set on a balance correction: the day it closes. */
+  adjustmentDate?: string;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -255,8 +257,69 @@ export async function accountTradeRows(db: DB, user: CurrentUser, accountIds: st
     .innerJoin(backtestSessions, eq(backtestSessions.id, backtestTrades.sessionId))
     .where(and(eq(backtestTrades.userId, user.id), inArray(backtestSessions.accountId, accountIds), isNotNull(backtestTrades.pnl), isNotNull(backtestTrades.closedAt)));
   for (const r of backtest) byAccount.get(r.accountId)?.push({ pnl: r.pnl!, at: r.closedAt!.getTime(), tradeDate: toLocalDate(r.closedAt!, user.timezone) });
+  // Balance corrections land at the very end of their day, after its trades.
+  const adjustments = await db
+    .select()
+    .from(accountAdjustments)
+    .where(and(eq(accountAdjustments.userId, user.id), inArray(accountAdjustments.accountId, accountIds)));
+  for (const a of adjustments) byAccount.get(a.accountId)?.push({ pnl: a.amount, at: endOfDay(a.date, user.timezone) - 1, tradeDate: a.date, adjustmentDate: a.date });
   for (const list of byAccount.values()) list.sort((a, b) => a.at - b.at);
   return byAccount;
+}
+
+/** The instant a local day ends (the next day's midnight in `timeZone`), in ms. */
+export function endOfDay(date: string, timeZone: string) {
+  const next = new Date(`${date}T12:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return zonedTimeToUtc(`${next.toISOString().slice(0, 10)}T00:00:00`, timeZone).getTime();
+}
+
+/** The app's balance at the end of `date`, leaving out that day's own correction. */
+async function balanceAtEndOf(db: DB, user: CurrentUser, account: TradingAccount, date: string) {
+  const rows = (await accountTradeRows(db, user, [account.id])).get(account.id) ?? [];
+  const end = endOfDay(date, user.timezone);
+  return round2(rows.reduce((sum, r) => (r.at < end && r.adjustmentDate !== date ? sum + r.pnl : sum), account.size));
+}
+
+async function correctableAccount(db: DB, user: CurrentUser, id: string) {
+  const account = await getAccount(db, user, id);
+  if (account.type === 'backtest') throw badRequest('backtestAccountTrade');
+  return account;
+}
+
+/** The app's balance at the end of a day and that day's correction, if any (for the form's preview). */
+export async function accountDayBalance(db: DB, user: CurrentUser, id: string, date: string) {
+  const account = await correctableAccount(db, user, id);
+  const [existing] = await db.select().from(accountAdjustments).where(and(eq(accountAdjustments.accountId, account.id), eq(accountAdjustments.date, date)));
+  return { date, computed: await balanceAtEndOf(db, user, account, date), adjustment: existing ?? null };
+}
+
+export async function listAdjustments(db: DB, user: CurrentUser, id: string) {
+  const account = await correctableAccount(db, user, id);
+  return db.select().from(accountAdjustments).where(eq(accountAdjustments.accountId, account.id)).orderBy(desc(accountAdjustments.date));
+}
+
+/** Saves the broker's end-of-day balance: the difference against the app's becomes that day's correction. */
+export async function setAdjustment(db: DB, user: CurrentUser, id: string, date: string, input: AccountAdjustmentInput) {
+  const account = await correctableAccount(db, user, id);
+  if (date > toLocalDate(new Date(), user.timezone)) throw badRequest('adjustmentFuture');
+  const computed = await balanceAtEndOf(db, user, account, date);
+  const values = { userId: user.id, accountId: account.id, date, balance: input.balance, amount: round2(input.balance - computed), note: input.note ?? null };
+  const [row] = await db
+    .insert(accountAdjustments)
+    .values(values)
+    .onConflictDoUpdate({ target: [accountAdjustments.accountId, accountAdjustments.date], set: { balance: values.balance, amount: values.amount, note: values.note, updatedAt: new Date() } })
+    .returning();
+  return row!;
+}
+
+export async function deleteAdjustment(db: DB, user: CurrentUser, id: string, date: string) {
+  const account = await correctableAccount(db, user, id);
+  const [row] = await db
+    .delete(accountAdjustments)
+    .where(and(eq(accountAdjustments.accountId, account.id), eq(accountAdjustments.date, date)))
+    .returning({ id: accountAdjustments.id });
+  if (!row) throw notFound('adjustmentNotFound');
 }
 
 /** Balance of an account just before `instant`. */
@@ -284,6 +347,8 @@ export function accountOverview(account: TradingAccount, rows: AccountTradeRow[]
     }
   }
   const pnl = balance - size;
+  /** The part of the balance that comes from corrections (fees the reports leave out). */
+  const adjustments = round2(rows.reduce((sum, r) => (r.adjustmentDate ? sum + r.pnl : sum), 0));
 
   // A limit entered as an amount is used as is; as %, it is that share of the size.
   const ddLimit = account.maxDrawdownAmount ?? (account.maxDrawdownPct != null ? (size * account.maxDrawdownPct) / 100 : null);
@@ -355,9 +420,11 @@ export function accountOverview(account: TradingAccount, rows: AccountTradeRow[]
     /** Accounts sharing this id are linked (trades are saved on all of them); null = not linked. */
     linkGroup: account.linkGroup,
     size,
-    trades: rows.length,
+    trades: rows.filter((r) => !r.adjustmentDate).length,
     balance: round2(balance),
     pnl: round2(pnl),
+    /** Of that, balance corrections (fees and commissions the trades do not show). */
+    adjustments,
     returnPct: round2((pnl / size) * 100),
     currentDrawdown: round2(peak - balance),
     currentDrawdownPct: round2(((peak - balance) / peak) * 100),
