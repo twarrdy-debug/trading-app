@@ -45,6 +45,7 @@ export function TradeChart({
   onTarget,
   onAddTarget,
   onRemoveTarget,
+  height = 460,
 }: {
   instrument: Instrument;
   direction: Direction;
@@ -57,6 +58,7 @@ export function TradeChart({
   onTarget: (index: number, price: number) => void;
   onAddTarget: (price: number) => void;
   onRemoveTarget: () => void;
+  height?: number;
 }) {
   const t = useT().tradeChart;
   const [tf, setTfState] = useState<AnalysisResolution>(loadTf);
@@ -65,7 +67,8 @@ export function TradeChart({
   const decimals = decimalsFor(instrument.unitSize);
   // Futures move in whole ticks; CFDs and forex in the prices' own decimals.
   const round = useCallback(
-    (price: number) => (instrument.market === 'futures' ? Math.round(price / instrument.unitSize) * instrument.unitSize : Number(price.toFixed(decimals))),
+    // toFixed also clears the float noise of tick rounding (4009.6000000000004).
+    (price: number) => Number((instrument.market === 'futures' ? Math.round(price / instrument.unitSize) * instrument.unitSize : price).toFixed(decimals)),
     [instrument.market, instrument.unitSize, decimals],
   );
   const last = candles.at(-1)?.close ?? null;
@@ -146,7 +149,7 @@ export function TradeChart({
           panes={NONE}
           decimals={decimals}
           timeZone={timeZone}
-          height={460}
+          height={height}
           watermark={`${instrument.symbol} · ${tf}`}
           resetKey={`${instrument.id}:${tf}`}
           ariaLabel={t.aria(instrument.symbol)}
@@ -154,7 +157,7 @@ export function TradeChart({
           onLineDrag={drag}
         />
       ) : (
-        <div className="flex h-[460px] items-center justify-center text-sm opacity-70">{isLoading ? t.loading : t.noData}</div>
+        <div className="flex items-center justify-center text-sm opacity-70" style={{ height }}>{isLoading ? t.loading : t.noData}</div>
       )}
       <span className="px-1 text-[11.5px] opacity-60">{t.hint}</span>
     </section>

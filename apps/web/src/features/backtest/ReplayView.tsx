@@ -470,13 +470,13 @@ function Summary({ session, currency, when, finished, onFinish }: { session: Ses
         {rows.length === 0 ? (
           <span className="text-[13px] text-dim">{t.noTrades}</span>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] border-collapse text-[13px]">
+          <div className="@container">
+            <table className="w-full border-collapse text-[13px]">
               <thead>
                 <tr className="text-left text-[11px] font-semibold text-dim">
                   <th className="py-1.5 pr-3 font-semibold">{t.columns.opened}</th>
                   <th className="py-1.5 pr-3 font-semibold">{t.columns.direction}</th>
-                  <th className="py-1.5 pr-3 font-semibold">{t.columns.prices}</th>
+                  <th className="hidden py-1.5 pr-3 font-semibold @min-[36rem]:table-cell">{t.columns.prices}</th>
                   <th className="py-1.5 pr-3 font-semibold">{t.columns.result}</th>
                   <th className="py-1.5 pr-3 text-right font-semibold">{t.columns.r}</th>
                   <th className="py-1.5 text-right font-semibold">{t.columns.amount}</th>
@@ -487,9 +487,15 @@ function Summary({ session, currency, when, finished, onFinish }: { session: Ses
                   const color = tr.outcome === 'win' ? 'text-buy' : tr.outcome === 'loss' ? 'text-sell' : '';
                   return (
                     <tr key={tr.id} className="border-t border-line">
-                      <td className="py-2 pr-3 font-mono">{when(tr.openedAt)}</td>
-                      <td className={`py-2 pr-3 text-[11px] font-bold ${tr.direction === 'long' ? 'text-long' : 'text-sell'}`}>{tr.direction === 'long' ? 'BUY' : 'SELL'}</td>
                       <td className="py-2 pr-3 font-mono">
+                        {when(tr.openedAt)}
+                        {/* The prices column's figures, while the table is narrow. */}
+                        <span className="block text-[11px] text-dim @min-[36rem]:hidden">
+                          {formatPrice(tr.entryPrice)} → {formatPrice(tr.exitPrice)}
+                        </span>
+                      </td>
+                      <td className={`py-2 pr-3 text-[11px] font-bold ${tr.direction === 'long' ? 'text-long' : 'text-sell'}`}>{tr.direction === 'long' ? 'BUY' : 'SELL'}</td>
+                      <td className="hidden py-2 pr-3 font-mono @min-[36rem]:table-cell">
                         {formatPrice(tr.entryPrice)} → {formatPrice(tr.exitPrice)}
                       </td>
                       <td className={`py-2 pr-3 text-[11px] font-bold ${color}`}>{tr.exitReason ? (t.exit[tr.exitReason] ?? tr.exitReason) : t.open}</td>

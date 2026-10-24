@@ -87,13 +87,13 @@ export function AdminUsers({ me }: { me: PublicUser }) {
       ) : shown.length === 0 ? (
         <p className="m-0 p-5 text-sm text-dim">{t.empty}</p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1000px] border-collapse text-sm">
+        <div className="@container">
+          <table className="w-full border-collapse text-sm">
             <thead className="bg-raised">
               <tr>
-                {Object.values(t.columns).map((label) => (
-                  <th key={label} scope="col" className="px-4 py-2.5 text-left text-xs font-semibold whitespace-nowrap text-dim">
-                    {label}
+                {(Object.keys(t.columns) as (keyof typeof t.columns)[]).map((key) => (
+                  <th key={key} scope="col" className={`px-4 py-2.5 text-left text-xs font-semibold whitespace-nowrap text-dim ${COL[key]}`}>
+                    {t.columns[key]}
                   </th>
                 ))}
               </tr>
@@ -104,6 +104,44 @@ export function AdminUsers({ me }: { me: PublicUser }) {
                 const status = u.disabledAt ? 'disabled' : u.signInLockedAt ? 'locked' : !u.onboardedAt ? 'onboarding' : !u.canSignIn ? 'noPassword' : 'active';
                 const statusTone =
                   status === 'disabled' || status === 'locked' ? 'bg-sell-soft text-sell' : status === 'active' ? 'bg-buy-soft text-buy' : 'bg-warn-bg text-warn';
+                const roleSelect = (
+                  <Select
+                    aria-label={`${t.columns.role}: ${u.displayName}`}
+                    value={u.role}
+                    disabled={self || busy}
+                    onChange={(role) => changeRole(u, role as (typeof ASSIGNABLE_ROLES)[number])}
+                    options={ASSIGNABLE_ROLES.map((r) => ({ value: r, label: roleName(r) }))}
+                  />
+                );
+                const badges = (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold whitespace-nowrap ${statusTone}`}>{t.status[status]}</span>
+                    {u.twoFactorEnabled && (
+                      <span title={t.twoFactorOn} className="rounded-full bg-chip px-2 py-1 text-[11px] font-bold text-dim">
+                        {t.twoFactorBadge}
+                      </span>
+                    )}
+                    {u.apiAccess && (
+                      <span title={t.apiOn} className="rounded-full bg-accent/15 px-2 py-1 text-[11px] font-bold text-accent-ink">
+                        {t.apiBadge}
+                      </span>
+                    )}
+                  </div>
+                );
+                const actions = !self && (
+                  <ActionsMenu
+                    label={`${t.columns.actions}: ${u.displayName}`}
+                    disabled={busy}
+                    items={[
+                      { key: 'revoke', label: t.actions.revoke, disabled: u.activeSessions === 0, onSelect: () => run(u, 'revoke') },
+                      { key: 'reset', label: t.actions.reset, disabled: !u.email, onSelect: () => run(u, 'reset') },
+                      { key: 'twoFactor', label: t.actions.twoFactor, disabled: !u.twoFactorEnabled, onSelect: () => run(u, 'twoFactor') },
+                      { key: 'api', label: u.apiAccess ? t.actions.apiOff : t.actions.apiOn, onSelect: () => toggleApi(u) },
+                      { key: 'block', label: u.disabledAt || u.signInLockedAt ? t.actions.unblock : t.actions.block, onSelect: () => toggleBlock(u) },
+                      { key: 'delete', label: t.actions.delete, danger: true, onSelect: () => run(u, 'delete') },
+                    ]}
+                  />
+                );
                 return (
                   <tr key={u.id} className={`border-b border-line align-top last:border-b-0 ${u.disabledAt ? 'opacity-70' : ''}`}>
                     <td className="px-4 py-3">
@@ -112,62 +150,37 @@ export function AdminUsers({ me }: { me: PublicUser }) {
                           {u.displayName}
                           {self && <span className="ml-2 rounded-md bg-chip px-1.5 py-0.5 text-[10px] font-bold text-dim">{t.you}</span>}
                         </span>
-                        <span className="text-xs text-dim">{u.email ?? '—'}</span>
+                        <span className="text-xs break-all text-dim">{u.email ?? '—'}</span>
+                        {/* What the hidden columns hold, under the name while the list is narrow. */}
+                        <span className="mt-1 text-xs text-dim @min-[72rem]:hidden">
+                          {formatDate(u.createdAt.slice(0, 10))}
+                          {u.signupCode && ` · ${t.viaCode(u.signupCode)}`} · {u.lastSeenAt ? formatRelative(u.lastSeenAt) : t.never} · {t.usage(u.trades, u.accounts, u.strategies)}
+                        </span>
+                        <div className="mt-2 flex flex-col gap-2 @min-[44rem]:hidden">
+                          {badges}
+                          <div className="flex items-center gap-2">
+                            <div className="w-40">{roleSelect}</div>
+                            {actions}
+                          </div>
+                        </div>
                       </div>
                     </td>
-                    <td className="w-40 px-4 py-3">
-                      <Select
-                        aria-label={`${t.columns.role}: ${u.displayName}`}
-                        value={u.role}
-                        disabled={self || busy}
-                        onChange={(role) => changeRole(u, role as (typeof ASSIGNABLE_ROLES)[number])}
-                        options={ASSIGNABLE_ROLES.map((r) => ({ value: r, label: roleName(r) }))}
-                      />
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
+                    <td className={`w-40 px-4 py-3 ${COL.role}`}>{roleSelect}</td>
+                    <td className={`px-4 py-3 whitespace-nowrap ${COL.joined}`}>
                       <div className="flex flex-col">
                         <span className="font-mono">{formatDate(u.createdAt.slice(0, 10))}</span>
                         {u.signupCode && <span className="text-xs text-dim">{t.viaCode(u.signupCode)}</span>}
                       </div>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
+                    <td className={`px-4 py-3 whitespace-nowrap ${COL.lastSeen}`}>
                       <div className="flex flex-col">
                         <span>{u.lastSeenAt ? formatRelative(u.lastSeenAt) : t.never}</span>
                         {u.activeSessions > 0 && <span className="text-xs text-dim">{t.sessions(u.activeSessions)}</span>}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-xs text-dim">{t.usage(u.trades, u.accounts, u.strategies)}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold whitespace-nowrap ${statusTone}`}>{t.status[status]}</span>
-                        {u.twoFactorEnabled && (
-                          <span title={t.twoFactorOn} className="rounded-full bg-chip px-2 py-1 text-[11px] font-bold text-dim">
-                            {t.twoFactorBadge}
-                          </span>
-                        )}
-                        {u.apiAccess && (
-                          <span title={t.apiOn} className="rounded-full bg-accent/15 px-2 py-1 text-[11px] font-bold text-accent-ink">
-                            {t.apiBadge}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      {!self && (
-                        <ActionsMenu
-                          label={`${t.columns.actions}: ${u.displayName}`}
-                          disabled={busy}
-                          items={[
-                            { key: 'revoke', label: t.actions.revoke, disabled: u.activeSessions === 0, onSelect: () => run(u, 'revoke') },
-                            { key: 'reset', label: t.actions.reset, disabled: !u.email, onSelect: () => run(u, 'reset') },
-                            { key: 'twoFactor', label: t.actions.twoFactor, disabled: !u.twoFactorEnabled, onSelect: () => run(u, 'twoFactor') },
-                            { key: 'api', label: u.apiAccess ? t.actions.apiOff : t.actions.apiOn, onSelect: () => toggleApi(u) },
-                            { key: 'block', label: u.disabledAt || u.signInLockedAt ? t.actions.unblock : t.actions.block, onSelect: () => toggleBlock(u) },
-                            { key: 'delete', label: t.actions.delete, danger: true, onSelect: () => run(u, 'delete') },
-                          ]}
-                        />
-                      )}
-                    </td>
+                    <td className={`px-4 py-3 text-xs text-dim ${COL.usage}`}>{t.usage(u.trades, u.accounts, u.strategies)}</td>
+                    <td className={`px-4 py-3 ${COL.status}`}>{badges}</td>
+                    <td className={`px-4 py-3 ${COL.actions}`}>{actions}</td>
                   </tr>
                 );
               })}
@@ -178,6 +191,20 @@ export function AdminUsers({ me }: { me: PublicUser }) {
     </section>
   );
 }
+
+/**
+ * Columns by the list's own width: the dates and counts move under the name below 72 rem, and on a
+ * phone the role, status and actions go to a second line under it as well.
+ */
+const COL = {
+  user: '',
+  role: 'hidden @min-[44rem]:table-cell',
+  joined: 'hidden @min-[72rem]:table-cell',
+  lastSeen: 'hidden @min-[72rem]:table-cell',
+  usage: 'hidden @min-[72rem]:table-cell',
+  status: 'hidden @min-[44rem]:table-cell',
+  actions: 'hidden @min-[44rem]:table-cell',
+};
 
 interface MenuItem {
   key: string;

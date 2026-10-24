@@ -30,7 +30,7 @@ export function AdminPage() {
   const current = SECTIONS.find((s) => s.slug === slug) ?? SECTIONS[0];
 
   return (
-    <main className="page max-w-7xl">
+    <main className="page">
       <h1 className="m-0 text-2xl font-bold tracking-tight">{t.title}</h1>
       <div className="grid items-start gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
         <nav aria-label={t.sectionsLabel} className="lg:card no-scrollbar -mx-3 flex gap-1 overflow-x-auto px-3 sm:-mx-4 sm:px-4 lg:sticky lg:top-4 lg:mx-0 lg:flex-col lg:p-2">

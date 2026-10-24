@@ -1506,6 +1506,8 @@ export const en: Messages = {
     loading: 'Loading candles…',
     noData: 'No candles for this instrument.',
     hint: 'Drag a line and its price goes into the form. Several TPs close the position in parts.',
+    show: 'Add from the chart',
+    hide: 'Hide the chart',
   },
   plans: {
     eyebrow: 'Pro and VIP',

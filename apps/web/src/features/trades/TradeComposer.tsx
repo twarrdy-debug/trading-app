@@ -20,7 +20,7 @@ import {
   analysisSource,
 } from '@trading/shared';
 import { Link } from '@tanstack/react-router';
-import { useEffect, useState, type ClipboardEvent, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type ReactNode } from 'react';
 import { ApiError } from '../../api/client.ts';
 import {
   useCreateEducator,
@@ -46,11 +46,14 @@ import { instrumentOptions } from '../../lib/instruments.ts';
 import { LinkIcon } from '../account/AccountsManager.tsx';
 import { emptyPart, PartsEditor, partsTotal, ResultPicker, splitEqually, type PartDraft } from './PartsEditor.tsx';
 import { PositionSize, type RiskMode } from './PositionSize.tsx';
+import { useMedia } from '../../lib/media.ts';
 import { TradeChart } from './TradeChart.tsx';
 import { onlyImages, ScreenshotDrop } from './ScreenshotDrop.tsx';
 
 /** The last choices, so the next trade needs fewer clicks (per browser). */
 const DEFAULTS_KEY = 'trade-composer-defaults';
+/** Whether the chart is shown on narrow screens ('1') — wide ones always show it. */
+const CHART_KEY = 'trade-chart-mobile';
 interface Remembered {
   accountId?: string;
   instrumentId?: string;
@@ -207,6 +210,16 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
 
   const entryNum = parseDecimal(entry) ?? null;
   const stop = parseDecimal(stopText) ?? null;
+  // The stop decides the side (owner, 2026-10-24): above the entry is a SHORT, below a LONG. Only when
+  // either level changes, so a direction picked by hand afterwards stays, and an opened trade is left as saved.
+  const levelsSeen = useRef(`${entryNum}|${stop}`);
+  useEffect(() => {
+    const key = `${entryNum}|${stop}`;
+    if (key === levelsSeen.current) return;
+    levelsSeen.current = key;
+    if (entryNum == null || stop == null || stop === entryNum) return;
+    setDirection(stop > entryNum ? 'short' : 'long');
+  }, [entryNum, stop]);
   const position = parseDecimal(sizeText) ?? null;
   const balance = tradeAccount?.balance ?? null;
   const splittable = canSplit(position, step);
@@ -263,6 +276,24 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
 
   // The chart (Pro and VIP; not the demo): its lines and these fields are the same levels.
   const chartOn = !user.demo && user.plan.features.includes('analysis') && instrument != null && analysisSource(instrument.symbol) != null;
+  // Beside the fields from `lg`; below that (phones, tablets) only when asked for, remembered per browser.
+  const wide = useMedia('(min-width: 64rem)');
+  const [chartAsked, setChartAsked] = useState(() => {
+    try {
+      return localStorage.getItem(CHART_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const askChart = (on: boolean) => {
+    setChartAsked(on);
+    try {
+      localStorage.setItem(CHART_KEY, on ? '1' : '0');
+    } catch {
+      // Hidden again next time.
+    }
+  };
+  const chartShown = chartOn && (wide || chartAsked);
   const chartTps = split ? parts.map((p) => parseDecimal(p.tpText) ?? null) : [parseDecimal(single.tpText) ?? null];
   /** Money and R at a level, for its label on the chart ("−$243 · −1R"). */
   const levelLabel = (price: number) => {
@@ -418,11 +449,25 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
           </a>
         </p>
       )}
-      <div className={chartOn ? 'grid items-start gap-5 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]' : 'contents'}>
-        {/* The chart (Pro and VIP) beside the fields on wide screens, above them otherwise. */}
-        {chartOn && instrument && (
-          <div className="2xl:sticky 2xl:top-4 2xl:order-2">
+      {chartOn && !wide && (
+        <button
+          type="button"
+          aria-expanded={chartAsked}
+          onClick={() => askChart(!chartAsked)}
+          className={`flex h-11 items-center justify-center gap-2 rounded-(--radius-control) text-[13px] font-bold transition ${chartAsked ? 'bg-chip text-dim' : 'bg-long-soft text-long'}`}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M4 19V5M4 19h16M8 15l4-4 3 3 5-6" />
+          </svg>
+          {chartAsked ? all.tradeChart.hide : all.tradeChart.show}
+        </button>
+      )}
+      <div className={chartShown ? 'grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]' : 'contents'}>
+        {/* The chart (Pro and VIP) on the right from `lg`, so the form does not grow longer; above the fields on phones when asked for. */}
+        {chartShown && instrument && (
+          <div className="lg:sticky lg:top-4 lg:order-2">
             <TradeChart
+              height={wide ? 520 : 340}
               instrument={instrument}
               direction={direction}
               levels={{ entry: entryNum, stopLoss: stop, takeProfits: chartTps }}
@@ -436,9 +481,10 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
             />
           </div>
         )}
-        <div className={chartOn ? 'flex min-w-0 flex-col gap-5 2xl:order-1' : 'contents'}>
+        {/* A size container: the fields lay themselves out by the column's width, not the window's. */}
+        <div className="@container flex min-w-0 flex-col gap-5 lg:order-1">
         {/* 1. What and when; the session follows from the time. */}
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[auto_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.2fr)]">
+        <div className="grid gap-3 @md:grid-cols-2 @min-[50rem]:grid-cols-[auto_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.2fr)]">
           <Group label={f.direction}>
             <div className="flex gap-1.5" role="group" aria-label={f.direction}>
               <Button variant="buy" size="md" selected={direction === 'long'} onClick={() => setDirection('long')} className="w-20">
@@ -495,7 +541,7 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
         </Group>
 
         {/* 3. Levels. */}
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 @md:grid-cols-3">
           <Field label={f.entry}>
             <Input inputMode="decimal" value={entry} onChange={(e) => setEntry(e.target.value)} placeholder="0,00" className="font-semibold" />
           </Field>
@@ -555,7 +601,7 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
         </div>
 
         {/* 5. What it comes to; per-part pips only here. Always in view, with dashes until known. */}
-        <dl className="m-0 grid grid-cols-2 gap-px overflow-hidden rounded-(--radius-control) border border-line bg-line text-[13px] lg:grid-cols-4">
+        <dl className="m-0 grid grid-cols-2 gap-px overflow-hidden rounded-(--radius-control) border border-line bg-line text-[13px] @2xl:grid-cols-4">
           <Metric label={t.risk}>
             {preview?.riskUnits == null ? (
               '—'
@@ -588,7 +634,7 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
         </dl>
 
         {/* 6. Psychology and context, always in view. */}
-        <div className="grid gap-5 lg:grid-cols-2">
+        <div className="grid gap-5 @2xl:grid-cols-2">
           <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
             <legend className="mb-2 text-sm font-semibold">{f.emotions}</legend>
             <div className="flex flex-wrap gap-1.5">
@@ -654,7 +700,7 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
             {t.advanced}
           </Button>
           {advanced && (
-            <div className="grid gap-4 rounded-(--radius-control) border border-line p-4 lg:grid-cols-2">
+            <div className="grid gap-4 rounded-(--radius-control) border border-line p-4 @2xl:grid-cols-2">
               {!trade && (
                 <div className="flex flex-col gap-2">
                   <span className="eyebrow">{f.pasteSignal}</span>

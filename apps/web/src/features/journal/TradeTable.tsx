@@ -188,6 +188,20 @@ export function tradeDuration(trade: Trade, format: (d: number, h: number, m: nu
   return format(Math.floor(minutes / 1440), Math.floor((minutes % 1440) / 60), minutes % 60);
 }
 
+/**
+ * Columns that step aside, least needed first, when the list is narrower than the whole table (the
+ * table's own width, not the window's: the side menu and the page take their share). An opened trade
+ * still shows all of it.
+ */
+const COL = {
+  account: 'hidden @min-[54rem]:table-cell',
+  risk: 'hidden @min-[61rem]:table-cell',
+  profit: 'hidden @min-[67rem]:table-cell',
+  fees: 'hidden @min-[72rem]:table-cell',
+  session: 'hidden @min-[77rem]:table-cell',
+  strategy: 'hidden @min-[83rem]:table-cell',
+};
+
 function HeaderCell({ children, help, className = '' }: { children: string; help?: string; className?: string }) {
   return (
     <th scope="col" className={`px-3 py-2.5 text-left font-sans text-xs font-semibold whitespace-nowrap text-dim ${className}`}>
@@ -288,23 +302,23 @@ export function TradeTable({
         );
       })}
     </ul>
-    <div className="hidden overflow-x-auto md:block">
-      <table className="w-full min-w-[1080px] border-collapse font-mono text-sm">
+    <div className="@container hidden overflow-x-auto md:block">
+      <table className="w-full border-collapse font-mono text-sm">
         <thead className="bg-raised">
           <tr>
             <HeaderCell>{labels.actions}</HeaderCell>
             <HeaderCell>{labels.date}</HeaderCell>
-            {showAccount && <HeaderCell>{labels.account}</HeaderCell>}
+            {showAccount && <HeaderCell className={COL.account}>{labels.account}</HeaderCell>}
             <HeaderCell>{labels.instrument}</HeaderCell>
             <HeaderCell>{labels.direction}</HeaderCell>
             <HeaderCell>{labels.result}</HeaderCell>
-            <HeaderCell help={labels.feesHelp}>{labels.fees}</HeaderCell>
-            <HeaderCell help={labels.profitPctHelp}>{labels.profitPct}</HeaderCell>
-            <HeaderCell help={labels.riskPctHelp}>{labels.riskPct}</HeaderCell>
+            <HeaderCell help={labels.feesHelp} className={COL.fees}>{labels.fees}</HeaderCell>
+            <HeaderCell help={labels.profitPctHelp} className={COL.profit}>{labels.profitPct}</HeaderCell>
+            <HeaderCell help={labels.riskPctHelp} className={COL.risk}>{labels.riskPct}</HeaderCell>
             <HeaderCell help={labels.rrHelp}>{labels.rr}</HeaderCell>
             <HeaderCell help={labels.outcomeHelp}>{labels.outcome}</HeaderCell>
-            <HeaderCell>{labels.session}</HeaderCell>
-            <HeaderCell>{labels.strategy}</HeaderCell>
+            <HeaderCell className={COL.session}>{labels.session}</HeaderCell>
+            <HeaderCell className={COL.strategy}>{labels.strategy}</HeaderCell>
           </tr>
         </thead>
         <tbody>
@@ -339,7 +353,7 @@ export function TradeTable({
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
                     </svg>
-                    {labels.openTrade}
+                    <span className="hidden @min-[60rem]:inline">{labels.openTrade}</span>
                   </button>
                 </td>
                 <td className="px-3 py-3 whitespace-nowrap">
@@ -378,7 +392,7 @@ export function TradeTable({
                   </div>
                 </td>
                 {showAccount && (
-                  <td className="max-w-40 px-3 py-3 font-sans">
+                  <td className={`max-w-40 px-3 py-3 font-sans ${COL.account}`}>
                     <div className="flex flex-col items-start gap-1">
                       <span className="max-w-40 truncate">{t.linked?.grouped ? all.accounts.linkedAccounts(t.linked.accounts.length) : (account?.name ?? <span className="text-dim">{all.accounts.none}</span>)}</span>
                       {t.linked && <LinkedBadge trade={t} />}
@@ -405,9 +419,9 @@ export function TradeTable({
                     <span className="text-[11px] text-dim">{t.resultUnits == null ? all.common.open : formatUnits(t.resultUnits, all.units.short[t.instrument.measureUnit])}</span>
                   </div>
                 </td>
-                <td className="px-3 py-3 whitespace-nowrap text-dim">{t.fees ? formatAmount(t.fees, t.accountCurrency, false) : '—'}</td>
-                <td className={`px-3 py-3 whitespace-nowrap ${tone(t.pnlPct)}`}>{t.pnlPct == null ? '—' : `${formatNumber(t.pnlPct, true)}%`}</td>
-                <td className="px-3 py-3 whitespace-nowrap">
+                <td className={`px-3 py-3 whitespace-nowrap text-dim ${COL.fees}`}>{t.fees ? formatAmount(t.fees, t.accountCurrency, false) : '—'}</td>
+                <td className={`px-3 py-3 whitespace-nowrap ${tone(t.pnlPct)} ${COL.profit}`}>{t.pnlPct == null ? '—' : `${formatNumber(t.pnlPct, true)}%`}</td>
+                <td className={`px-3 py-3 whitespace-nowrap ${COL.risk}`}>
                   <div className="flex flex-col gap-0.5">
                     <span>{t.riskPct != null ? `${formatNumber(t.riskPct)}%` : '—'}</span>
                     {t.riskAccount != null && (
@@ -435,8 +449,8 @@ export function TradeTable({
                     {t.parts.length > 1 && <span className="font-sans text-[11px] whitespace-nowrap text-dim">{exitsLabel}</span>}
                   </div>
                 </td>
-                <td className="px-3 py-3 font-sans text-xs whitespace-nowrap">{all.tradeSessions[t.session] ?? t.session}</td>
-                <td className="px-3 py-3 font-sans text-xs">
+                <td className={`px-3 py-3 font-sans text-xs whitespace-nowrap ${COL.session}`}>{all.tradeSessions[t.session] ?? t.session}</td>
+                <td className={`px-3 py-3 font-sans text-xs ${COL.strategy}`}>
                   {t.strategy ? (
                     <div className="flex flex-col">
                       <span className="max-w-36 truncate font-semibold">{t.strategy.name}</span>

@@ -28,15 +28,15 @@ export function AdminInstruments() {
           + {t.add}
         </Button>
       )}
-      <section className="card overflow-x-auto">
+      <section className="card @container">
         {isLoading ? (
           <p className="m-0 p-5 text-sm text-dim">{all.common.loading}</p>
         ) : (
-          <table className="w-full min-w-[760px] border-collapse text-sm">
+          <table className="w-full border-collapse text-sm">
             <thead className="bg-raised">
               <tr>
                 {[t.symbol, t.market, t.measureUnit, t.unitValue, t.currencies, ''].map((label, i) => (
-                  <th key={i} scope="col" className="px-4 py-2.5 text-left text-xs font-semibold whitespace-nowrap text-dim">
+                  <th key={i} scope="col" className={`px-4 py-2.5 text-left text-xs font-semibold whitespace-nowrap text-dim ${i > 0 && i < 5 ? WIDE : ''}`}>
                     {label}
                   </th>
                 ))}
@@ -58,20 +58,26 @@ export function AdminInstruments() {
                         <span className="text-xs text-dim">
                           {i.name} · {t.trades(i.trades)}
                         </span>
+                        {/* The other columns' figures, while the list is too narrow for them. */}
+                        <span className="text-xs text-dim @min-[52rem]:hidden">
+                          {i.market === 'cfd' ? 'CFD' : i.market === 'futures' ? 'Futures' : all.accounts.crypto} · {all.units.name[i.measureUnit]}{' '}
+                          <span className="font-mono">{formatPrice(i.unitSize)}</span> = <span className="font-mono">{formatPrice(i.unitValue)} {i.quoteCurrency}</span>
+                          {i.currencies.length > 0 && ` · ${i.currencies.join(', ')}`}
+                        </span>
                       </div>
                     </td>
-                    <td className="px-4 py-2.5 whitespace-nowrap">
+                    <td className={`px-4 py-2.5 whitespace-nowrap ${WIDE}`}>
                       {i.market === 'cfd' ? 'CFD' : i.market === 'futures' ? 'Futures' : all.accounts.crypto} · {t.assetClasses[i.assetClass] ?? i.assetClass}
                     </td>
-                    <td className="px-4 py-2.5 whitespace-nowrap">
+                    <td className={`px-4 py-2.5 whitespace-nowrap ${WIDE}`}>
                       {all.units.name[i.measureUnit]} · <span className="font-mono">{formatPrice(i.unitSize)}</span>
                     </td>
-                    <td className="px-4 py-2.5 font-mono whitespace-nowrap">
+                    <td className={`px-4 py-2.5 font-mono whitespace-nowrap ${WIDE}`}>
                       {formatPrice(i.unitValue)} {i.quoteCurrency}
                     </td>
-                    <td className="px-4 py-2.5 font-mono text-xs">{i.currencies.join(', ') || '—'}</td>
+                    <td className={`px-4 py-2.5 font-mono text-xs ${WIDE}`}>{i.currencies.join(', ') || '—'}</td>
                     <td className="px-4 py-2.5">
-                      <div className="flex justify-end gap-1.5">
+                      <div className="flex flex-wrap justify-end gap-1.5">
                         <button
                           type="button"
                           aria-pressed={i.active}
@@ -96,6 +102,9 @@ export function AdminInstruments() {
     </div>
   );
 }
+
+/** Market, unit, value and currencies get their own columns once the list is wide enough. */
+const WIDE = 'hidden @min-[52rem]:table-cell';
 
 /** Add (no `instrument`) or edit; symbol and market are fixed once created. */
 function InstrumentForm({ instrument, onDone }: { instrument?: AdminInstrument; onDone: () => void }) {

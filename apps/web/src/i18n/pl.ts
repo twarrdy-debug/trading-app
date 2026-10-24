@@ -1523,6 +1523,8 @@ export const pl = {
     loading: 'Wczytuję świece…',
     noData: 'Brak świec dla tego instrumentu.',
     hint: 'Przeciągnij linię, a cena wpisze się w formularz. Kilka TP to zamknięcie w częściach.',
+    show: 'Dodaj z wykresu',
+    hide: 'Ukryj wykres',
   },
   plans: {
     eyebrow: 'Pro i VIP',

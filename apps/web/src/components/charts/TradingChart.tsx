@@ -465,10 +465,13 @@ export function TradingChart({
     };
   }, [editLines, resetKey, theme]);
 
+  // Bound once per chart, not per `onLineDrag`: the form re-renders on every move, and rebinding
+  // then dropped the drag after its first step.
+  const draggable = onLineDrag != null;
   useEffect(() => {
     const el = box.current;
     const ref = chartRef.current;
-    if (!el || !ref || !onLineDrag) return;
+    if (!el || !ref || !draggable) return;
     let dragging: string | null = null;
     const yOf = (e: PointerEvent) => e.clientY - el.getBoundingClientRect().top;
     // The line under the pointer, within a few pixels (more for a finger).
@@ -516,8 +519,9 @@ export function TradingChart({
       el.removeEventListener('pointerup', up);
       el.removeEventListener('pointercancel', up);
       el.style.cursor = '';
+      if (dragging && chartRef.current === ref) hold(false);
     };
-  }, [onLineDrag, resetKey, theme]);
+  }, [draggable, resetKey, theme]);
 
   // Time left until the last candle closes, under its price label on the axis (as on TradingView).
   const [countdown, setCountdown] = useState<{ y: number; width: number; text: string; up: boolean } | null>(null);
