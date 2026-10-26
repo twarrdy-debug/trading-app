@@ -508,12 +508,35 @@ export function TradingChart({
       hold(false);
       if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
     };
+    // A finger on a line must not scroll the page: once the browser takes the gesture over it sends
+    // pointercancel and the drag stops after a step or two. Cancelling the touch keeps it ours.
+    const touchStart = (e: TouchEvent) => {
+      const t = e.touches[0];
+      if (e.touches.length !== 1 || !t) return;
+      const y = t.clientY - el.getBoundingClientRect().top;
+      const onLine = edit.current.lines.some((l) => {
+        const ly = ref.candles.priceToCoordinate(l.price);
+        return ly != null && Math.abs(ly - y) <= 14;
+      });
+      if (!onLine) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const touchMove = (e: TouchEvent) => {
+      if (!dragging) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
     // Capture phase: the chart's own panning never sees a drag that starts on a line.
     el.addEventListener('pointerdown', down, { capture: true });
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
     el.addEventListener('pointercancel', up);
+    el.addEventListener('touchstart', touchStart, { capture: true, passive: false });
+    el.addEventListener('touchmove', touchMove, { capture: true, passive: false });
     return () => {
+      el.removeEventListener('touchstart', touchStart, { capture: true });
+      el.removeEventListener('touchmove', touchMove, { capture: true });
       el.removeEventListener('pointerdown', down, { capture: true });
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', up);
