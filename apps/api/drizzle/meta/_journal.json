@@ -267,6 +267,13 @@
       "when": 1792797454079,
       "tag": "0037_sign_in_lock",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1793707920019,
+      "tag": "0038_naive_sway",
+      "breakpoints": true
     }
   ]
 }

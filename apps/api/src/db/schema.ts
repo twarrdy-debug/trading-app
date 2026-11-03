@@ -1,5 +1,6 @@
 import {
   ASSET_CLASSES,
+  type BillingInterval,
   BIASES,
   type ChartStyle,
   DIRECTIONS,
@@ -910,3 +911,25 @@ export const sessionChecklistsRelations = relations(sessionChecklists, ({ many }
 export const checklistItemsRelations = relations(checklistItems, ({ one }) => ({
   checklist: one(sessionChecklists, { fields: [checklistItems.checklistId], references: [sessionChecklists.id] }),
 }));
+
+/**
+ * A user's paid Pro (Stripe holds the cards and invoices). `grantedPro` says the subscription raised
+ * the role, so its end lowers it again; Pro given for free (existing users, invitations, an admin)
+ * has no such row and stays when anything here changes.
+ */
+export const subscriptions = pgTable('subscriptions', {
+  userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  stripeCustomerId: text('stripe_customer_id').notNull().unique(),
+  stripeSubscriptionId: text('stripe_subscription_id').unique(),
+  /** The newest unfinished checkout, closed when another starts so nobody ends up paying twice. */
+  stripeCheckoutId: text('stripe_checkout_id'),
+  /** Stripe's own word: active, trialing, past_due, canceled, unpaid…; null before the first purchase. */
+  status: text('status'),
+  interval: text('interval').$type<BillingInterval>(),
+  currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+  cancelAtPeriodEnd: boolean('cancel_at_period_end').notNull().default(false),
+  grantedPro: boolean('granted_pro').notNull().default(false),
+  /** Bought at the founders' price; it can be used once. */
+  founder: boolean('founder').notNull().default(false),
+  ...timestamps,
+});

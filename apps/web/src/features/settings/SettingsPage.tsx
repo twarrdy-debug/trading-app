@@ -30,6 +30,7 @@ import { DEFAULT_ACCENT } from '../../lib/theme.ts';
 import { AccountsManager } from '../account/AccountsManager.tsx';
 import { FavoriteInstrumentsPicker } from './FavoriteInstruments.tsx';
 import { KeywordAlertsFields } from '../news/KeywordAlerts.tsx';
+import { SubscriptionSection } from '../billing/SubscriptionSection.tsx';
 import { ApiKeysSection } from './ApiKeys.tsx';
 
 const TIMEZONES = ['Europe/Warsaw', 'Europe/London', 'America/New_York', 'America/Chicago', 'Asia/Tokyo', 'UTC'];
@@ -40,6 +41,7 @@ const SECTIONS = [
   { slug: 'wyglad', key: 'appearance' },
   { slug: 'waluta-i-czas', key: 'region' },
   { slug: 'dyscyplina', key: 'discipline' },
+  { slug: 'subskrypcja', key: 'subscription' },
   { slug: 'konta', key: 'accounts' },
   { slug: 'instrumenty', key: 'instruments' },
   { slug: 'alerty', key: 'alerts' },
@@ -145,6 +147,8 @@ function Section({ section, user, save }: { section: SectionKey; user: PublicUse
       );
     case 'emails':
       return <EmailsSection user={user} save={save} />;
+    case 'subscription':
+      return <SubscriptionSection user={user} />;
     case 'apiKeys':
       return <ApiKeysSection user={user} />;
   }

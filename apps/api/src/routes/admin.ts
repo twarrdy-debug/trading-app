@@ -36,7 +36,7 @@ export const adminRoutes: FastifyPluginAsyncZod = async (app) => {
     return { sent: true, emailConfigured: Boolean(app.env.SMTP_URL) };
   });
 
-  app.delete('/admin/users/:id', { schema: { tags, params: idParams } }, (req) => deleteUser(app.db, req.user, req.params.id, app.uploadDir));
+  app.delete('/admin/users/:id', { schema: { tags, params: idParams } }, (req) => deleteUser(app.db, req.user, req.params.id, app.uploadDir, app.billing));
 
   app.get('/admin/stats', { schema: { tags } }, () => appStats(app.db));
 

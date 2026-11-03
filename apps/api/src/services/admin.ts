@@ -1,3 +1,4 @@
+import { stopPayments, type BillingProvider } from './billing.ts';
 import type { AdminUpdateUserInput, UpdateInstrumentInput } from '@trading/shared';
 import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
@@ -132,9 +133,11 @@ export async function revokeSessions(db: DB, id: string) {
  * Deletes the account with everything it owns (trades, accounts, strategies…, by cascade) and its
  * screenshot files. An educator still linked to signals or other users' trades cannot be deleted.
  */
-export async function deleteUser(db: DB, admin: CurrentUser, id: string, uploadDir: string) {
+export async function deleteUser(db: DB, admin: CurrentUser, id: string, uploadDir: string, billing: BillingProvider | null = null) {
   notSelf(admin, id);
   await getUser(db, id);
+  // Before the row goes: a deleted user must not keep being charged.
+  await stopPayments(db, billing, id);
   const files = await db
     .select({ key: tradeScreenshots.storageKey })
     .from(tradeScreenshots)

@@ -98,3 +98,5 @@ export interface ApiErrorBody {
   issues?: { path: string; message: string }[];
   details?: unknown;
 }
+
+export type { BillingState } from './services/billing.ts';

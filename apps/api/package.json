@@ -13,7 +13,8 @@
     "db:migrate": "tsx --env-file-if-exists=.env src/db/migrate.ts",
     "db:seed": "tsx --env-file-if-exists=.env src/db/seed.ts",
     "typecheck": "tsc --noEmit -p .",
-    "user:login": "tsx --env-file-if-exists=.env src/db/set-login.ts"
+    "user:login": "tsx --env-file-if-exists=.env src/db/set-login.ts",
+    "stripe:setup": "tsx --env-file-if-exists=.env src/db/stripe-setup.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
@@ -32,6 +33,7 @@
     "fflate": "^0.8.3",
     "nodemailer": "^10.0.15",
     "postgres": "^3.4.9",
+    "stripe": "^23.1.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {

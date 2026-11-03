@@ -22,6 +22,12 @@ const envSchema = z.object({
   CAPITAL_IDENTIFIER: z.string().optional(),
   CAPITAL_API_KEY: z.string().optional(),
   CAPITAL_API_PASSWORD: z.string().optional(),
+  /**
+   * Stripe (paid Pro). Without both the app simply sells nothing. A test-mode key (sk_test_) in
+   * development; `npm run stripe:setup` creates the product, prices and founders' coupon there.
+   */
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
   /** How often to fetch new candles for the analysis, in minutes; 0 turns it off. */
   ANALYSIS_INTERVAL_MINUTES: z.coerce.number().min(0).default(15),
   /** How often to fetch the Forex Factory calendar; 0 turns it off. */

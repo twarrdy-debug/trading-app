@@ -24,6 +24,7 @@ import {
   TIMEFRAMES,
   TRADE_SOURCES,
 } from './enums.ts';
+import { BILLING_CURRENCIES, BILLING_INTERVALS } from './plans.ts';
 import { BROKER_TIMEZONES } from './dates.ts';
 import { ANALYSIS_RESOLUTIONS } from './analysis.ts';
 import { PRO_RESOLUTIONS } from './calculator-pro.ts';
@@ -115,6 +116,12 @@ export const updateSettingsSchema = z
       .nullable(),
   })
   .partial();
+
+/** Buying Pro; without a currency the buyer's language decides (Polish pays in zloty). */
+export const checkoutSchema = z.object({
+  interval: z.enum(BILLING_INTERVALS),
+  currency: z.enum(BILLING_CURRENCIES).optional(),
+});
 
 /** E-mails a user can unsubscribe from with the link in each of them. */
 export const EMAIL_SUBSCRIPTIONS = ['weekAhead', 'daySummary', 'updates'] as const;

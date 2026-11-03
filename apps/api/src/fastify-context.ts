@@ -4,6 +4,7 @@ import type { Auth } from './auth.ts';
 import type { DB } from './db/client.ts';
 import type { Env } from './env.ts';
 import type { QuoteProvider } from './services/basis.ts';
+import type { BillingProvider } from './services/billing.ts';
 import type { CalendarSource } from './services/calendar.ts';
 import type { FxProvider } from './services/fx.ts';
 import type { LiveSource } from './services/live-prices.ts';
@@ -25,6 +26,8 @@ declare module 'fastify' {
     newsHub: NewsHub;
     uploadDir: string;
     mailer: Mailer;
+    /** Stripe; null until its keys are set. */
+    billing: BillingProvider | null;
     auth: Auth;
   }
 }
