@@ -1,5 +1,6 @@
 import { APP_NAME, LANGUAGES, SUPPORT_EMAIL, type EmailSubscription } from '@trading/shared';
 import { usePageMeta } from '../../lib/seo.ts';
+import { LegalLinks } from '../legal/LegalPage.tsx';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { AuthError, authApi, useAuthConfig, useResetSession } from '../../api/auth.ts';
@@ -59,6 +60,9 @@ function AuthLayout({ title, children, footer }: { title: string; children: Reac
           <a href={`mailto:${SUPPORT_EMAIL}`} className="text-dim hover:text-ink">
             {SUPPORT_EMAIL}
           </a>
+        </div>
+        <div className="text-center text-xs text-dim">
+          <LegalLinks />
         </div>
       </div>
     </main>
@@ -268,6 +272,7 @@ export function RegisterPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [inviteCode, setInviteCode] = useState(() => query().get('kod') ?? '');
+  const [accepted, setAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   /** The account exists and waits for the e-mailed activation link. */
@@ -288,6 +293,7 @@ export function RegisterPage() {
         email: email.trim(),
         password,
         inviteCode: inviteCode.trim() || undefined,
+        acceptedTerms: accepted,
         language,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
@@ -328,9 +334,10 @@ export function RegisterPage() {
   return (
     <AuthLayout title={t.signUpTitle} footer={footer}>
       <form onSubmit={submit} className="flex flex-col gap-4">
-        {config?.registration !== 'open' && (
+        {/* With open registration only an invitation link shows the code. */}
+        {(config?.registration !== 'open' || inviteCode !== '') && (
           <Field label={t.inviteCode} hint={t.inviteHint}>
-            <Input value={inviteCode} onChange={(e) => setInviteCode(e.target.value.toUpperCase())} required autoComplete="off" />
+            <Input value={inviteCode} onChange={(e) => setInviteCode(e.target.value.toUpperCase())} required={config?.registration !== 'open'} autoComplete="off" />
           </Field>
         )}
         <Field label={t.name}>
@@ -343,6 +350,12 @@ export function RegisterPage() {
           <Input type="password" autoComplete="new-password" aria-describedby={rulesId} value={password} onChange={(e) => setPassword(e.target.value)} required maxLength={128} />
         </Field>
         <PasswordRules password={password} id={rulesId} />
+        <label className="flex items-start gap-2.5 text-[13px] text-dim">
+          <input type="checkbox" required checked={accepted} onChange={(e) => setAccepted(e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-(--accent)" />
+          <span>
+            {t.acceptTerms} <LegalLinks />
+          </span>
+        </label>
         <Errors lines={errors} />
         {taken && (
           <p className="-mt-2 m-0 flex flex-wrap gap-x-4 gap-y-1 text-sm">

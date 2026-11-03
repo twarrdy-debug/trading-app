@@ -24,6 +24,9 @@ const AnalysisPage = lazyRouteComponent(() => import('./features/analysis/Analys
 const StrategiesPage = lazyRouteComponent(() => import('./features/analysis/AnalysisPage.tsx'), 'StrategiesPage');
 const BacktestPage = lazyRouteComponent(() => import('./features/backtest/BacktestPage.tsx'), 'BacktestPage');
 const DashboardPage = lazyRouteComponent(() => import('./features/dashboard/DashboardPage.tsx'), 'DashboardPage');
+const TermsPage = lazyRouteComponent(() => import('./features/legal/LegalPage.tsx'), 'TermsPage');
+const PrivacyPage = lazyRouteComponent(() => import('./features/legal/LegalPage.tsx'), 'PrivacyPage');
+const PricingPage = lazyRouteComponent(() => import('./features/billing/PricingPage.tsx'), 'PricingPage');
 const TradesPage = lazyRouteComponent(() => import('./features/trades/TradesPage.tsx'), 'TradesPage');
 
 const rootRoute = createRootRoute();
@@ -41,6 +44,8 @@ const routeTree = rootRoute.addChildren([
       throw redirect({ to: '/', replace: true });
     },
   }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/regulamin', component: TermsPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/prywatnosc', component: PrivacyPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/logowanie', component: LoginPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/rejestracja', component: RegisterPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/reset-hasla', component: ForgotPasswordPage }),
@@ -71,6 +76,7 @@ const routeTree = rootRoute.addChildren([
     createRoute({ getParentRoute: () => appRoute, path: '/strategie', component: StrategiesPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/kalendarz', component: CalendarPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/news', component: NewsPage }),
+    createRoute({ getParentRoute: () => appRoute, path: '/plany', component: PricingPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/ustawienia', component: SettingsPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/admin', component: AdminPage }),
     createRoute({ getParentRoute: () => appRoute, path: '/admin/$section', component: AdminPage }),

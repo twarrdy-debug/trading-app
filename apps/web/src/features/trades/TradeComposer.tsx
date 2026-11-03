@@ -1,6 +1,5 @@
 import type { AccountSummary, Instrument, PublicUser, Trade, TradeMutation } from '@trading/api/types';
 import {
-  SUPPORT_EMAIL,
   AUTO_FX_CURRENCIES,
   canSplit,
   computeTradeMetrics,
@@ -47,6 +46,7 @@ import { LinkIcon } from '../account/AccountsManager.tsx';
 import { emptyPart, PartsEditor, partsTotal, ResultPicker, splitEqually, type PartDraft } from './PartsEditor.tsx';
 import { PositionSize, type RiskMode } from './PositionSize.tsx';
 import { useMedia } from '../../lib/media.ts';
+import { UpgradeLink } from '../plans/PlanLocked.tsx';
 import { TradeChart } from './TradeChart.tsx';
 import { onlyImages, ScreenshotDrop } from './ScreenshotDrop.tsx';
 
@@ -444,9 +444,7 @@ export function TradeComposer({ user, instruments, accounts, trade, preferredAcc
       {journalFull && (
         <p role="status" className="m-0 flex flex-wrap items-center justify-between gap-3 rounded-(--radius-control) bg-accent/10 px-3.5 py-3 text-[13px] ring-1 ring-accent/30 ring-inset">
           <span>{all.plans.tradesFull(tradeLimit!)}</span>
-          <a href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(all.plans.askSubject)}`} className="font-bold text-accent-ink no-underline hover:underline">
-            {all.plans.ask} →
-          </a>
+          <UpgradeLink className="font-bold text-accent-ink no-underline hover:underline" />
         </p>
       )}
       {chartOn && !wide && (

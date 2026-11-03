@@ -13,6 +13,7 @@ Disallow: /strategie
 Disallow: /kalendarz
 Disallow: /news
 Disallow: /ustawienia
+Disallow: /plany
 Disallow: /admin
 Disallow: /sygnaly
 Disallow: /aktywacja

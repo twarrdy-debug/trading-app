@@ -54,7 +54,7 @@ export async function findUsableInvite(db: DB, code: unknown, email: unknown) {
  * After a successful sign-up: uses up the invite (giving its role) and stores the language and
  * time zone the browser sent, when valid.
  */
-export async function finishSignUp(db: DB, userId: string, body: Record<string, unknown>, inviteMode: boolean) {
+export async function finishSignUp(db: DB, userId: string, body: Record<string, unknown>) {
   // A new sign-up starts with the introduction.
   const patch: Partial<typeof users.$inferInsert> = { onboardedAt: null };
   if (typeof body.language === 'string' && (LANGUAGES as readonly string[]).includes(body.language)) {
@@ -68,17 +68,17 @@ export async function finishSignUp(db: DB, userId: string, body: Record<string, 
       // Unknown zone: keep the default.
     }
   }
-  if (inviteMode) {
-    const invite = await findUsableInvite(db, body.inviteCode, body.email);
-    if (invite) {
-      // A multi-use code only counts its sign-ups; a single-use one is used up.
-      await db
-        .update(invites)
-        .set(invite.multiUse ? { useCount: sql`${invites.useCount} + 1`, usedAt: new Date() } : { usedBy: userId, usedAt: new Date(), useCount: 1 })
-        .where(eq(invites.id, invite.id));
-      patch.role = invite.role;
-      patch.signupCode = invite.code;
-    }
+  if (body.acceptedTerms === true) patch.termsAcceptedAt = new Date();
+  // With open registration a code is optional and still gives its role; without one the plan is Standard.
+  const invite = await findUsableInvite(db, body.inviteCode, body.email);
+  if (invite) {
+    // A multi-use code only counts its sign-ups; a single-use one is used up.
+    await db
+      .update(invites)
+      .set(invite.multiUse ? { useCount: sql`${invites.useCount} + 1`, usedAt: new Date() } : { usedBy: userId, usedAt: new Date(), useCount: 1 })
+      .where(eq(invites.id, invite.id));
+    patch.role = invite.role;
+    patch.signupCode = invite.code;
   }
   if (Object.keys(patch).length > 0) await db.update(users).set(patch).where(eq(users.id, userId));
 }

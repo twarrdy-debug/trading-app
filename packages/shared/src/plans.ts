@@ -27,3 +27,26 @@ export const INVITE_ROLES = ['standard', 'pro', 'vip'] as const;
  * user (`users.api_access`); an admin always may.
  */
 export const apiAllowed = (user: { role: RoleKey; apiAccess: boolean }) => hasFeature(user.role, 'apiKeys') && (user.role === 'admin' || user.apiAccess);
+
+/** How a paid Pro plan renews. */
+export const BILLING_INTERVALS = ['month', 'year'] as const;
+export type BillingInterval = (typeof BILLING_INTERVALS)[number];
+export const BILLING_CURRENCIES = ['usd', 'pln'] as const;
+export type BillingCurrency = (typeof BILLING_CURRENCIES)[number];
+
+/**
+ * Pro's prices (owner, 2026-11-03): 15 USD a month, 120 USD a year, and the first FOUNDER_SEATS
+ * buyers who type the code FOUNDER_CODE on Stripe's page get their first year for 15 USD. Stripe charges what `npm run stripe:setup` created there;
+ * keep the two in step. The zloty prices exist because BLIK only takes PLN.
+ */
+export const PRO_PRICES: Record<BillingCurrency, Record<BillingInterval | 'founderYear', number>> = {
+  usd: { month: 15, year: 120, founderYear: 15 },
+  pln: { month: 59, year: 472, founderYear: 59 },
+};
+export const FOUNDER_SEATS = 50;
+export const FOUNDER_CODE = 'FOUNDERS';
+/** Off the first year's price, so 120 USD becomes 15 USD and 472 zl becomes 59 zl. */
+export const FOUNDER_PERCENT_OFF = 87.5;
+
+/** A subscription in these Stripe states gives Pro; `past_due` keeps it while Stripe retries the card. */
+export const subscriptionGivesPro = (status: string | null | undefined) => status === 'active' || status === 'trialing' || status === 'past_due';

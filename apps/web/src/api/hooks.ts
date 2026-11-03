@@ -14,6 +14,7 @@ import type {
   AccountAdjustment,
   AccountDayBalance,
   CreatedApiKey,
+  BillingState,
   BacktestCandles,
   BacktestSession,
   BacktestSessionListItem,
@@ -54,12 +55,22 @@ import type {
   UpdateStrategyInput,
   WhatsNewInput,
 } from '@trading/shared';
+import type { BillingCurrency, BillingInterval } from '@trading/shared';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, qs } from './client.ts';
 
 const STATIC = { staleTime: 5 * 60_000 };
 
 export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => api<PublicUser>('/me') });
+export const useBilling = () => useQuery({ queryKey: ['billing'], queryFn: () => api<BillingState>('/billing') });
+/** Both lead away to Stripe's own page. */
+const leaveFor = ({ url }: { url: string }) => window.location.assign(url);
+export const useCheckout = () =>
+  useMutation({
+    mutationFn: (json: { interval: BillingInterval; currency: BillingCurrency; acceptedTerms: true }) => api<{ url: string }>('/billing/checkout', { method: 'POST', json }),
+    onSuccess: leaveFor,
+  });
+export const usePortal = () => useMutation({ mutationFn: () => api<{ url: string }>('/billing/portal', { method: 'POST' }), onSuccess: leaveFor });
 export const useInstruments = () =>
   useQuery({ queryKey: ['instruments'], queryFn: () => api<Instrument[]>('/instruments'), ...STATIC });
 /** Adds or removes a favourite instrument; the cached list updates at once. */

@@ -22,9 +22,10 @@ declare module 'fastify' {
 
 /**
  * Reachable without a session: health, API docs, auth endpoints and their config, the signed
- * unsubscribe link, entering and leaving the demo, and the bot door (which checks its own API key).
+ * unsubscribe link, entering and leaving the demo, the bot door (which checks its own API key) and
+ * Stripe's webhook (which checks Stripe's signature).
  */
-const PUBLIC_PREFIXES = ['/health', '/docs', '/auth/', '/auth-config', '/email/unsubscribe', '/demo', '/bot/'];
+const PUBLIC_PREFIXES = ['/health', '/docs', '/auth/', '/auth-config', '/email/unsubscribe', '/demo', '/bot/', '/billing/webhook'];
 
 /** Screens the demo does not open (owner's choice): the analysis, backtesting and news, all on outside data. */
 const DEMO_LOCKED = ['/analysis', '/backtest', '/news', '/basis/pro', '/levels', '/checklists'];

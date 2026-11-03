@@ -1858,7 +1858,7 @@ describe('authentication', () => {
 
   /** Signs up and opens the e-mailed activation link, like a new user does: then signed in. */
   async function signUpAndActivate(client: Client, payload: Record<string, string>) {
-    const res = await client('POST', '/auth/sign-up/email', payload);
+    const res = await client('POST', '/auth/sign-up/email', { acceptedTerms: true, ...payload });
     if (res.statusCode === 200) expect((await client('GET', activationLink(payload.email!))).statusCode).toBe(200);
     return res;
   }
@@ -1905,7 +1905,7 @@ describe('authentication', () => {
     expect(invite.code).toMatch(/^[A-Z2-9]{10}$/);
 
     const newcomer = browser();
-    const without = await newcomer('POST', '/auth/sign-up/email', { name: 'Jan', email: 'jan@example.com', password: 'Jan-password-1!' });
+    const without = await newcomer('POST', '/auth/sign-up/email', { acceptedTerms: true, name: 'Jan', email: 'jan@example.com', password: 'Jan-password-1!' });
     expect(without.statusCode).toBe(400);
     expect(without.json().code).toBe('INVALID_INVITE');
 
@@ -1934,7 +1934,7 @@ describe('authentication', () => {
     expect((await newcomer('GET', '/invites')).statusCode).toBe(403);
 
     // An invite works once.
-    const again = await browser()('POST', '/auth/sign-up/email', { name: 'Ola', email: 'ola@example.com', password: 'Ola-password-1!', inviteCode: invite.code });
+    const again = await browser()('POST', '/auth/sign-up/email', { acceptedTerms: true, name: 'Ola', email: 'ola@example.com', password: 'Ola-password-1!', inviteCode: invite.code });
     expect(again.json().code).toBe('INVALID_INVITE');
     expect((await admin('GET', '/invites')).json()[0]).toMatchObject({ code: invite.code, usedBy: expect.any(String) });
 
@@ -1946,7 +1946,7 @@ describe('authentication', () => {
     const { code } = (await authApp.inject({ method: 'POST', url: '/invites', headers: { cookie: await ownerCookie() }, payload: {} })).json();
     const user = browser();
     const payload = { name: 'Nowy', email: 'nowy@example.com', password: 'Nowy-password-1!', inviteCode: code, language: 'pl' };
-    const res = await user('POST', '/auth/sign-up/email', payload);
+    const res = await user('POST', '/auth/sign-up/email', { acceptedTerms: true, ...payload });
     expect(res.statusCode).toBe(200);
     expect(res.json().token).toBeNull();
     expect((await user('GET', '/me')).statusCode).toBe(401);
@@ -1976,7 +1976,7 @@ describe('authentication', () => {
 
     // Signing up again with a taken address says so, creates nothing and keeps the invite.
     const { code: fresh } = (await authApp.inject({ method: 'POST', url: '/invites', headers: { cookie: await ownerCookie() }, payload: {} })).json();
-    const again = await browser()('POST', '/auth/sign-up/email', { ...payload, email: ' Nowy@Example.com ', inviteCode: fresh });
+    const again = await browser()('POST', '/auth/sign-up/email', { acceptedTerms: true, ...payload, email: ' Nowy@Example.com ', inviteCode: fresh });
     expect(again.statusCode).toBe(422);
     expect(again.json().code).toBe('USER_ALREADY_EXISTS');
     const invites = (await authApp.inject({ url: '/invites', headers: { cookie: await ownerCookie() } })).json();
@@ -2024,7 +2024,7 @@ describe('authentication', () => {
 
     // Deleting the code closes it.
     await admin('DELETE', `/invites/${stored.id}`);
-    const late = await browser()('POST', '/auth/sign-up/email', { name: 'Cezary', email: 'cezary@group.example', password: 'Group-password-1!', inviteCode: 'DIXIGROUP26' });
+    const late = await browser()('POST', '/auth/sign-up/email', { acceptedTerms: true, name: 'Cezary', email: 'cezary@group.example', password: 'Group-password-1!', inviteCode: 'DIXIGROUP26' });
     expect(late.json().code).toBe('INVALID_INVITE');
   });
 
@@ -2044,7 +2044,7 @@ describe('authentication', () => {
     const user = browser();
     const { code } = (await authApp.inject({ method: 'POST', url: '/invites', headers: { cookie: await ownerCookie() }, payload: {} })).json();
     for (const weak of ['Short-1!', 'no-upper-case-1!', 'NO-LOWER-CASE-1!', 'NoSpecialChar1']) {
-      const res = await user('POST', '/auth/sign-up/email', { name: 'Weak', email: 'weak@example.com', password: weak, inviteCode: code });
+      const res = await user('POST', '/auth/sign-up/email', { acceptedTerms: true, name: 'Weak', email: 'weak@example.com', password: weak, inviteCode: code });
       expect(res.statusCode).toBe(400);
       expect(res.json().code).toBe('PASSWORD_TOO_WEAK');
     }

@@ -30,6 +30,7 @@ import { apiKeyRoutes } from './routes/api-keys.ts';
 import { botRoutes } from './routes/bot.ts';
 import { authRoutes } from './routes/auth.ts';
 import { basisRoutes } from './routes/basis.ts';
+import { billingRoutes } from './routes/billing.ts';
 import { calendarRoutes } from './routes/calendar.ts';
 import { emailRoutes } from './routes/email.ts';
 import { newsRoutes } from './routes/news.ts';
@@ -40,6 +41,7 @@ import { spreadRoutes } from './routes/spreads.ts';
 import { strategyRoutes } from './routes/strategies.ts';
 import { tradeRoutes } from './routes/trades.ts';
 import { createQuoteProvider, type QuoteProvider } from './services/basis.ts';
+import { stripeBilling, type BillingProvider } from './services/billing.ts';
 import { capitalLiveSource, type LiveSource } from './services/live-prices.ts';
 import { capitalProvider, type MarketDataProvider } from './services/market-data.ts';
 import { forexFactorySource, type CalendarSource } from './services/calendar.ts';
@@ -59,6 +61,7 @@ export async function buildApp({
   calendar = forexFactorySource,
   news = financialJuiceSource,
   mailer,
+  billing,
   logger = true,
   rateLimits = env.NODE_ENV !== 'test',
 }: {
@@ -74,6 +77,8 @@ export async function buildApp({
   news?: NewsSource;
   /** Defaults to SMTP_URL, or to writing e-mails to the log when it is not set. */
   mailer?: Mailer;
+  /** Payments; defaults to Stripe when its keys are set, else none. */
+  billing?: BillingProvider | null;
   logger?: boolean;
   /** Request limits per client (off in tests unless a test turns them on). */
   rateLimits?: boolean;
@@ -105,6 +110,10 @@ export async function buildApp({
   app.decorate('uploadDir', uploadDir);
   const outgoing = mailer ?? (env.SMTP_URL ? smtpMailer(env.SMTP_URL, env.MAIL_FROM) : logMailer((msg) => app.log.info(msg)));
   app.decorate('mailer', outgoing);
+  app.decorate(
+    'billing',
+    billing !== undefined ? billing : env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET ? stripeBilling(env.STRIPE_SECRET_KEY, env.STRIPE_WEBHOOK_SECRET) : null,
+  );
   app.decorate('auth', createAuth({ db, env, mailer: outgoing }));
 
   app.setErrorHandler((error, req, reply) => {
@@ -171,6 +180,7 @@ export async function buildApp({
   await app.register(analysisRoutes);
   await app.register(backtestRoutes);
   await app.register(demoRoutes);
+  await app.register(billingRoutes);
   await app.register(apiKeyRoutes);
   await app.register(botRoutes);
   await app.register(strategyRoutes);
