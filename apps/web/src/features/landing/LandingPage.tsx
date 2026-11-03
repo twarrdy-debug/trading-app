@@ -10,6 +10,7 @@ import { InstrumentBadge, InstrumentLogo } from '../../components/ui/InstrumentB
 import { useLanguage, useSetLanguage, useT } from '../../i18n/index.tsx';
 import { formatAmount, formatNumber } from '../../lib/format.ts';
 import { usePageMeta } from '../../lib/seo.ts';
+import { LegalLinks } from '../legal/LegalPage.tsx';
 import { NavIcon, type NavIconName } from '../../layout/NavIcon.tsx';
 import { SAMPLE_CURVE } from '../dashboard/DashboardPreview.tsx';
 
@@ -221,6 +222,9 @@ export function LandingPage() {
           <a href={`mailto:${SUPPORT_EMAIL}`} className="text-dim underline-offset-2 hover:text-ink hover:underline">
             {SUPPORT_EMAIL}
           </a>
+        </span>
+        <span>
+          <LegalLinks />
         </span>
         <span>{t.copyright(new Date().getFullYear())}</span>
       </footer>

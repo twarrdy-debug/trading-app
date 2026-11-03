@@ -1078,6 +1078,7 @@ export const pl = {
     verifying: 'Sprawdzanie…',
     lostBoth: 'Nie masz ani telefonu, ani kodów zapasowych? Skontaktuj się z administratorem.',
     name: 'Imię lub nick',
+    acceptTerms: 'Mam ukończone 18 lat i akceptuję:',
     inviteCode: 'Kod zaproszenia',
     inviteHint: 'otrzymasz go od administratora',
     signIn: 'Zaloguj się',
@@ -1542,6 +1543,10 @@ export const pl = {
     tradesFull: (limit: number) => `Dziennik planu Standard jest pełny (${limit} transakcji). Więcej w planach Pro i VIP.`,
     accountLimit: 'W planie Standard masz jedno konto handlowe. Więcej kont w planach Pro i VIP.',
   },
+  legal: {
+    terms: 'Regulamin',
+    privacy: 'Polityka prywatności',
+  },
   billing: {
     title: 'Wybierz plan',
     subtitle: 'Bez umowy na czas określony. Zrezygnować możesz w każdej chwili.',
@@ -1561,6 +1566,7 @@ export const pl = {
     proText: 'Całe AlphaLogFX, bez limitów.',
     proIncludes: 'Wszystko ze Standard, a do tego:',
     proFeatures: ['Transakcje bez limitu', 'Wiele kont i spinanie kont', 'Analiza rynku z wykresem na żywo', 'Backtesting', 'Newsy z alertami', 'Kalkulator PRO'],
+    acceptTerms: 'Akceptuję zasady i chcę, aby Pro zaczęło działać od razu. Subskrypcja odnawia się automatycznie, a w ciągu 14 dni mogę odstąpić od umowy.',
     goPro: 'Przejdź na Pro',
     opening: 'Otwieranie…',
     error: 'Nie udało się otworzyć strony płatności. Spróbuj ponownie.',

@@ -121,6 +121,8 @@ export const updateSettingsSchema = z
 export const checkoutSchema = z.object({
   interval: z.enum(BILLING_INTERVALS),
   currency: z.enum(BILLING_CURRENCIES).optional(),
+  /** The buyer ticked the Terms, including the start of the service at once. */
+  acceptedTerms: z.literal(true),
 });
 
 /** E-mails a user can unsubscribe from with the link in each of them. */

@@ -67,7 +67,7 @@ export const useBilling = () => useQuery({ queryKey: ['billing'], queryFn: () =>
 const leaveFor = ({ url }: { url: string }) => window.location.assign(url);
 export const useCheckout = () =>
   useMutation({
-    mutationFn: (json: { interval: BillingInterval; currency: BillingCurrency }) => api<{ url: string }>('/billing/checkout', { method: 'POST', json }),
+    mutationFn: (json: { interval: BillingInterval; currency: BillingCurrency; acceptedTerms: true }) => api<{ url: string }>('/billing/checkout', { method: 'POST', json }),
     onSuccess: leaveFor,
   });
 export const usePortal = () => useMutation({ mutationFn: () => api<{ url: string }>('/billing/portal', { method: 'POST' }), onSuccess: leaveFor });

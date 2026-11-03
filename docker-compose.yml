@@ -2,8 +2,16 @@
 # (template: deploy/docker/env.example). Cloudflare Tunnel points at this host's port 8080.
 name: trading-app
 
+# Logs stay small and short-lived: at the usual volume this keeps well under 30 days (privacy policy).
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
 services:
   db:
+    logging: *logging
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -19,6 +27,7 @@ services:
       retries: 10
 
   api:
+    logging: *logging
     build:
       context: .
       target: api
@@ -37,6 +46,7 @@ services:
         condition: service_healthy
 
   web:
+    logging: *logging
     build:
       context: .
       target: web

@@ -133,10 +133,9 @@ Migracje bazy i nowe dane startowe wchodzą przy starcie api.
 ## Kopie zapasowe
 
 - **Cała maszyna:** Proxmox → Datacenter → Backup → zadanie dla tej VM (np. co noc).
-- **Baza osobno**, codziennie o 3:00, 14 dni wstecz:
+- **Baza osobno**, codziennie o 3:00, 30 dni wstecz (obiecuje to polityka prywatności):
   ```sh
-  mkdir -p /var/backups/trading
-  echo '0 3 * * * root cd /opt/trading-app && docker compose exec -T db pg_dump -U trading -Fc trading > /var/backups/trading/trading-$(date +\%F).dump && find /var/backups/trading -mtime +14 -delete' > /etc/cron.d/trading-backup
+  echo '0 3 * * * root /opt/trading-app/deploy/docker/backup.sh 2>&1 | logger -t trading-backup' > /etc/cron.d/trading-backup
   ```
   Przywrócenie: `docker compose exec -T db pg_restore -U trading -d trading --clean < plik.dump`.
 - **Zrzuty ekranu** są w wolumenie `trading-app_uploads` (w kopii maszyny).

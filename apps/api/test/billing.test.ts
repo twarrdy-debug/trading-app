@@ -83,7 +83,7 @@ const newUser = async (role: 'standard' | 'pro' | 'vip' = 'standard', language: 
 const headers = (id: string) => ({ 'x-user-id': id });
 const roleOf = async (id: string) => (await database.db.select({ role: users.role }).from(users).where(eq(users.id, id)))[0]!.role;
 const rowOf = async (id: string) => (await database.db.select().from(subscriptions).where(eq(subscriptions.userId, id)))[0]!;
-const checkout = (id: string, interval: 'month' | 'year' = 'month') => app.inject({ method: 'POST', url: '/billing/checkout', headers: headers(id), payload: { interval } });
+const checkout = (id: string, interval: 'month' | 'year' = 'month') => app.inject({ method: 'POST', url: '/billing/checkout', headers: headers(id), payload: { interval, acceptedTerms: true } });
 const webhook = (subscriptionId: string | null, signature = 'good') =>
   app.inject({ method: 'POST', url: '/billing/webhook', headers: { 'content-type': 'application/json', 'stripe-signature': signature }, payload: JSON.stringify({ subscriptionId }) });
 
@@ -187,6 +187,56 @@ describe('buying Pro', () => {
     await webhook(old);
     expect(await roleOf(user.id)).toBe('pro');
     expect((await rowOf(user.id)).stripeSubscriptionId).toBe('sub_new');
+  });
+});
+
+describe('the Terms', () => {
+  it('must be ticked to buy, and the acceptance is kept', async () => {
+    const user = await newUser();
+    const refused = await app.inject({ method: 'POST', url: '/billing/checkout', headers: headers(user.id), payload: { interval: 'month' } });
+    expect(refused.statusCode).toBe(400);
+    expect((await checkout(user.id)).statusCode).toBe(200);
+    const [row] = await database.db.select({ at: users.termsAcceptedAt }).from(users).where(eq(users.id, user.id));
+    expect(row!.at).toBeInstanceOf(Date);
+  });
+});
+
+describe('open registration', () => {
+  let open: App;
+  let db: Database;
+  const signUp = (payload: object) => open.inject({ method: 'POST', url: '/auth/sign-up/email', headers: { 'content-type': 'application/json', origin: 'http://localhost:5173' }, payload: JSON.stringify(payload) });
+  beforeAll(async () => {
+    const env = loadEnv({ NODE_ENV: 'test', DATABASE_URL: 'memory://', UPLOAD_DIR: uploadDir, REGISTRATION: 'open' });
+    db = createDatabase(env.DATABASE_URL);
+    await db.migrate();
+    await seed(db.db, env.DEV_USER_EMAIL);
+    open = await buildApp({ db: db.db, env, billing, mailer: { send: async () => undefined }, logger: false });
+  });
+  afterAll(async () => {
+    await open.close();
+    await db.close();
+  });
+
+  it('needs no code, gives Standard and keeps the acceptance of the Terms', async () => {
+    const account = { name: 'Nowy', email: 'open1@example.com', password: 'Open-password-1!' };
+    expect((await signUp(account)).statusCode).toBe(400);
+    expect((await signUp({ ...account, acceptedTerms: true })).statusCode).toBe(200);
+    const [user] = await db.db.select().from(users).where(eq(users.email, account.email));
+    expect(user!.role).toBe('standard');
+    expect(user!.termsAcceptedAt).toBeInstanceOf(Date);
+  });
+
+  it('still honours a valid code and ignores an expired one', async () => {
+    const admin = (await db.db.select().from(users).where(eq(users.email, 'admin@trading.local')))[0]!;
+    const made = await open.inject({ method: 'POST', url: '/invites', headers: { 'x-user-id': admin.id }, payload: { role: 'pro', multiUse: false } });
+    const code = made.json().code as string;
+    const account = { name: 'Zaproszony', email: 'open2@example.com', password: 'Open-password-1!', acceptedTerms: true, inviteCode: code };
+    expect((await signUp(account)).statusCode).toBe(200);
+    expect((await db.db.select().from(users).where(eq(users.email, account.email)))[0]!.role).toBe('pro');
+
+    const late = { ...account, email: 'open3@example.com' };
+    expect((await signUp(late)).statusCode).toBe(200);
+    expect((await db.db.select().from(users).where(eq(users.email, late.email)))[0]!.role).toBe('standard');
   });
 });
 

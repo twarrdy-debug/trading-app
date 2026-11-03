@@ -127,6 +127,8 @@ export const users = pgTable('users', {
   /** Wrong passwords in a row; at SIGN_IN_ATTEMPTS the account locks until the password is reset. */
   failedSignIns: smallint('failed_sign_ins').notNull().default(0),
   signInLockedAt: timestamp('sign_in_locked_at', { withTimezone: true }),
+  /** The latest acceptance of the Terms, at sign-up or when buying; null from before the rule. */
+  termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }),
   /** E-mails the user can turn off (settings or the link in each one): week ahead, day summary, what's new. */
   emailWeekAhead: boolean('email_week_ahead').notNull().default(true),
   emailDaySummary: boolean('email_day_summary').notNull().default(true),

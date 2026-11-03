@@ -6,6 +6,7 @@ import { useBilling, useCheckout, useMe } from '../../api/hooks.ts';
 import { Button } from '../../components/ui/Button.tsx';
 import { Segmented } from '../../components/ui/Field.tsx';
 import { useLanguage, useT } from '../../i18n/index.tsx';
+import { LegalLinks } from '../legal/LegalPage.tsx';
 import { UpgradeLink } from '../plans/PlanLocked.tsx';
 
 function Check({ muted = false }: { muted?: boolean }) {
@@ -83,6 +84,7 @@ export function PricingPage() {
   const { data: billing } = useBilling();
   const checkout = useCheckout();
   const [interval, setInterval] = useState<BillingInterval>('year');
+  const [accepted, setAccepted] = useState(false);
   const currency: BillingCurrency = language === 'pl' ? 'pln' : 'usd';
   const prices = PRO_PRICES[currency];
   const money = t.money;
@@ -134,9 +136,17 @@ export function PricingPage() {
             <FoundersOffer code={billing.founder.code} left={billing.founder.left} money={money} price={prices.founderYear} yearPrice={prices.year} />
           )}
           {billing?.canBuy ? (
-            <Button variant="primary" size="lg" className="w-full" disabled={checkout.isPending} onClick={() => checkout.mutate({ interval, currency })}>
-              {checkout.isPending ? t.opening : t.goPro}
-            </Button>
+            <>
+              <label className="flex items-start gap-2.5 text-[13px] text-dim">
+                <input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-(--accent)" />
+                <span>
+                  {t.acceptTerms} <LegalLinks />
+                </span>
+              </label>
+              <Button variant="primary" size="lg" className="w-full" disabled={checkout.isPending || !accepted} onClick={() => checkout.mutate({ interval, currency, acceptedTerms: true })}>
+                {checkout.isPending ? t.opening : t.goPro}
+              </Button>
+            </>
           ) : standard ? (
             <UpgradeLink className="flex h-12 w-full items-center justify-center rounded-(--radius-control) bg-accent text-[15px] font-bold text-on-accent no-underline hover:brightness-105" />
           ) : (

@@ -186,7 +186,7 @@ export async function startCheckout(
   db: DB,
   user: CurrentUser,
   publicUrl: string,
-  { interval, currency }: { interval: BillingInterval; currency?: BillingCurrency },
+  { interval, currency }: { interval: BillingInterval; currency?: BillingCurrency; acceptedTerms: true },
   log: FastifyBaseLogger,
 ) {
   if (!billing) throw new HttpError(404, 'billingOff');
@@ -195,6 +195,7 @@ export async function startCheckout(
   if (subscriptionGivesPro(row?.status)) throw new HttpError(409, 'billingActive');
 
   return outside(log, async () => {
+    await db.update(users).set({ termsAcceptedAt: new Date() }).where(eq(users.id, user.id));
     let customerId = row?.stripeCustomerId;
     if (!customerId) {
       customerId = await billing.createCustomer({ email: user.email, name: user.displayName, userId: user.id });

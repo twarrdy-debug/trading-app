@@ -95,7 +95,7 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
         create: {
           // Only a real sign-up: an address already taken gets the same answer but creates nobody.
           after: async (user, ctx) => {
-            if (ctx?.path === '/sign-up/email') await finishSignUp(db, user.id, (ctx.body ?? {}) as Record<string, unknown>, env.REGISTRATION === 'invite');
+            if (ctx?.path === '/sign-up/email') await finishSignUp(db, user.id, (ctx.body ?? {}) as Record<string, unknown>);
           },
         },
       },
@@ -137,6 +137,7 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
           if (row?.signInLockedAt) throw new APIError('FORBIDDEN', { message: 'Account locked', code: 'ACCOUNT_LOCKED' });
         }
         if (ctx.path !== '/sign-up/email') return;
+        if (ctx.body?.acceptedTerms !== true) throw new APIError('BAD_REQUEST', { message: 'The Terms must be accepted', code: 'TERMS_REQUIRED' });
         if (env.REGISTRATION === 'invite') {
           const invite = await findUsableInvite(db, ctx.body?.inviteCode, ctx.body?.email);
           if (!invite) throw new APIError('BAD_REQUEST', { message: 'Invalid or used invite code', code: 'INVALID_INVITE' });

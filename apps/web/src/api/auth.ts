@@ -40,7 +40,7 @@ export const authApi = {
   disableTwoFactor: (password: string) => authCall('/two-factor/disable', { password }),
   /** New backup codes; the old ones stop working. */
   newBackupCodes: (password: string) => authCall<{ backupCodes: string[] }>('/two-factor/generate-backup-codes', { password }),
-  signUp: (input: { name: string; email: string; password: string; inviteCode?: string; language: string; timezone: string }) =>
+  signUp: (input: { name: string; email: string; password: string; inviteCode?: string; language: string; timezone: string; acceptedTerms: boolean }) =>
     authCall('/sign-up/email', input),
   signOut: () => authCall('/sign-out', {}),
   /** Sends the activation link again (for an account that is not active yet). */

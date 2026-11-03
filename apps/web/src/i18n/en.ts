@@ -1065,6 +1065,7 @@ export const en: Messages = {
     verifying: 'Checking…',
     lostBoth: 'No phone and no backup codes? Contact the administrator.',
     name: 'Name or nickname',
+    acceptTerms: 'I am at least 18 years old and accept:',
     inviteCode: 'Invite code',
     inviteHint: 'you get it from an administrator',
     signIn: 'Sign in',
@@ -1525,6 +1526,10 @@ export const en: Messages = {
     tradesFull: (limit) => `The Standard plan's journal is full (${limit} trades). More with Pro and VIP.`,
     accountLimit: 'The Standard plan has one trading account. More accounts with Pro and VIP.',
   },
+  legal: {
+    terms: 'Terms of Service',
+    privacy: 'Privacy Policy',
+  },
   billing: {
     title: 'Choose a plan',
     subtitle: 'No fixed term. You can cancel at any time.',
@@ -1544,6 +1549,7 @@ export const en: Messages = {
     proText: 'All of AlphaLogFX, no limits.',
     proIncludes: 'Everything in Standard, plus:',
     proFeatures: ['Unlimited trades', 'Several accounts, and linked accounts', 'Market analysis with a live chart', 'Backtesting', 'News with alerts', 'Calculator PRO'],
+    acceptTerms: 'I accept the rules and want Pro to start right away. The subscription renews automatically, and I may withdraw within 14 days.',
     goPro: 'Go Pro',
     opening: 'Opening…',
     error: 'Could not open the payment page. Try again.',
