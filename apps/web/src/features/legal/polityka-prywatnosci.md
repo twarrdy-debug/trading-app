@@ -1,7 +1,5 @@
 # Polityka prywatności AlphaLogFX
 
-> **Projekt do weryfikacji przez prawnika.** Pola w [NAWIASACH] wymagają uzupełnienia przed uruchomieniem sprzedaży.
-
 Obowiązuje od: 1 listopada 2026
 
 ## 1. Kto jest administratorem danych

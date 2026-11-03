@@ -1,7 +1,5 @@
 # AlphaLogFX Terms of Service
 
-> **Draft for review by a lawyer.** Fields in [BRACKETS] must be filled in before sales start.
-
 Effective from: 1 November 2026
 
 ## § 1. General
