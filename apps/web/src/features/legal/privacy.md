@@ -17,6 +17,7 @@ Contact on personal data: contact@alphalogfx.com, technical help: support@alphal
 | Trading accounts and trades (instruments, prices, sizes, results, notes, emotions, screenshots, import files) | you enter or import them | keeping the journal, statistics, discipline monitor |
 | Subscription data (plan, status, dates, customer identifiers at the payment operator, date of accepting the Terms) | created at purchase | running the subscription and accounting |
 | Invitation code, if you use one | you give it when signing up | giving the plan of the invitation |
+| Your referrer, if you sign up with their link or code | the link or code at sign-up | settling the referral commission |
 | IP address, browser, session time | automatically when signing in | security, preventing abuse, sign-in sessions |
 | Two-step sign-in data (2FA), if you turn it on | generated in the app | securing the account |
 
@@ -25,7 +26,7 @@ Contact on personal data: contact@alphalogfx.com, technical help: support@alphal
 ## 3. Legal bases
 
 - **Performing the contract** (Art. 6(1)(b) GDPR): account, journal, statistics, subscription, technical e-mails (activation, password reset).
-- **Legitimate interest** (Art. 6(1)(f) GDPR): security, preventing abuse, pursuing claims, the “Week ahead”, “Day summary” and “What's new” e-mails (you can turn them off at any time in Settings → E-mails or with the link in the e-mail).
+- **Legitimate interest** (Art. 6(1)(f) GDPR): security, preventing abuse, pursuing claims, settling referrals, the “Week ahead”, “Day summary” and “What's new” e-mails (you can turn them off at any time in Settings → E-mails or with the link in the e-mail).
 - **Legal obligation** (Art. 6(1)(c) GDPR): keeping data required by tax and accounting rules.
 
 ## 4. Who receives your data
@@ -39,6 +40,8 @@ Data is processed only by those needed to run the service:
 - **Apple (iCloud+)**: the contact@ and support@ mailboxes, if you write to us.
 
 Transfers outside the European Economic Area rely on a European Commission decision (EU-U.S. Data Privacy Framework) or standard contractual clauses.
+
+The person who referred you sees only the number of sign-ups and the date, plan and amount of payments, not your name or e-mail address.
 
 We fetch market data and the calendar from outside providers on the server side. We do not pass your personal data to them.
 

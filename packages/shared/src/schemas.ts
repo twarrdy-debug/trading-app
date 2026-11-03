@@ -118,6 +118,19 @@ export const updateSettingsSchema = z
   .partial();
 
 /** Buying Pro; without a currency the buyer's language decides (Polish pays in zloty). */
+const referralCode = z.string().trim().toUpperCase().regex(/^[A-Z0-9-]{3,20}$/, 'validation.referralCode');
+const referralPercent = z.number().int().min(1).max(100);
+
+export const createPartnerSchema = z.object({
+  email: z.string().trim().toLowerCase().email(),
+  code: referralCode,
+  percent: referralPercent.default(30),
+});
+
+export const updatePartnerSchema = z.object({ percent: referralPercent.optional(), active: z.boolean().optional() });
+
+export const partnerPayoutSchema = z.object({ currency: z.enum(BILLING_CURRENCIES) });
+
 export const checkoutSchema = z.object({
   interval: z.enum(BILLING_INTERVALS),
   currency: z.enum(BILLING_CURRENCIES).optional(),

@@ -5,7 +5,7 @@ import { rm } from 'node:fs/promises';
 import path from 'node:path';
 import { and, asc, count, desc, eq, gte, isNotNull, isNull, max, notInArray, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.ts';
-import { apiKeys, authSessions, authTwoFactors, economicEvents, instrumentCurrencies, instruments, invites, newsItems, strategies, tradeScreenshots, trades, tradingAccounts, users } from '../db/schema.ts';
+import { apiKeys, authSessions, authTwoFactors, economicEvents, instrumentCurrencies, instruments, invites, newsItems, referralCommissions, strategies, tradeScreenshots, trades, tradingAccounts, users } from '../db/schema.ts';
 import { HttpError, notFound } from '../errors.ts';
 import type { CurrentUser } from '../plugins/current-user.ts';
 import { basisOverview } from './basis.ts';
@@ -136,6 +136,9 @@ export async function revokeSessions(db: DB, id: string) {
 export async function deleteUser(db: DB, admin: CurrentUser, id: string, uploadDir: string, billing: BillingProvider | null = null) {
   notSelf(admin, id);
   await getUser(db, id);
+  // What was earned or paid stays on record, so a partner with commissions cannot be deleted.
+  const [commission] = await db.select({ id: referralCommissions.id }).from(referralCommissions).where(eq(referralCommissions.partnerId, id)).limit(1);
+  if (commission) throw new HttpError(409, 'partnerLinked');
   // Before the row goes: a deleted user must not keep being charged.
   await stopPayments(db, billing, id);
   const files = await db

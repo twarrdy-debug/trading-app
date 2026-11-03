@@ -2,6 +2,7 @@ import type {
   AccountListItem,
   AccountSummary,
   AdminInstrument,
+  AdminPartner,
   AdminStats,
   AdminUser,
   SystemStatus,
@@ -15,6 +16,7 @@ import type {
   AccountDayBalance,
   CreatedApiKey,
   BillingState,
+  PartnerPanel,
   BacktestCandles,
   BacktestSession,
   BacktestSessionListItem,
@@ -71,6 +73,18 @@ export const useCheckout = () =>
     onSuccess: leaveFor,
   });
 export const usePortal = () => useMutation({ mutationFn: () => api<{ url: string }>('/billing/portal', { method: 'POST' }), onSuccess: leaveFor });
+export const useReferrals = () => useQuery({ queryKey: ['referrals'], queryFn: () => api<PartnerPanel>('/referrals') });
+export const useAdminPartners = () => useQuery({ queryKey: ['admin', 'partners'], queryFn: () => api<AdminPartner[]>('/admin/partners') });
+function usePartnerChange<T>(call: (input: T) => Promise<unknown>) {
+  const client = useQueryClient();
+  return useMutation({ mutationFn: call, onSuccess: () => client.invalidateQueries({ queryKey: ['admin', 'partners'] }) });
+}
+export const useCreatePartner = () =>
+  usePartnerChange((json: { email: string; code: string; percent: number }) => api('/admin/partners', { method: 'POST', json }));
+export const useUpdatePartner = () =>
+  usePartnerChange(({ id, ...json }: { id: string; percent?: number; active?: boolean }) => api(`/admin/partners/${id}`, { method: 'PATCH', json }));
+export const usePartnerPayout = () =>
+  usePartnerChange(({ id, currency }: { id: string; currency: BillingCurrency }) => api(`/admin/partners/${id}/payout`, { method: 'POST', json: { currency } }));
 export const useInstruments = () =>
   useQuery({ queryKey: ['instruments'], queryFn: () => api<Instrument[]>('/instruments'), ...STATIC });
 /** Adds or removes a favourite instrument; the cached list updates at once. */

@@ -8,6 +8,7 @@ import type { createApiKey, listApiKeys } from './services/api-keys.ts';
 import type { accountDayBalance, listAdjustments } from './services/accounts.ts';
 import type { backtestCandles, getBacktestSession, listBacktestSessions } from './services/backtest.ts';
 import type { analysisOverview, marketAnalysis } from './services/market-analysis.ts';
+import type { listPartners, PartnerPanel as PartnerPanelData } from './services/referrals.ts';
 import type { eventHistory, listEvents, RefreshResult } from './services/calendar.ts';
 import type { invites } from './db/schema.ts';
 import type { importMt5 } from './services/mt5-import.ts';
@@ -24,6 +25,9 @@ export type Jsonify<T> = T extends Date
     : T extends object
       ? { [K in keyof T]: Jsonify<T[K]> }
       : T;
+
+export type PartnerPanel = Jsonify<PartnerPanelData>;
+export type AdminPartner = Jsonify<Awaited<ReturnType<typeof listPartners>>[number]>;
 
 /** `tradesUsed` comes with GET /me (not with the answers of settings changes). */
 export type PublicUser = Jsonify<ReturnType<typeof toPublicUser>> & { tradesUsed?: number | null };

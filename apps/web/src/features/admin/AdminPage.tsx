@@ -7,6 +7,7 @@ import { AdminStats } from './AdminStats.tsx';
 import { AdminSystem } from './AdminSystem.tsx';
 import { AdminUsers } from './AdminUsers.tsx';
 import { AdminWhatsNew } from './AdminWhatsNew.tsx';
+import { AdminPartners } from '../referrals/Referrals.tsx';
 
 /** URL slug → section; the slugs are Polish like the other paths. */
 const SECTIONS = [
@@ -15,6 +16,7 @@ const SECTIONS = [
   { slug: 'system', key: 'system' },
   { slug: 'instrumenty', key: 'instruments' },
   { slug: 'zaproszenia', key: 'invites' },
+  { slug: 'partnerzy', key: 'partners' },
   { slug: 'co-nowego', key: 'whatsNew' },
 ] as const;
 
@@ -58,6 +60,7 @@ export function AdminPage() {
           {current.key === 'system' && <AdminSystem timezone={me.settings.timezone} />}
           {current.key === 'instruments' && <AdminInstruments />}
           {current.key === 'whatsNew' && <AdminWhatsNew />}
+          {current.key === 'partners' && <AdminPartners />}
           {current.key === 'invites' && (
             <section className="card p-5">
               <InvitesManager timezone={me.settings.timezone} />

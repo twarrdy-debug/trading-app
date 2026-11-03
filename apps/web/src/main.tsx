@@ -48,6 +48,13 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: '/prywatnosc', component: PrivacyPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/logowanie', component: LoginPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/rejestracja', component: RegisterPage }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/r/$code',
+    beforeLoad: ({ params }) => {
+      throw redirect({ to: '/rejestracja', search: { ref: params.code }, replace: true });
+    },
+  }),
   createRoute({ getParentRoute: () => rootRoute, path: '/reset-hasla', component: ForgotPasswordPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/nowe-haslo', component: ResetPasswordPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/aktywacja', component: ActivatePage }),

@@ -13,6 +13,7 @@ import type { DB } from '../db/client.ts';
 import { subscriptions, users } from '../db/schema.ts';
 import { HttpError } from '../errors.ts';
 import type { CurrentUser } from '../plugins/current-user.ts';
+import type { PaidInvoice, RefundedPayment } from './referrals.ts';
 
 /** Stripe's names for what `npm run stripe:setup` creates; prices are found by these. */
 export const PRICE_KEYS: Record<BillingInterval, string> = { month: 'pro_month', year: 'pro_year' };
@@ -44,8 +45,10 @@ export interface BillingProvider {
   checkout(input: CheckoutRequest): Promise<{ id: string; url: string }>;
   expireCheckout(id: string): Promise<void>;
   portal(customerId: string, returnUrl: string): Promise<string>;
-  /** Checks the signature (throws when it is wrong) and names the subscription the event concerns. */
-  parseEvent(rawBody: Buffer, signature: string): { subscriptionId: string | null };
+  /** Checks the signature (throws when it is wrong) and says what the event concerns. */
+  parseEvent(rawBody: Buffer, signature: string): { subscriptionId: string | null; payment?: PaidInvoice; refund?: RefundedPayment };
+  /** The invoice a payment settled, for refunds, which name only the payment. */
+  invoiceOfPayment(paymentIntentId: string): Promise<string | null>;
   subscription(id: string): Promise<BillingSubscription | null>;
   cancel(id: string): Promise<void>;
   founderSeatsLeft(): Promise<number>;
@@ -104,9 +107,37 @@ export function stripeBilling(secretKey: string, webhookSecret: string): Billing
         case 'customer.subscription.updated':
         case 'customer.subscription.deleted':
           return { subscriptionId: event.data.object.id };
+        case 'invoice.paid': {
+          const invoice = event.data.object;
+          const customerId = idOf(invoice.customer);
+          if (!invoice.id || !customerId) return { subscriptionId: null };
+          const period = invoice.lines.data[0]?.period;
+          const yearly = period != null && period.end - period.start > 40 * 86_400;
+          const discounted = (invoice.total_discount_amounts ?? []).some((d) => d.amount > 0);
+          return {
+            subscriptionId: null,
+            payment: {
+              invoiceId: invoice.id,
+              customerId,
+              amount: invoice.amount_paid,
+              currency: invoice.currency,
+              paidAt: new Date((invoice.status_transitions.paid_at ?? event.created) * 1000),
+              // The founders' code is the only discount on sale, and only on the yearly plan.
+              plan: !yearly ? 'month' : discounted ? 'founder' : 'year',
+            },
+          };
+        }
+        case 'charge.refunded': {
+          const paymentIntentId = idOf(event.data.object.payment_intent);
+          return paymentIntentId ? { subscriptionId: null, refund: { paymentIntentId, refunded: event.data.object.amount_refunded } } : { subscriptionId: null };
+        }
         default:
           return { subscriptionId: null };
       }
+    },
+    async invoiceOfPayment(paymentIntentId) {
+      const found = await stripe.invoicePayments.list({ payment: { type: 'payment_intent', payment_intent: paymentIntentId }, limit: 1 });
+      return idOf(found.data[0]?.invoice);
     },
     async subscription(id) {
       const sub = await stripe.subscriptions.retrieve(id, { expand: ['latest_invoice.discounts'] });

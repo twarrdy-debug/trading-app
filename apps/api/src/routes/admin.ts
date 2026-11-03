@@ -1,4 +1,4 @@
-import { adminUpdateUserSchema, idParams, updateInstrumentSchema, whatsNewSchema } from '@trading/shared';
+import { adminUpdateUserSchema, createPartnerSchema, idParams, partnerPayoutSchema, updateInstrumentSchema, updatePartnerSchema, whatsNewSchema } from '@trading/shared';
 import { eq } from 'drizzle-orm';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { users } from '../db/schema.ts';
@@ -7,6 +7,7 @@ import { requireRole } from '../plugins/current-user.ts';
 import { appStats, deleteUser, listAllInstruments, listUsers, resetTwoFactor, revokeSessions, systemStatus, updateInstrument, updateUser } from '../services/admin.ts';
 import { sendWhatsNew } from '../services/digests.ts';
 import { refreshNews } from '../services/news.ts';
+import { createPartner, listPartners, markPayout, updatePartner } from '../services/referrals.ts';
 
 const tags = ['admin'];
 
@@ -17,6 +18,15 @@ export const adminRoutes: FastifyPluginAsyncZod = async (app) => {
   app.addHook('preHandler', async (req) => requireRole(req, 'admin'));
 
   app.get('/admin/users', { schema: { tags } }, () => listUsers(app.db));
+
+  app.get('/admin/partners', { schema: { tags } }, () => listPartners(app.db));
+
+  app.post('/admin/partners', { schema: { tags, body: createPartnerSchema } }, (req) => createPartner(app.db, req.body));
+
+  app.patch('/admin/partners/:id', { schema: { tags, params: idParams, body: updatePartnerSchema } }, (req) => updatePartner(app.db, req.params.id, req.body));
+
+  /** The admin has transferred what was ready in this currency. */
+  app.post('/admin/partners/:id/payout', { schema: { tags, params: idParams, body: partnerPayoutSchema } }, (req) => markPayout(app.db, req.params.id, req.body.currency));
 
   app.patch('/admin/users/:id', { schema: { tags, params: idParams, body: adminUpdateUserSchema } }, (req) =>
     updateUser(app.db, req.user, req.params.id, req.body),
