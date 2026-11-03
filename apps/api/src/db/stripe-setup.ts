@@ -10,7 +10,7 @@ if (!key) {
   console.error('Set STRIPE_SECRET_KEY in apps/api/.env first.');
   process.exit(1);
 }
-if (key.startsWith('sk_live') && !process.argv.includes('--live')) {
+if (/^(sk|rk)_live/.test(key) && !process.argv.includes('--live')) {
   console.error('This is a live key. Add --live only if you mean to create the real prices.');
   process.exit(1);
 }
