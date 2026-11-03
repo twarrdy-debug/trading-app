@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp, type App } from '../src/app.ts';
 import { createDatabase, type Database } from '../src/db/client.ts';
-import { subscriptions, users } from '../src/db/schema.ts';
+import { referralCommissions, referralPartners, subscriptions, users } from '../src/db/schema.ts';
 import { seed } from '../src/db/seed-data.ts';
 import { loadEnv } from '../src/env.ts';
 import type { BillingProvider, BillingSubscription, CheckoutRequest } from '../src/services/billing.ts';
@@ -19,6 +19,7 @@ const stripe = {
   seats: 2,
   down: false,
   customers: 0,
+  payments: new Map<string, string>(),
 };
 const billing: BillingProvider = {
   async createCustomer() {
@@ -37,10 +38,15 @@ const billing: BillingProvider = {
   },
   parseEvent(body, signature) {
     if (signature !== 'good') throw new Error('bad signature');
-    return JSON.parse(body.toString()) as { subscriptionId: string | null };
+    const event = JSON.parse(body.toString()) as ReturnType<BillingProvider['parseEvent']>;
+    if (event.payment) event.payment.paidAt = new Date(event.payment.paidAt);
+    return event;
   },
   async subscription(id) {
     return stripe.subs.get(id) ?? null;
+  },
+  async invoiceOfPayment(id) {
+    return stripe.payments.get(id) ?? null;
   },
   async cancel(id) {
     stripe.cancelled.push(id);
@@ -281,5 +287,174 @@ describe('managing and deleting', () => {
     const subId = await buy(user.id);
     expect((await app.inject({ method: 'DELETE', url: `/admin/users/${user.id}` })).statusCode).toBe(200);
     expect(stripe.cancelled).toEqual([subId]);
+  });
+});
+
+describe('referrals', () => {
+  const DAY = 86_400_000;
+  const event = (payload: object) =>
+    app.inject({ method: 'POST', url: '/billing/webhook', headers: { 'content-type': 'application/json', 'stripe-signature': 'good' }, payload: JSON.stringify({ subscriptionId: null, ...payload }) });
+  const admin = async () => (await database.db.select().from(users).where(eq(users.email, 'admin@trading.local')))[0]!;
+  let code = 0;
+  /** A partner and a customer referred by them who already has a Stripe customer. */
+  const pair = async (percent = 30) => {
+    const partner = await newUser();
+    const made = `CODE${++code}`;
+    const res = await app.inject({ method: 'POST', url: '/admin/partners', headers: headers((await admin()).id), payload: { email: partner.email, code: made, percent } });
+    expect(res.statusCode).toBe(200);
+    const customer = await newUser();
+    await database.db.update(users).set({ referredBy: partner.id }).where(eq(users.id, customer.id));
+    await checkout(customer.id);
+    return { partner, customer, customerId: (await rowOf(customer.id)).stripeCustomerId, code: made };
+  };
+  let invoice = 0;
+  const paid = (customerId: string, amount: number, paidAt: Date, plan = 'month', invoiceId = `in_${++invoice}`, currency = 'pln') => {
+    return event({ payment: { invoiceId, customerId, amount, currency, paidAt, plan } }).then((res) => {
+      expect(res.statusCode).toBe(200);
+      return res;
+    });
+  };
+  const panel = async (id: string) => (await app.inject({ url: '/referrals', headers: headers(id) })).json().partner;
+  const ago = (days: number) => new Date(Date.now() - days * DAY);
+
+  it('gives the partner their share, once per invoice, and hides the customer', async () => {
+    const { partner, customer, customerId } = await pair();
+    await paid(customerId, 47200, ago(40), 'year', 'in_same');
+    await paid(customerId, 47200, ago(40), 'year', 'in_same');
+    await paid(customerId, 5900, ago(1), 'month');
+    const view = await panel(partner.id);
+    expect(view.totals).toEqual([{ currency: 'pln', ready: 141.6, waiting: 17.7, paidOut: 0 }]);
+    expect(view.signups).toBe(1);
+    expect(view.customers).toBe(1);
+    expect(view.sales.map((s: { status: string }) => s.status)).toEqual(['waiting', 'ready']);
+    expect(JSON.stringify(view)).not.toContain(customer.email!);
+    expect(JSON.stringify(view)).not.toContain(customer.id);
+  });
+
+  it('counts a year from the first purchase and nothing for accounts nobody referred', async () => {
+    const { partner, customerId } = await pair();
+    await paid(customerId, 5900, ago(400));
+    await paid(customerId, 5900, ago(380));
+    await paid(customerId, 5900, ago(10));
+    const view = await panel(partner.id);
+    expect(view.sales).toHaveLength(2);
+
+    const stranger = await newUser();
+    await checkout(stranger.id);
+    const before = (await database.db.select().from(referralCommissions)).length;
+    await paid((await rowOf(stranger.id)).stripeCustomerId, 5900, ago(1));
+    expect((await database.db.select().from(referralCommissions)).length).toBe(before);
+  });
+
+  it('keeps currencies apart and uses the percent in force when paid', async () => {
+    const { partner, customerId } = await pair(40);
+    await paid(customerId, 5900, ago(40));
+    await app.inject({ method: 'PATCH', url: `/admin/partners/${partner.id}`, headers: headers((await admin()).id), payload: { percent: 10 } });
+    await paid(customerId, 1500, ago(40), 'month', undefined, 'usd');
+    const view = await panel(partner.id);
+    expect(view.totals).toEqual(expect.arrayContaining([
+      { currency: 'pln', ready: 23.6, waiting: 0, paidOut: 0 },
+      { currency: 'usd', ready: 1.5, waiting: 0, paidOut: 0 },
+    ]));
+  });
+
+  it('drops a refunded commission, and takes it back from the next payout once paid out', async () => {
+    const { partner, customerId } = await pair();
+    const adminId = (await admin()).id;
+    stripe.payments.set('pi_new', 'in_new');
+    await paid(customerId, 5900, ago(1), 'month', 'in_new');
+    await event({ refund: { paymentIntentId: 'pi_new', refunded: 5900 } });
+    await event({ refund: { paymentIntentId: 'pi_new', refunded: 5900 } });
+    let view = await panel(partner.id);
+    expect(view.totals[0]).toMatchObject({ waiting: 0, ready: 0 });
+    expect(view.sales[0].status).toBe('refunded');
+
+    stripe.payments.set('pi_old', 'in_old');
+    await paid(customerId, 47200, ago(40), 'year', 'in_old');
+    const payout = await app.inject({ method: 'POST', url: `/admin/partners/${partner.id}/payout`, headers: headers(adminId), payload: { currency: 'pln' } });
+    expect(payout.json()).toEqual({ amount: 141.6, currency: 'pln' });
+    expect((await panel(partner.id)).totals[0]).toMatchObject({ ready: 0, paidOut: 141.6 });
+    expect((await app.inject({ method: 'POST', url: `/admin/partners/${partner.id}/payout`, headers: headers(adminId), payload: { currency: 'pln' } })).statusCode).toBe(400);
+
+    await event({ refund: { paymentIntentId: 'pi_old', refunded: 47200 } });
+    await event({ refund: { paymentIntentId: 'pi_old', refunded: 47200 } });
+    view = await panel(partner.id);
+    expect(view.totals[0]).toMatchObject({ ready: -141.6, paidOut: 141.6 });
+    expect(view.sales.filter((s: { status: string }) => s.status === 'clawback')).toHaveLength(1);
+    expect((await app.inject({ method: 'POST', url: `/admin/partners/${partner.id}/payout`, headers: headers(adminId), payload: { currency: 'pln' } })).statusCode).toBe(400);
+  });
+
+  it('shows the panel to partners only and the admin screens to admins only', async () => {
+    const user = await newUser();
+    expect((await app.inject({ url: '/referrals', headers: headers(user.id) })).json()).toEqual({ partner: null });
+    expect((await app.inject({ url: '/admin/partners', headers: headers(user.id) })).statusCode).toBe(403);
+    expect((await app.inject({ url: '/%61dmin/partners', headers: headers(user.id) })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: '/admin/partners', headers: headers(user.id), payload: { email: user.email, code: 'SELF' } })).statusCode).toBe(403);
+  });
+
+  it('refuses a taken code, a second record and an unknown address', async () => {
+    const { partner, code: taken } = await pair();
+    const adminId = (await admin()).id;
+    const other = await newUser();
+    const add = (email: string, value: string) => app.inject({ method: 'POST', url: '/admin/partners', headers: headers(adminId), payload: { email, code: value } });
+    expect((await add(other.email!, taken)).statusCode).toBe(409);
+    expect((await add(partner.email!, 'FRESH-1')).statusCode).toBe(409);
+    expect((await add('nobody@example.com', 'FRESH-2')).statusCode).toBe(404);
+    expect((await add(other.email!, 'x')).statusCode).toBe(400);
+  });
+
+  it('will not delete a partner who has commissions', async () => {
+    const { partner, customerId } = await pair();
+    await paid(customerId, 5900, ago(1));
+    const res = await app.inject({ method: 'DELETE', url: `/admin/users/${partner.id}`, headers: headers((await admin()).id) });
+    expect(res.statusCode).toBe(409);
+    expect((await database.db.select().from(referralPartners).where(eq(referralPartners.userId, partner.id))).length).toBe(1);
+  });
+});
+
+describe('signing up through a partner', () => {
+  let open: App;
+  let db: Database;
+  const signUp = (payload: object) => open.inject({ method: 'POST', url: '/auth/sign-up/email', headers: { 'content-type': 'application/json', origin: 'http://localhost:5173' }, payload: JSON.stringify({ password: 'Open-password-1!', acceptedTerms: true, name: 'Widz', ...payload }) });
+  const account = async (email: string) => (await db.db.select().from(users).where(eq(users.email, email)))[0]!;
+  let partner: typeof users.$inferSelect;
+  beforeAll(async () => {
+    const env = loadEnv({ NODE_ENV: 'test', DATABASE_URL: 'memory://', UPLOAD_DIR: uploadDir, REGISTRATION: 'open' });
+    db = createDatabase(env.DATABASE_URL);
+    await db.migrate();
+    await seed(db.db, env.DEV_USER_EMAIL);
+    open = await buildApp({ db: db.db, env, billing, mailer: { send: async () => undefined }, logger: false });
+    [partner] = (await db.db.insert(users).values({ email: 'partner@test.local', displayName: 'Partner', role: 'standard' }).returning()) as [typeof users.$inferSelect];
+    await db.db.insert(referralPartners).values({ userId: partner.id, code: 'KUBA' });
+  });
+  afterAll(async () => {
+    await open.close();
+    await db.close();
+  });
+
+  it('assigns the new account, in any letter case, with the plan staying Standard', async () => {
+    expect((await signUp({ email: 'viewer1@example.com', referralCode: 'kuba' })).statusCode).toBe(200);
+    const user = await account('viewer1@example.com');
+    expect(user.referredBy).toBe(partner.id);
+    expect(user.role).toBe('standard');
+  });
+
+  it('refuses an unknown code and creates nobody', async () => {
+    const res = await signUp({ email: 'viewer2@example.com', referralCode: 'NOPE' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('INVALID_REFERRAL');
+    expect(await account('viewer2@example.com')).toBeUndefined();
+  });
+
+  it('refuses a switched-off code but keeps earlier customers assigned', async () => {
+    await db.db.update(referralPartners).set({ active: false }).where(eq(referralPartners.userId, partner.id));
+    expect((await signUp({ email: 'viewer3@example.com', referralCode: 'KUBA' })).statusCode).toBe(400);
+    expect((await account('viewer1@example.com')).referredBy).toBe(partner.id);
+    await db.db.update(referralPartners).set({ active: true }).where(eq(referralPartners.userId, partner.id));
+  });
+
+  it('needs no code at all', async () => {
+    expect((await signUp({ email: 'viewer4@example.com' })).statusCode).toBe(200);
+    expect((await account('viewer4@example.com')).referredBy).toBeNull();
   });
 });

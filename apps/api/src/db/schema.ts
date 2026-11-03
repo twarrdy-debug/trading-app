@@ -1,6 +1,8 @@
 import {
   ASSET_CLASSES,
+  type BillingCurrency,
   type BillingInterval,
+  type ReferralPlan,
   BIASES,
   type ChartStyle,
   DIRECTIONS,
@@ -129,6 +131,8 @@ export const users = pgTable('users', {
   signInLockedAt: timestamp('sign_in_locked_at', { withTimezone: true }),
   /** The latest acceptance of the Terms, at sign-up or when buying; null from before the rule. */
   termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }),
+  /** The partner whose link or code this account signed up with; it never changes afterwards. */
+  referredBy: uuid('referred_by').references((): AnyPgColumn => users.id, { onDelete: 'set null' }),
   /** E-mails the user can turn off (settings or the link in each one): week ahead, day summary, what's new. */
   emailWeekAhead: boolean('email_week_ahead').notNull().default(true),
   emailDaySummary: boolean('email_day_summary').notNull().default(true),
@@ -919,6 +923,41 @@ export const checklistItemsRelations = relations(checklistItems, ({ one }) => ({
  * the role, so its end lowers it again; Pro given for free (existing users, invitations, an admin)
  * has no such row and stays when anything here changes.
  */
+/** Who may refer: chosen by an admin. Turning one off ends the code; customers already referred still count. */
+export const referralPartners = pgTable('referral_partners', {
+  userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  code: text('code').notNull().unique(),
+  percent: integer('percent').notNull().default(30),
+  active: boolean('active').notNull().default(true),
+  ...timestamps,
+});
+
+/** One row per paid invoice of a referred customer. Money in minor units, so sums stay exact. */
+export const referralCommissions = pgTable(
+  'referral_commissions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // Restricted: a partner with commissions cannot vanish with what is owed or was paid.
+    partnerId: uuid('partner_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+    customerId: uuid('customer_id').references(() => users.id, { onDelete: 'set null' }),
+    /** Stripe's invoice, or `<invoice>:clawback:<refunded so far>` for a correction after a payout. */
+    stripeInvoiceId: text('stripe_invoice_id').notNull().unique(),
+    /** Set on a correction: taking back a commission that was already paid out. */
+    clawbackOf: uuid('clawback_of').references((): AnyPgColumn => referralCommissions.id, { onDelete: 'set null' }),
+    plan: text('plan').$type<ReferralPlan>().notNull(),
+    currency: text('currency').$type<BillingCurrency>().notNull(),
+    paid: integer('paid').notNull(),
+    refunded: integer('refunded').notNull().default(0),
+    percent: integer('percent').notNull(),
+    commission: integer('commission').notNull(),
+    paidAt: timestamp('paid_at', { withTimezone: true }).notNull(),
+    availableAt: timestamp('available_at', { withTimezone: true }).notNull(),
+    paidOutAt: timestamp('paid_out_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [index('referral_commissions_partner_idx').on(t.partnerId), index('referral_commissions_customer_idx').on(t.customerId)],
+);
+
 export const subscriptions = pgTable('subscriptions', {
   userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
   stripeCustomerId: text('stripe_customer_id').notNull().unique(),

@@ -2,6 +2,7 @@ import { checkoutSchema } from '@trading/shared';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { HttpError, notFound } from '../errors.ts';
 import { billingState, openPortal, startCheckout, syncSubscription } from '../services/billing.ts';
+import { recordPayment, recordRefund } from '../services/referrals.ts';
 
 const tags = ['billing'];
 
@@ -32,6 +33,8 @@ export const billingRoutes: FastifyPluginAsyncZod = async (app) => {
       }
       // A failure here answers 500, so Stripe sends the event again later.
       if (event.subscriptionId) await syncSubscription(app.billing, app.db, event.subscriptionId, req.log);
+      if (event.payment) await recordPayment(app.db, event.payment, req.log);
+      if (event.refund) await recordRefund(app.db, app.billing, event.refund, req.log);
       return { received: true };
     });
   });

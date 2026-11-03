@@ -40,6 +40,7 @@ Using the Service requires a device with internet access, an up-to-date browser 
 4. FOUNDERS offer: the first 50 people who choose the yearly plan and type the code FOUNDERS on the payment page pay 15 USD or 59 PLN for their first year. The offer is for people who have not paid for a subscription before. After the first year the subscription renews at the yearly plan price.
 5. The Provider may develop and change the features of the Service. If it permanently withdraws a material Pro feature during a paid period, the User may cancel and receive a refund in proportion to the unused period.
 6. The Provider announces a price change by e-mail at least 30 days before the next renewal. A User who does not accept it may cancel before the renewal.
+7. An account created with a referrer's link or code is assigned to that person, who receives a commission from the Provider on the User's payments for 12 months from the first purchase. The price for the User stays the same.
 
 ## § 7. Payments and renewal
 

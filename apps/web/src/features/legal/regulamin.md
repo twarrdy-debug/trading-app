@@ -40,6 +40,7 @@ Do korzystania z Serwisu potrzebne są: urządzenie z dostępem do internetu, ak
 4. Oferta FOUNDERS: pierwsze 50 osób, które wybiorą plan roczny i wpiszą kod FOUNDERS na stronie płatności, płaci za pierwszy rok 59 zł albo 15 USD. Oferta dotyczy osób, które wcześniej nie opłaciły subskrypcji. Po pierwszym roku subskrypcja odnawia się w cenie planu rocznego.
 5. Usługodawca może rozwijać i zmieniać funkcje Serwisu. Jeśli w opłaconym okresie trwale wycofa istotną funkcję planu Pro, Użytkownik może zrezygnować i otrzymać zwrot proporcjonalny do niewykorzystanego okresu.
 6. O zmianie ceny Usługodawca informuje mailem co najmniej 30 dni przed kolejnym odnowieniem. Użytkownik, który się na nią nie zgadza, może zrezygnować przed odnowieniem.
+7. Konto założone z linku lub kodu osoby polecającej jest przypisane do tej osoby. Otrzymuje ona od Usługodawcy prowizję od płatności Użytkownika przez 12 miesięcy od pierwszego zakupu. Cena dla Użytkownika pozostaje taka sama.
 
 ## § 7. Płatności i odnowienie
 

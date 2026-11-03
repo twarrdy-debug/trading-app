@@ -19,7 +19,7 @@ import { useEffect, useId, useRef, useState, type FormEvent, type InputHTMLAttri
 import { AuthError, authApi } from '../../api/auth.ts';
 import { ApiError } from '../../api/client.ts';
 import { useQueryClient } from '@tanstack/react-query';
-import { useMe, useOnboarding, useUpdateSettings } from '../../api/hooks.ts';
+import { useMe, useOnboarding, useReferrals, useUpdateSettings } from '../../api/hooks.ts';
 import { Button } from '../../components/ui/Button.tsx';
 import { FieldLabelContext, Input, Segmented, toggleClass } from '../../components/ui/Field.tsx';
 import { isStrongPassword, PasswordRules } from '../../components/ui/PasswordRules.tsx';
@@ -31,6 +31,7 @@ import { AccountsManager } from '../account/AccountsManager.tsx';
 import { FavoriteInstrumentsPicker } from './FavoriteInstruments.tsx';
 import { KeywordAlertsFields } from '../news/KeywordAlerts.tsx';
 import { SubscriptionSection } from '../billing/SubscriptionSection.tsx';
+import { PartnerSection } from '../referrals/Referrals.tsx';
 import { ApiKeysSection } from './ApiKeys.tsx';
 
 const TIMEZONES = ['Europe/Warsaw', 'Europe/London', 'America/New_York', 'America/Chicago', 'Asia/Tokyo', 'UTC'];
@@ -42,6 +43,7 @@ const SECTIONS = [
   { slug: 'waluta-i-czas', key: 'region' },
   { slug: 'dyscyplina', key: 'discipline' },
   { slug: 'subskrypcja', key: 'subscription' },
+  { slug: 'polecenia', key: 'referrals' },
   { slug: 'konta', key: 'accounts' },
   { slug: 'instrumenty', key: 'instruments' },
   { slug: 'alerty', key: 'alerts' },
@@ -57,6 +59,7 @@ export function SettingsPage() {
   const all = useT();
   const t = all.settings;
   const { data: me } = useMe();
+  const { data: referrals } = useReferrals();
   const { section: slug } = useParams({ strict: false }) as { section?: string };
   const update = useUpdateSettings();
   const [savedAt, setSavedAt] = useState(0);
@@ -72,7 +75,8 @@ export function SettingsPage() {
 
   if (!me) return <main className="page text-dim">{all.common.loading}</main>;
 
-  const sections = SECTIONS;
+  // The referrals section is for partners only.
+  const sections = SECTIONS.filter((s) => s.key !== 'referrals' || referrals?.partner);
   const current = sections.find((s) => s.slug === slug) ?? sections[0]!;
   const save: Save = (patch) => update.mutate(patch, { onSuccess: () => setSavedAt(Date.now()) });
 
@@ -149,6 +153,8 @@ function Section({ section, user, save }: { section: SectionKey; user: PublicUse
       return <EmailsSection user={user} save={save} />;
     case 'subscription':
       return <SubscriptionSection user={user} />;
+    case 'referrals':
+      return <PartnerSection />;
     case 'apiKeys':
       return <ApiKeysSection user={user} />;
   }

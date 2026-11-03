@@ -17,6 +17,7 @@ Kontakt w sprawach danych osobowych: contact@alphalogfx.com, pomoc techniczna: s
 | Dane o kontach tradingowych i transakcjach (instrumenty, ceny, wielkości, wyniki, notatki, emocje, zrzuty ekranu, pliki importu) | wpisujesz lub importujesz | prowadzenie dziennika, statystyki, monitor dyscypliny |
 | Dane subskrypcji (plan, status, daty, identyfikatory klienta u operatora płatności, data akceptacji Regulaminu) | powstają przy zakupie | obsługa subskrypcji i rozliczenia |
 | Kod zaproszenia, jeśli go użyjesz | podajesz przy rejestracji | nadanie planu z zaproszenia |
+| Osoba polecająca, jeśli rejestrujesz się z jej linku lub kodu | link albo kod przy rejestracji | rozliczenie prowizji za polecenie |
 | Adres IP, przeglądarka, czas sesji | automatycznie przy logowaniu | bezpieczeństwo, ochrona przed nadużyciami, sesje logowania |
 | Dane do drugiego etapu logowania (2FA), jeśli je włączysz | generowane w aplikacji | zabezpieczenie konta |
 
@@ -25,7 +26,7 @@ Kontakt w sprawach danych osobowych: contact@alphalogfx.com, pomoc techniczna: s
 ## 3. Podstawy prawne
 
 - **Wykonanie umowy** (art. 6 ust. 1 lit. b RODO): konto, dziennik, statystyki, subskrypcja, maile techniczne (aktywacja, reset hasła).
-- **Prawnie uzasadniony interes** (art. 6 ust. 1 lit. f RODO): bezpieczeństwo, zapobieganie nadużyciom, dochodzenie roszczeń, maile „Nadchodzący tydzień”, „Podsumowanie dnia” i „Co nowego” (możesz je wyłączyć w każdej chwili w Ustawieniach → Maile albo linkiem w mailu).
+- **Prawnie uzasadniony interes** (art. 6 ust. 1 lit. f RODO): bezpieczeństwo, zapobieganie nadużyciom, dochodzenie roszczeń, rozliczanie poleceń, maile „Nadchodzący tydzień”, „Podsumowanie dnia” i „Co nowego” (możesz je wyłączyć w każdej chwili w Ustawieniach → Maile albo linkiem w mailu).
 - **Obowiązek prawny** (art. 6 ust. 1 lit. c RODO): przechowywanie danych wymaganych przez przepisy podatkowe i rachunkowe.
 
 ## 4. Komu przekazujemy dane
@@ -39,6 +40,8 @@ Dane przetwarzają wyłącznie podmioty potrzebne do działania usługi:
 - **Apple (iCloud+)**: obsługa skrzynek contact@ i support@, jeśli do nas piszesz.
 
 Przekazanie poza Europejski Obszar Gospodarczy odbywa się na podstawie decyzji Komisji Europejskiej (EU-U.S. Data Privacy Framework) lub standardowych klauzul umownych.
+
+Osoba, która Cię poleciła, widzi tylko liczbę rejestracji oraz datę, plan i kwotę płatności, bez Twojego imienia i adresu e-mail.
 
 Dane rynkowe i kalendarz pobieramy od zewnętrznych dostawców po stronie serwera. Nie przekazujemy im Twoich danych osobowych.
 

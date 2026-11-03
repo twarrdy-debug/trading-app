@@ -11,6 +11,7 @@ import type { Env } from './env.ts';
 import { passwordResetEmail, verificationEmail, welcomeEmail } from './services/emails.ts';
 import { findUsableInvite, finishSignUp } from './services/invites.ts';
 import type { Mailer } from './services/mailer.ts';
+import { findPartnerByCode } from './services/referrals.ts';
 
 /**
  * Better Auth: e-mail + password accounts, cookie sessions and password reset, stored in our own
@@ -141,6 +142,9 @@ export function createAuth({ db, env, mailer }: { db: DB; env: Env; mailer: Mail
         if (env.REGISTRATION === 'invite') {
           const invite = await findUsableInvite(db, ctx.body?.inviteCode, ctx.body?.email);
           if (!invite) throw new APIError('BAD_REQUEST', { message: 'Invalid or used invite code', code: 'INVALID_INVITE' });
+        }
+        if (typeof ctx.body?.referralCode === 'string' && ctx.body.referralCode.trim() !== '' && !(await findPartnerByCode(db, ctx.body.referralCode))) {
+          throw new APIError('BAD_REQUEST', { message: 'Unknown referral code', code: 'INVALID_REFERRAL' });
         }
         // An address already registered is said so (the owner's choice, 2026-10-20), after the invite
         // check so that only someone with a code can ask; nothing is created and the invite stays.

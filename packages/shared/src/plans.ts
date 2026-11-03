@@ -50,3 +50,13 @@ export const FOUNDER_PERCENT_OFF = 87.5;
 
 /** A subscription in these Stripe states gives Pro; `past_due` keeps it while Stripe retries the card. */
 export const subscriptionGivesPro = (status: string | null | undefined) => status === 'active' || status === 'trialing' || status === 'past_due';
+
+/** Referrals (owner's rules): a share of what a referred customer pays, for a year from the first purchase. */
+export const REFERRAL_DEFAULT_PERCENT = 30;
+export const REFERRAL_MONTHS = 12;
+/** A commission waits this long: the customer's 14 days of withdrawal and room for refunds. */
+export const REFERRAL_HOLD_DAYS = 30;
+export const REFERRAL_STATUSES = ['waiting', 'ready', 'paidOut', 'refunded', 'clawback'] as const;
+export type ReferralStatus = (typeof REFERRAL_STATUSES)[number];
+export type ReferralPlan = 'month' | 'year' | 'founder';
+export const normalizeReferralCode = (code: string) => code.trim().toUpperCase();

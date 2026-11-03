@@ -264,7 +264,8 @@ function SecondFactor({ onDone, onRestart }: { onDone: () => Promise<void>; onRe
 }
 
 export function RegisterPage() {
-  const t = useT().auth;
+  const all = useT();
+  const t = all.auth;
   const language = useLanguage();
   const errorText = useErrorText();
   const { data: config } = useAuthConfig();
@@ -272,6 +273,9 @@ export function RegisterPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [inviteCode, setInviteCode] = useState(() => query().get('kod') ?? '');
+  const [referralCode, setReferralCode] = useState(() => query().get('ref')?.toUpperCase() ?? '');
+  /** Came through a partner's link: says so instead of asking for the code. */
+  const [referredByLink, setReferredByLink] = useState(() => (query().get('ref') ?? '').toUpperCase());
   const [accepted, setAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -293,6 +297,7 @@ export function RegisterPage() {
         email: email.trim(),
         password,
         inviteCode: inviteCode.trim() || undefined,
+        referralCode: inviteCode.trim() ? undefined : referralCode.trim() || undefined,
         acceptedTerms: accepted,
         language,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -300,6 +305,8 @@ export function RegisterPage() {
       setSentTo(email.trim());
     } catch (err) {
       setTaken(err instanceof AuthError && err.code.startsWith('USER_ALREADY_EXISTS'));
+      // A wrong code in a link: show the field, so it can be corrected or cleared.
+      if (err instanceof AuthError && err.code === 'INVALID_REFERRAL') setReferredByLink('');
       setErrors([errorText(err)]);
     } finally {
       setBusy(false);
@@ -338,6 +345,13 @@ export function RegisterPage() {
         {(config?.registration !== 'open' || inviteCode !== '') && (
           <Field label={t.inviteCode} hint={t.inviteHint}>
             <Input value={inviteCode} onChange={(e) => setInviteCode(e.target.value.toUpperCase())} required={config?.registration !== 'open'} autoComplete="off" />
+          </Field>
+        )}
+        {inviteCode !== '' ? null : referredByLink !== '' ? (
+          <p className="m-0 rounded-(--radius-control) bg-accent/10 px-4 py-3 text-sm font-semibold text-accent-ink">{all.referrals.referredBy(referredByLink)}</p>
+        ) : (
+          <Field label={all.referrals.signupCode} hint={all.referrals.signupCodeHint}>
+            <Input value={referralCode} onChange={(e) => setReferralCode(e.target.value.toUpperCase())} autoComplete="off" />
           </Field>
         )}
         <Field label={t.name}>

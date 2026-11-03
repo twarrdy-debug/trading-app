@@ -1,3 +1,4 @@
+import { findPartnerByCode } from './referrals.ts';
 import { LANGUAGES, type CreateInviteInput } from '@trading/shared';
 import { randomInt } from 'node:crypto';
 import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
@@ -79,6 +80,10 @@ export async function finishSignUp(db: DB, userId: string, body: Record<string, 
       .where(eq(invites.id, invite.id));
     patch.role = invite.role;
     patch.signupCode = invite.code;
+  } else {
+    // Only a new account is ever assigned to a partner, once.
+    const partner = await findPartnerByCode(db, body.referralCode);
+    if (partner) patch.referredBy = partner.userId;
   }
   if (Object.keys(patch).length > 0) await db.update(users).set(patch).where(eq(users.id, userId));
 }
