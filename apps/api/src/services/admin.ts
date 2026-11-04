@@ -177,8 +177,8 @@ export async function appStats(db: DB) {
     db
       .select({
         total: count(),
-        new7: sql<number>`count(*) filter (where ${users.createdAt} >= ${since(7)})`.mapWith(Number),
-        new30: sql<number>`count(*) filter (where ${users.createdAt} >= ${since(30)})`.mapWith(Number),
+        new7: sql<number>`count(*) filter (where ${gte(users.createdAt, since(7))})`.mapWith(Number),
+        new30: sql<number>`count(*) filter (where ${gte(users.createdAt, since(30))})`.mapWith(Number),
         disabled: sql<number>`count(*) filter (where ${users.disabledAt} is not null)`.mapWith(Number),
         onboardingPending: sql<number>`count(*) filter (where ${users.onboardedAt} is null)`.mapWith(Number),
       })
@@ -190,8 +190,8 @@ export async function appStats(db: DB) {
     db
       .select({
         total: count(),
-        last7: sql<number>`count(*) filter (where ${trades.createdAt} >= ${since(7)})`.mapWith(Number),
-        last30: sql<number>`count(*) filter (where ${trades.createdAt} >= ${since(30)})`.mapWith(Number),
+        last7: sql<number>`count(*) filter (where ${gte(trades.createdAt, since(7))})`.mapWith(Number),
+        last30: sql<number>`count(*) filter (where ${gte(trades.createdAt, since(30))})`.mapWith(Number),
         imported: sql<number>`count(*) filter (where ${trades.externalId} is not null)`.mapWith(Number),
       })
       .from(trades)
