@@ -30,6 +30,8 @@ const EQUAL_ATR_SHARE = 0.1;
 /** Fetch again on demand when the last fetch is older than this (short timeframes sooner). */
 const ON_DEMAND_MS: Record<StoredResolution, number> = { M1: 30_000, M5: 60_000, M15: 2 * 60_000, M30: 2 * 60_000, H1: 5 * 60_000, H4: 5 * 60_000, D1: 5 * 60_000 };
 const SENTIMENT_MS = 5 * 60_000;
+/** Periods per request when walking a gap: Capital.com refuses a range of 1000 or more. */
+const STRETCH = 960;
 
 /** When each instrument × resolution was last fetched (this process). */
 const fetched = new Map<string, number>();
@@ -38,7 +40,27 @@ const sentimentCache = new Map<string, { long: number; short: number; at: number
 /** Prices to 6 decimals, so a shifted price does not print as 4211.389999… */
 const round = (n: number) => Math.round(n * 1e6) / 1e6;
 
-/** Brings the stored candles up to date: the whole window the first time, then from the last stored one. */
+/**
+ * The candles from `since` (inclusive: it may still have been forming). Capital.com reads `from` alone
+ * as a limited stretch, so a closed market longer than that (M1: every weekend) answers nothing newer,
+ * though newer candles exist; then it is walked in stretches it accepts until they start.
+ */
+async function candlesSince(market: MarketDataProvider, epic: string, resolution: StoredResolution, since: Date) {
+  const isNewer = (c: Candle) => Date.parse(c.time) > since.getTime();
+  const candles = await market.fetchCandles(epic, resolution, { from: since });
+  if (candles.some(isNewer)) return candles;
+  const step = STRETCH * RESOLUTION_MS[resolution];
+  // A `to` past Capital.com's own clock is refused.
+  const end = Date.now() - 60_000;
+  if (end - since.getTime() < step) return [];
+  for (let from = since.getTime(); from < end; from += step) {
+    const found = await market.fetchCandles(epic, resolution, { from: new Date(from), to: new Date(Math.min(from + step, end)), max: 1000 });
+    if (found.some(isNewer)) return found;
+  }
+  return [];
+}
+
+/** Brings the stored candles up to date: the whole window the first time, then from the last stored one, in as many stretches as it takes. */
 export async function syncCandles(db: DB, market: MarketDataProvider, instrumentId: string, epic: string, resolution: StoredResolution) {
   const [latest] = await db
     .select({ ts: ohlcCandles.ts })
@@ -46,8 +68,29 @@ export async function syncCandles(db: DB, market: MarketDataProvider, instrument
     .where(and(eq(ohlcCandles.instrumentId, instrumentId), eq(ohlcCandles.timeframe, resolution)))
     .orderBy(desc(ohlcCandles.ts))
     .limit(1);
-  // From the last stored candle (inclusive): it may still have been forming.
-  const candles = await market.fetchCandles(epic, resolution, latest ? { from: latest.ts } : { max: 1000 });
+  if (!latest) {
+    const candles = await market.fetchCandles(epic, resolution, { max: 1000 });
+    await saveCandles(db, instrumentId, resolution, candles);
+    fetched.set(`${instrumentId}:${resolution}`, Date.now());
+    return candles.length;
+  }
+  let since = latest.ts;
+  let saved = 0;
+  for (;;) {
+    const candles = await candlesSince(market, epic, resolution, since);
+    await saveCandles(db, instrumentId, resolution, candles);
+    saved += candles.length;
+    const newest = candles.at(-1);
+    if (!newest || Date.parse(newest.time) <= since.getTime()) break;
+    since = new Date(newest.time);
+    // Up to the candle still forming; a quiet minute or two costs nothing more than this check.
+    if (Date.now() - since.getTime() < 3 * RESOLUTION_MS[resolution]) break;
+  }
+  fetched.set(`${instrumentId}:${resolution}`, Date.now());
+  return saved;
+}
+
+async function saveCandles(db: DB, instrumentId: string, resolution: StoredResolution, candles: Candle[]) {
   for (let i = 0; i < candles.length; i += 200) {
     const rows = candles.slice(i, i + 200).map((c) => ({
       instrumentId,
@@ -66,8 +109,6 @@ export async function syncCandles(db: DB, market: MarketDataProvider, instrument
         set: { open: sql`excluded.open`, high: sql`excluded.high`, low: sql`excluded.low`, close: sql`excluded.close` },
       });
   }
-  fetched.set(`${instrumentId}:${resolution}`, Date.now());
-  return candles.length;
 }
 
 /** Every instrument with its own Capital.com epic, every resolution. */
